@@ -1,4 +1,5 @@
 """Workout service with database operations."""
+import re
 import uuid
 from datetime import date, datetime, timezone
 
@@ -12,7 +13,11 @@ from src.domains.workouts.models import (
     MuscleGroup,
     ProgramAssignment,
     ProgramWorkout,
+    SessionMessage,
+    SessionStatus,
     SplitType,
+    TechniqueType,
+    TrainerAdjustment,
     Workout,
     WorkoutAssignment,
     WorkoutExercise,
@@ -21,6 +26,7 @@ from src.domains.workouts.models import (
     WorkoutSession,
     WorkoutSessionSet,
 )
+from src.domains.workouts.schemas import ActiveSessionResponse
 
 
 class WorkoutService:
@@ -28,6 +34,50 @@ class WorkoutService:
 
     def __init__(self, db: AsyncSession):
         self.db = db
+
+    def _strip_copy_prefixes(self, name: str) -> str:
+        """Recursively strip 'Copy of', 'Copia de', 'Cópia de' prefixes from a name."""
+        copy_prefixes = ['copy of ', 'copia de ', 'cópia de ']
+        lower_name = name.lower()
+
+        for prefix in copy_prefixes:
+            if lower_name.startswith(prefix):
+                # Recursively strip in case of "Copy of Copy of ..."
+                return self._strip_copy_prefixes(name[len(prefix):].strip())
+
+        return name
+
+    def _get_next_copy_name(self, original_name: str, existing_names: list[str]) -> str:
+        """Generate next copy name like 'Name (2)', 'Name (3)', etc.
+
+        This method extracts the base name from the original (removing any existing
+        'Copy of' prefix or numbered suffix), then finds the next available number.
+        """
+        # Pattern to match: "Name" or "Name (N)" where N is a number
+        pattern = r'^(.*?)(?:\s*\((\d+)\))?$'
+        match = re.match(pattern, original_name.strip())
+
+        if match:
+            base_name = match.group(1).strip()
+            # Recursively remove "Copy of" prefixes
+            base_name = self._strip_copy_prefixes(base_name)
+        else:
+            base_name = self._strip_copy_prefixes(original_name)
+
+        # Find highest existing number for this base name
+        max_num = 1
+        for name in existing_names:
+            name_match = re.match(pattern, name.strip())
+            if name_match:
+                existing_base = name_match.group(1).strip()
+                # Also strip copy prefixes from existing names for comparison
+                existing_base = self._strip_copy_prefixes(existing_base)
+
+                if existing_base.lower() == base_name.lower():
+                    num = int(name_match.group(2)) if name_match.group(2) else 1
+                    max_num = max(max_num, num)
+
+        return f"{base_name} ({max_num + 1})"
 
     # Exercise operations
 
@@ -259,6 +309,12 @@ class WorkoutService:
         rest_seconds: int = 60,
         notes: str | None = None,
         superset_with: uuid.UUID | None = None,
+        # Advanced technique fields
+        execution_instructions: str | None = None,
+        isometric_seconds: int | None = None,
+        technique_type: TechniqueType = TechniqueType.NORMAL,
+        exercise_group_id: str | None = None,
+        exercise_group_order: int = 0,
     ) -> WorkoutExercise:
         """Add an exercise to a workout."""
         workout_exercise = WorkoutExercise(
@@ -270,6 +326,12 @@ class WorkoutService:
             rest_seconds=rest_seconds,
             notes=notes,
             superset_with=superset_with,
+            # Advanced technique fields
+            execution_instructions=execution_instructions,
+            isometric_seconds=isometric_seconds,
+            technique_type=technique_type,
+            exercise_group_id=exercise_group_id,
+            exercise_group_order=exercise_group_order,
         )
         self.db.add(workout_exercise)
         await self.db.commit()
@@ -296,8 +358,17 @@ class WorkoutService:
         new_name: str | None = None,
     ) -> Workout:
         """Duplicate a workout for another user."""
+        # Generate a numbered name if no custom name provided
+        if not new_name:
+            existing_workouts = await self.list_workouts(
+                user_id=new_owner_id,
+                limit=500,
+            )
+            existing_names = [w.name for w in existing_workouts]
+            new_name = self._get_next_copy_name(workout.name, existing_names)
+
         new_workout = Workout(
-            name=new_name or f"Copy of {workout.name}",
+            name=new_name,
             description=workout.description,
             difficulty=workout.difficulty,
             estimated_duration_min=workout.estimated_duration_min,
@@ -320,6 +391,13 @@ class WorkoutService:
                 reps=we.reps,
                 rest_seconds=we.rest_seconds,
                 notes=we.notes,
+                superset_with=we.superset_with,
+                # Advanced technique fields
+                execution_instructions=we.execution_instructions,
+                isometric_seconds=we.isometric_seconds,
+                technique_type=we.technique_type,
+                exercise_group_id=we.exercise_group_id,
+                exercise_group_order=we.exercise_group_order,
             )
             self.db.add(new_we)
 
@@ -591,7 +669,10 @@ class WorkoutService:
             .where(
                 WorkoutProgram.is_template == True,
                 WorkoutProgram.is_public == True,
-                WorkoutProgram.created_by_id != exclude_user_id,
+                or_(
+                    WorkoutProgram.created_by_id == None,  # System templates
+                    WorkoutProgram.created_by_id != exclude_user_id,  # Other users' templates
+                ),
             )
         )
 
@@ -620,6 +701,7 @@ class WorkoutService:
                 "duration_weeks": program.duration_weeks,
                 "workout_count": len(program.program_workouts),
                 "creator_name": creator_name,
+                "created_by_id": program.created_by_id,
                 "created_at": program.created_at,
             })
         return templates
@@ -984,16 +1066,36 @@ class WorkoutService:
         duplicate_workouts: bool = True,
     ) -> WorkoutProgram:
         """Duplicate a program for another user."""
+        # Generate a numbered name if no custom name provided
+        if not new_name:
+            existing_programs = await self.list_programs(
+                user_id=new_owner_id,
+                limit=500,
+            )
+            existing_names = [p.name for p in existing_programs]
+            new_name = self._get_next_copy_name(program.name, existing_names)
+
         new_program = WorkoutProgram(
-            name=new_name or f"Copy of {program.name}",
+            name=new_name,
             description=program.description,
             goal=program.goal,
             difficulty=program.difficulty,
             split_type=program.split_type,
             duration_weeks=program.duration_weeks,
+            # Copy diet configuration
+            include_diet=program.include_diet,
+            diet_type=program.diet_type,
+            daily_calories=program.daily_calories,
+            protein_grams=program.protein_grams,
+            carbs_grams=program.carbs_grams,
+            fat_grams=program.fat_grams,
+            meals_per_day=program.meals_per_day,
+            diet_notes=program.diet_notes,
+            # Flags
             is_template=False,
             is_public=False,
             created_by_id=new_owner_id,
+            source_template_id=None,  # Local duplication should not inherit template origin
         )
         self.db.add(new_program)
         await self.db.flush()
@@ -1001,11 +1103,11 @@ class WorkoutService:
         # Copy program workouts (and optionally duplicate workouts)
         for pw in program.program_workouts:
             if duplicate_workouts:
-                # Duplicate the workout itself
+                # Duplicate the workout itself (keeping the original name)
                 new_workout = await self.duplicate_workout(
                     pw.workout,
                     new_owner_id,
-                    new_name=None,
+                    new_name=pw.workout.name,
                 )
                 workout_id = new_workout.id
             else:
@@ -1120,3 +1222,182 @@ class WorkoutService:
         await self.db.commit()
         await self.db.refresh(assignment)
         return assignment
+
+    # Co-Training operations
+
+    async def trainer_join_session(
+        self,
+        session: WorkoutSession,
+        trainer_id: uuid.UUID,
+    ) -> WorkoutSession:
+        """Trainer joins a session for co-training."""
+        session.trainer_id = trainer_id
+        session.is_shared = True
+        if session.status == SessionStatus.WAITING:
+            session.status = SessionStatus.ACTIVE
+
+        await self.db.commit()
+        await self.db.refresh(session)
+        return session
+
+    async def trainer_leave_session(
+        self,
+        session: WorkoutSession,
+    ) -> WorkoutSession:
+        """Trainer leaves a co-training session."""
+        session.trainer_id = None
+        session.is_shared = False
+
+        await self.db.commit()
+        await self.db.refresh(session)
+        return session
+
+    async def update_session_status(
+        self,
+        session: WorkoutSession,
+        status: SessionStatus,
+    ) -> WorkoutSession:
+        """Update session status."""
+        session.status = status
+
+        if status == SessionStatus.COMPLETED:
+            session.completed_at = datetime.now(timezone.utc)
+            if session.started_at:
+                delta = session.completed_at - session.started_at
+                session.duration_minutes = int(delta.total_seconds() / 60)
+
+        await self.db.commit()
+        await self.db.refresh(session)
+        return session
+
+    async def create_trainer_adjustment(
+        self,
+        session_id: uuid.UUID,
+        trainer_id: uuid.UUID,
+        exercise_id: uuid.UUID,
+        set_number: int | None = None,
+        suggested_weight_kg: float | None = None,
+        suggested_reps: int | None = None,
+        note: str | None = None,
+    ) -> TrainerAdjustment:
+        """Create a trainer adjustment during co-training."""
+        adjustment = TrainerAdjustment(
+            session_id=session_id,
+            trainer_id=trainer_id,
+            exercise_id=exercise_id,
+            set_number=set_number,
+            suggested_weight_kg=suggested_weight_kg,
+            suggested_reps=suggested_reps,
+            note=note,
+        )
+        self.db.add(adjustment)
+        await self.db.commit()
+        await self.db.refresh(adjustment)
+        return adjustment
+
+    async def create_session_message(
+        self,
+        session_id: uuid.UUID,
+        sender_id: uuid.UUID,
+        message: str,
+    ) -> SessionMessage:
+        """Create a message during co-training session."""
+        session_message = SessionMessage(
+            session_id=session_id,
+            sender_id=sender_id,
+            message=message,
+        )
+        self.db.add(session_message)
+        await self.db.commit()
+        await self.db.refresh(session_message)
+        return session_message
+
+    async def list_session_messages(
+        self,
+        session_id: uuid.UUID,
+        limit: int = 50,
+    ) -> list[SessionMessage]:
+        """List messages from a session."""
+        query = (
+            select(SessionMessage)
+            .where(SessionMessage.session_id == session_id)
+            .options(selectinload(SessionMessage.sender))
+            .order_by(SessionMessage.sent_at.desc())
+            .limit(limit)
+        )
+        result = await self.db.execute(query)
+        messages = list(result.scalars().all())
+        return list(reversed(messages))  # Return oldest first
+
+    async def list_active_sessions(
+        self,
+        trainer_id: uuid.UUID,
+        organization_id: uuid.UUID | None = None,
+    ) -> list[ActiveSessionResponse]:
+        """List active sessions for students (trainer view)."""
+        from src.domains.organizations.models import OrganizationMembership
+        from src.domains.users.models import User, UserRole
+
+        # Get students that this trainer can see
+        students_query = (
+            select(User.id, User.name, User.avatar_url)
+            .join(
+                OrganizationMembership,
+                OrganizationMembership.user_id == User.id,
+            )
+            .where(
+                and_(
+                    OrganizationMembership.role == UserRole.STUDENT,
+                    OrganizationMembership.is_active == True,
+                )
+            )
+        )
+
+        if organization_id:
+            students_query = students_query.where(
+                OrganizationMembership.organization_id == organization_id
+            )
+
+        students_result = await self.db.execute(students_query)
+        student_data = {row[0]: {"name": row[1], "avatar_url": row[2]} for row in students_result.all()}
+
+        if not student_data:
+            return []
+
+        # Get active sessions for these students
+        sessions_query = (
+            select(WorkoutSession)
+            .where(
+                and_(
+                    WorkoutSession.user_id.in_(student_data.keys()),
+                    WorkoutSession.status.in_([SessionStatus.WAITING, SessionStatus.ACTIVE, SessionStatus.PAUSED]),
+                    WorkoutSession.completed_at.is_(None),
+                )
+            )
+            .options(
+                selectinload(WorkoutSession.workout).selectinload(Workout.exercises),
+                selectinload(WorkoutSession.sets),
+            )
+            .order_by(WorkoutSession.started_at.desc())
+        )
+
+        sessions_result = await self.db.execute(sessions_query)
+        sessions = sessions_result.scalars().all()
+
+        return [
+            ActiveSessionResponse(
+                id=s.id,
+                workout_id=s.workout_id,
+                workout_name=s.workout.name if s.workout else "",
+                user_id=s.user_id,
+                student_name=student_data.get(s.user_id, {}).get("name", ""),
+                student_avatar=student_data.get(s.user_id, {}).get("avatar_url"),
+                trainer_id=s.trainer_id,
+                is_shared=s.is_shared,
+                status=s.status,
+                started_at=s.started_at,
+                total_exercises=len(s.workout.exercises) if s.workout else 0,
+                completed_sets=len(s.sets) if s.sets else 0,
+            )
+            for s in sessions
+        ]

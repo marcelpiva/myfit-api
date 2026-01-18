@@ -3,13 +3,27 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+
+def _str_to_uuid(value: str | UUID | None) -> UUID | None:
+    """Convert string to UUID, handling SQLite TEXT columns."""
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return value
+    try:
+        return UUID(value)
+    except (ValueError, TypeError):
+        return None
+from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.service import UserService
-from src.domains.workouts.models import Difficulty, MuscleGroup, SplitType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, WorkoutGoal
 from src.domains.workouts.schemas import (
+    ActiveSessionResponse,
     AIGenerateProgramRequest,
     AIGenerateProgramResponse,
     AssignmentCreate,
@@ -30,12 +44,18 @@ from src.domains.workouts.schemas import (
     ProgramUpdate,
     ProgramWorkoutInput,
     SessionComplete,
+    SessionJoinResponse,
     SessionListResponse,
+    SessionMessageCreate,
+    SessionMessageResponse,
     SessionResponse,
     SessionSetInput,
     SessionSetResponse,
     SessionStart,
+    SessionStatusUpdate,
     SuggestedExercise,
+    TrainerAdjustmentCreate,
+    TrainerAdjustmentResponse,
     WorkoutCreate,
     WorkoutExerciseInput,
     WorkoutExerciseResponse,
@@ -610,6 +630,8 @@ async def list_programs(
             is_template=p.is_template,
             is_public=p.is_public,
             workout_count=len(p.program_workouts),
+            created_by_id=p.created_by_id,
+            source_template_id=_str_to_uuid(p.source_template_id),
             created_at=p.created_at,
         )
         for p in programs
@@ -746,6 +768,12 @@ async def create_program(
                             rest_seconds=ex.rest_seconds,
                             notes=ex.notes,
                             superset_with=ex.superset_with,
+                            # Advanced technique fields
+                            execution_instructions=ex.execution_instructions,
+                            isometric_seconds=ex.isometric_seconds,
+                            technique_type=ex.technique_type,
+                            exercise_group_id=ex.exercise_group_id,
+                            exercise_group_order=ex.exercise_group_order,
                         )
                 # Add to program
                 await workout_service.add_workout_to_program(
@@ -831,6 +859,7 @@ async def duplicate_program(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     duplicate_workouts: Annotated[bool, Query()] = True,
+    new_name: Annotated[str | None, Query(max_length=100)] = None,
 ) -> ProgramResponse:
     """Duplicate a program for the current user."""
     workout_service = WorkoutService(db)
@@ -852,6 +881,7 @@ async def duplicate_program(
     new_program = await workout_service.duplicate_program(
         program=program,
         new_owner_id=current_user.id,
+        new_name=new_name,
         duplicate_workouts=duplicate_workouts,
     )
 
@@ -909,6 +939,12 @@ async def add_workout_to_program(
                     rest_seconds=ex.rest_seconds,
                     notes=ex.notes,
                     superset_with=ex.superset_with,
+                    # Advanced technique fields
+                    execution_instructions=ex.execution_instructions,
+                    isometric_seconds=ex.isometric_seconds,
+                    technique_type=ex.technique_type,
+                    exercise_group_id=ex.exercise_group_id,
+                    exercise_group_order=ex.exercise_group_order,
                 )
         await workout_service.add_workout_to_program(
             program_id=program_id,
@@ -1198,6 +1234,12 @@ async def create_workout(
                 rest_seconds=ex.rest_seconds,
                 notes=ex.notes,
                 superset_with=ex.superset_with,
+                # Advanced technique fields
+                execution_instructions=ex.execution_instructions,
+                isometric_seconds=ex.isometric_seconds,
+                technique_type=ex.technique_type,
+                exercise_group_id=ex.exercise_group_id,
+                exercise_group_order=ex.exercise_group_order,
             )
         # Refresh to get exercises
         workout = await workout_service.get_workout_by_id(workout.id)
@@ -1331,6 +1373,12 @@ async def add_exercise(
         rest_seconds=request.rest_seconds,
         notes=request.notes,
         superset_with=request.superset_with,
+        # Advanced technique fields
+        execution_instructions=request.execution_instructions,
+        isometric_seconds=request.isometric_seconds,
+        technique_type=request.technique_type,
+        exercise_group_id=request.exercise_group_id,
+        exercise_group_order=request.exercise_group_order,
     )
 
     # Refresh workout
@@ -1362,3 +1410,335 @@ async def remove_exercise(
         )
 
     await workout_service.remove_exercise_from_workout(workout_exercise_id)
+
+
+# Co-Training endpoints
+
+@router.get("/sessions/active", response_model=list[ActiveSessionResponse])
+async def list_active_sessions(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: Annotated[UUID | None, Query()] = None,
+) -> list[ActiveSessionResponse]:
+    """List active sessions for students (trainer view - 'Students Now')."""
+    workout_service = WorkoutService(db)
+    sessions = await workout_service.list_active_sessions(
+        trainer_id=current_user.id,
+        organization_id=organization_id,
+    )
+    return sessions
+
+
+@router.post("/sessions/{session_id}/join", response_model=SessionJoinResponse)
+async def join_session(
+    session_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionJoinResponse:
+    """Trainer joins a student's session for co-training."""
+    from src.domains.workouts.realtime import notify_trainer_joined
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    if session.is_completed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot join a completed session",
+        )
+
+    # Update session with trainer
+    updated_session = await workout_service.trainer_join_session(
+        session=session,
+        trainer_id=current_user.id,
+    )
+
+    # Notify via real-time
+    await notify_trainer_joined(
+        session_id=session_id,
+        trainer_id=current_user.id,
+        trainer_name=current_user.name,
+    )
+
+    return SessionJoinResponse(
+        session_id=updated_session.id,
+        trainer_id=current_user.id,
+        student_id=updated_session.user_id,
+        workout_name=updated_session.workout.name if updated_session.workout else "",
+        is_shared=updated_session.is_shared,
+        status=updated_session.status,
+    )
+
+
+@router.post("/sessions/{session_id}/leave")
+async def leave_session(
+    session_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Trainer leaves a co-training session."""
+    from src.domains.workouts.realtime import notify_trainer_left
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    if session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You are not the trainer of this session",
+        )
+
+    await workout_service.trainer_leave_session(session)
+
+    # Notify via real-time
+    await notify_trainer_left(
+        session_id=session_id,
+        trainer_id=current_user.id,
+    )
+
+    return {"message": "Left session successfully"}
+
+
+@router.put("/sessions/{session_id}/status", response_model=SessionResponse)
+async def update_session_status(
+    session_id: UUID,
+    request: SessionStatusUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionResponse:
+    """Update session status (active, paused, etc.)."""
+    from src.domains.workouts.realtime import notify_session_status_change
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Only session owner or trainer can update status
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    updated = await workout_service.update_session_status(
+        session=session,
+        status=request.status,
+    )
+
+    # Notify via real-time
+    await notify_session_status_change(
+        session_id=session_id,
+        status=request.status,
+        changed_by=current_user.id,
+    )
+
+    return SessionResponse.model_validate(updated)
+
+
+@router.post("/sessions/{session_id}/adjustments", response_model=TrainerAdjustmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_trainer_adjustment(
+    session_id: UUID,
+    request: TrainerAdjustmentCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> TrainerAdjustmentResponse:
+    """Trainer makes an adjustment during co-training (suggest weight/reps)."""
+    from src.domains.workouts.realtime import notify_trainer_adjustment
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    if session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the session trainer can make adjustments",
+        )
+
+    if session.is_completed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot adjust a completed session",
+        )
+
+    adjustment = await workout_service.create_trainer_adjustment(
+        session_id=session_id,
+        trainer_id=current_user.id,
+        exercise_id=request.exercise_id,
+        set_number=request.set_number,
+        suggested_weight_kg=request.suggested_weight_kg,
+        suggested_reps=request.suggested_reps,
+        note=request.note,
+    )
+
+    # Notify via real-time
+    await notify_trainer_adjustment(
+        session_id=session_id,
+        trainer_id=current_user.id,
+        exercise_id=request.exercise_id,
+        set_number=request.set_number,
+        suggested_weight_kg=request.suggested_weight_kg,
+        suggested_reps=request.suggested_reps,
+        note=request.note,
+    )
+
+    return TrainerAdjustmentResponse.model_validate(adjustment)
+
+
+@router.post("/sessions/{session_id}/messages", response_model=SessionMessageResponse, status_code=status.HTTP_201_CREATED)
+async def send_session_message(
+    session_id: UUID,
+    request: SessionMessageCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionMessageResponse:
+    """Send a quick message during co-training session."""
+    from src.domains.workouts.realtime import notify_message_sent
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Only session participants can send messages
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only session participants can send messages",
+        )
+
+    if session.is_completed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot send messages to a completed session",
+        )
+
+    message = await workout_service.create_session_message(
+        session_id=session_id,
+        sender_id=current_user.id,
+        message=request.message,
+    )
+
+    # Notify via real-time
+    await notify_message_sent(
+        session_id=session_id,
+        sender_id=current_user.id,
+        sender_name=current_user.name,
+        message=request.message,
+        message_id=message.id,
+    )
+
+    return SessionMessageResponse(
+        id=message.id,
+        session_id=message.session_id,
+        sender_id=message.sender_id,
+        sender_name=current_user.name,
+        message=message.message,
+        sent_at=message.sent_at,
+        is_read=message.is_read,
+    )
+
+
+@router.get("/sessions/{session_id}/messages", response_model=list[SessionMessageResponse])
+async def list_session_messages(
+    session_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+) -> list[SessionMessageResponse]:
+    """List messages from a co-training session."""
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Only session participants can view messages
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    messages = await workout_service.list_session_messages(
+        session_id=session_id,
+        limit=limit,
+    )
+
+    return [
+        SessionMessageResponse(
+            id=m.id,
+            session_id=m.session_id,
+            sender_id=m.sender_id,
+            sender_name=m.sender.name if m.sender else None,
+            message=m.message,
+            sent_at=m.sent_at,
+            is_read=m.is_read,
+        )
+        for m in messages
+    ]
+
+
+@router.get("/sessions/{session_id}/stream")
+async def stream_session_events(
+    session_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> StreamingResponse:
+    """Stream real-time session events via Server-Sent Events (SSE)."""
+    from src.domains.workouts.realtime import stream_session_events as stream_events
+
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Only session participants can subscribe
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    return StreamingResponse(
+        stream_events(session_id, current_user.id),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
