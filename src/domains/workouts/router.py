@@ -38,6 +38,7 @@ from src.domains.workouts.schemas import (
     SuggestedExercise,
     WorkoutCreate,
     WorkoutExerciseInput,
+    WorkoutExerciseResponse,
     WorkoutListResponse,
     WorkoutResponse,
     WorkoutUpdate,
