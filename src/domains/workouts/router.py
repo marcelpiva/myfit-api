@@ -1133,6 +1133,36 @@ async def get_workout(
     return WorkoutResponse.model_validate(workout)
 
 
+@router.get("/{workout_id}/exercises", response_model=list[WorkoutExerciseResponse])
+async def get_workout_exercises(
+    workout_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[WorkoutExerciseResponse]:
+    """Get exercises for a workout."""
+    workout_service = WorkoutService(db)
+    workout = await workout_service.get_workout_by_id(workout_id)
+
+    if not workout:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Workout not found",
+        )
+
+    # Check access
+    if (
+        not workout.is_public
+        and workout.created_by_id != current_user.id
+        and workout.organization_id is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    return [WorkoutExerciseResponse.model_validate(we) for we in workout.workout_exercises]
+
+
 @router.post("/", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
 async def create_workout(
     request: WorkoutCreate,

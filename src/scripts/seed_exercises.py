@@ -3,6 +3,7 @@ Seed script for populating the database with common exercises.
 
 Run with:
     python -m src.scripts.seed_exercises
+    python -m src.scripts.seed_exercises --clear  # Replace existing exercises
 
 Or from the api directory:
     PYTHONPATH=. python src/scripts/seed_exercises.py
@@ -15,11 +16,90 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup
+
+
+# Unsplash image URLs by muscle group (free, high-quality fitness images)
+MUSCLE_GROUP_IMAGES = {
+    MuscleGroup.CHEST: [
+        "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=80",  # Bench press
+        "https://images.unsplash.com/photo-1598971639058-fab3c3109a00?w=800&q=80",  # Push-ups
+        "https://images.unsplash.com/photo-1597452485669-2c7bb5fef90d?w=800&q=80",  # Chest workout
+        "https://images.unsplash.com/photo-1534438327276-14e5300c3a48?w=800&q=80",  # Gym chest
+        "https://images.unsplash.com/photo-1581009146145-b5ef050c149a?w=800&q=80",  # Dumbbell press
+    ],
+    MuscleGroup.BACK: [
+        "https://images.unsplash.com/photo-1603287681836-b174ce5074c2?w=800&q=80",  # Pull-ups
+        "https://images.unsplash.com/photo-1541534741688-6078c6bfb5c5?w=800&q=80",  # Back workout
+        "https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=800&q=80",  # Lat pulldown
+        "https://images.unsplash.com/photo-1597347316205-36f6c451902a?w=800&q=80",  # Rowing
+        "https://images.unsplash.com/photo-1605296867304-46d5465a13f1?w=800&q=80",  # Back muscles
+    ],
+    MuscleGroup.SHOULDERS: [
+        "https://images.unsplash.com/photo-1532029837206-abbe2b7620e3?w=800&q=80",  # Shoulder press
+        "https://images.unsplash.com/photo-1581009137042-c552e485697a?w=800&q=80",  # Lateral raises
+        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&q=80",  # Shoulder workout
+        "https://images.unsplash.com/photo-1584466977773-e625c37cdd50?w=800&q=80",  # Deltoids
+    ],
+    MuscleGroup.BICEPS: [
+        "https://images.unsplash.com/photo-1581009146145-b5ef050c149a?w=800&q=80",  # Bicep curls
+        "https://images.unsplash.com/photo-1583454110551-21f2fa2afe61?w=800&q=80",  # Dumbbell curls
+        "https://images.unsplash.com/photo-1534368786749-b63e05c90863?w=800&q=80",  # Arm workout
+        "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80",  # Biceps
+    ],
+    MuscleGroup.TRICEPS: [
+        "https://images.unsplash.com/photo-1530822847156-5df684ec5ee1?w=800&q=80",  # Tricep dips
+        "https://images.unsplash.com/photo-1598971639058-fab3c3109a00?w=800&q=80",  # Tricep workout
+        "https://images.unsplash.com/photo-1584466977773-e625c37cdd50?w=800&q=80",  # Arms
+        "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=80",  # Tricep press
+    ],
+    MuscleGroup.QUADRICEPS: [
+        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&q=80",  # Squats
+        "https://images.unsplash.com/photo-1434608519344-49d77a699e1d?w=800&q=80",  # Leg press
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Leg workout
+        "https://images.unsplash.com/photo-1596357395217-80de13130e92?w=800&q=80",  # Quads
+    ],
+    MuscleGroup.HAMSTRINGS: [
+        "https://images.unsplash.com/photo-1434608519344-49d77a699e1d?w=800&q=80",  # Deadlift
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Leg workout
+        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&q=80",  # Posterior chain
+    ],
+    MuscleGroup.GLUTES: [
+        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&q=80",  # Hip thrust
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Glute workout
+        "https://images.unsplash.com/photo-1596357395217-80de13130e92?w=800&q=80",  # Glutes
+    ],
+    MuscleGroup.CALVES: [
+        "https://images.unsplash.com/photo-1434608519344-49d77a699e1d?w=800&q=80",  # Calf raises
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Leg workout
+    ],
+    MuscleGroup.ABS: [
+        "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80",  # Abs workout
+        "https://images.unsplash.com/photo-1544367567-0f2fcb009e0b?w=800&q=80",  # Plank
+        "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&q=80",  # Core workout
+        "https://images.unsplash.com/photo-1571019614242-c5c5dee9f50b?w=800&q=80",  # Crunches
+    ],
+    MuscleGroup.CARDIO: [
+        "https://images.unsplash.com/photo-1538805060514-97d9cc17730c?w=800&q=80",  # Running
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Cardio
+        "https://images.unsplash.com/photo-1534787238916-9ba6764efd4f?w=800&q=80",  # Treadmill
+        "https://images.unsplash.com/photo-1517838277536-f5f99be501cd?w=800&q=80",  # Cycling
+    ],
+    MuscleGroup.FULL_BODY: [
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Full body
+        "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80",  # Workout
+    ],
+}
+
+
+def get_image_for_exercise(muscle_group: MuscleGroup, index: int) -> str:
+    """Get an image URL for an exercise based on its muscle group."""
+    images = MUSCLE_GROUP_IMAGES.get(muscle_group, MUSCLE_GROUP_IMAGES[MuscleGroup.FULL_BODY])
+    return images[index % len(images)]
 
 
 EXERCISES = [
@@ -423,24 +503,40 @@ EXERCISES = [
 ]
 
 
-async def seed_exercises(session: AsyncSession) -> int:
+async def seed_exercises(session: AsyncSession, clear_existing: bool = False) -> int:
     """Seed the database with common exercises."""
 
-    # Check if exercises already exist
-    result = await session.execute(select(Exercise).limit(1))
-    if result.scalar_one_or_none():
-        print("Exercises already exist in database. Skipping seed.")
-        return 0
+    if clear_existing:
+        print("Clearing existing public exercises...")
+        await session.execute(delete(Exercise).where(Exercise.is_custom == False))
+        await session.commit()
+    else:
+        # Check if exercises already exist
+        result = await session.execute(select(Exercise).limit(1))
+        if result.scalar_one_or_none():
+            print("Exercises already exist in database. Use --clear to replace them.")
+            return 0
+
+    # Track index per muscle group for image rotation
+    muscle_group_counters: dict[MuscleGroup, int] = {}
 
     count = 0
     for exercise_data in EXERCISES:
+        muscle_group = exercise_data["muscle_group"]
+
+        # Get image for this exercise
+        idx = muscle_group_counters.get(muscle_group, 0)
+        image_url = get_image_for_exercise(muscle_group, idx)
+        muscle_group_counters[muscle_group] = idx + 1
+
         exercise = Exercise(
             name=exercise_data["name"],
-            muscle_group=exercise_data["muscle_group"],
+            muscle_group=muscle_group,
             secondary_muscles=exercise_data.get("secondary_muscles"),
             equipment=exercise_data.get("equipment"),
             description=exercise_data.get("description"),
             instructions=exercise_data.get("instructions"),
+            image_url=image_url,
             is_custom=False,
             is_public=True,
         )
@@ -453,15 +549,25 @@ async def seed_exercises(session: AsyncSession) -> int:
 
 async def main():
     """Main function to run the seed."""
-    print("Starting exercise seed...")
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Seed exercises database")
+    parser.add_argument("--clear", action="store_true", help="Clear existing public exercises first")
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("Exercise Seed Script (54 exercicios em PT-BR com imagens)")
+    print("=" * 60)
 
     async with AsyncSessionLocal() as session:
-        count = await seed_exercises(session)
+        count = await seed_exercises(session, clear_existing=args.clear)
 
     if count > 0:
-        print(f"Successfully seeded {count} exercises!")
+        print("=" * 60)
+        print(f"Successfully seeded {count} exercises with images!")
+        print("=" * 60)
     else:
-        print("No exercises were seeded (database may already have data).")
+        print("No exercises were seeded.")
 
 
 if __name__ == "__main__":
