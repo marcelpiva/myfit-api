@@ -400,6 +400,33 @@ class OrganizationService:
         )
         return list(result.scalars().all())
 
+    async def get_pending_invites_for_email(
+        self,
+        email: str,
+    ) -> list[OrganizationInvite]:
+        """Get all pending invites for a specific email.
+
+        Args:
+            email: User email to find invites for
+
+        Returns:
+            List of pending invites
+        """
+        result = await self.db.execute(
+            select(OrganizationInvite)
+            .where(
+                and_(
+                    OrganizationInvite.email == email,
+                    OrganizationInvite.accepted_at == None,
+                )
+            )
+            .options(
+                selectinload(OrganizationInvite.organization),
+                selectinload(OrganizationInvite.invited_by),
+            )
+        )
+        return list(result.scalars().all())
+
     async def accept_invite(
         self,
         invite: OrganizationInvite,

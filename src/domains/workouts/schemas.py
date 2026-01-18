@@ -2,9 +2,9 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
-from src.domains.workouts.models import Difficulty, MuscleGroup, SplitType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -67,6 +67,12 @@ class WorkoutExerciseInput(BaseModel):
     rest_seconds: int = Field(default=60, ge=0, le=600)
     notes: str | None = None
     superset_with: UUID | None = None
+    # Advanced technique fields
+    execution_instructions: str | None = None
+    isometric_seconds: int | None = Field(None, ge=0, le=60)
+    technique_type: TechniqueType = TechniqueType.NORMAL
+    exercise_group_id: str | None = Field(None, max_length=50)
+    exercise_group_order: int = 0
 
 
 class WorkoutExerciseResponse(BaseModel):
@@ -80,6 +86,12 @@ class WorkoutExerciseResponse(BaseModel):
     rest_seconds: int
     notes: str | None = None
     superset_with: UUID | None = None
+    # Advanced technique fields
+    execution_instructions: str | None = None
+    isometric_seconds: int | None = None
+    technique_type: TechniqueType = TechniqueType.NORMAL
+    exercise_group_id: str | None = None
+    exercise_group_order: int = 0
     exercise: ExerciseResponse
 
     class Config:
@@ -225,6 +237,7 @@ class SessionStart(BaseModel):
 
     workout_id: UUID
     assignment_id: UUID | None = None
+    is_shared: bool = False  # If true, creates a shared co-training session
 
 
 class SessionComplete(BaseModel):
@@ -232,6 +245,7 @@ class SessionComplete(BaseModel):
 
     notes: str | None = None
     rating: int | None = Field(None, ge=1, le=5)
+    student_feedback: str | None = None
 
 
 class SessionResponse(BaseModel):
@@ -241,11 +255,16 @@ class SessionResponse(BaseModel):
     workout_id: UUID
     assignment_id: UUID | None = None
     user_id: UUID
+    trainer_id: UUID | None = None
+    is_shared: bool = False
+    status: SessionStatus = SessionStatus.WAITING
     started_at: datetime
     completed_at: datetime | None = None
     duration_minutes: int | None = None
     notes: str | None = None
     rating: int | None = None
+    student_feedback: str | None = None
+    trainer_notes: str | None = None
     is_completed: bool
     sets: list[SessionSetResponse] = []
 
@@ -259,10 +278,119 @@ class SessionListResponse(BaseModel):
     id: UUID
     workout_id: UUID
     workout_name: str
+    trainer_id: UUID | None = None
+    is_shared: bool = False
+    status: SessionStatus = SessionStatus.WAITING
     started_at: datetime
     completed_at: datetime | None = None
     duration_minutes: int | None = None
     is_completed: bool
+
+    class Config:
+        from_attributes = True
+
+
+# Co-Training schemas
+
+class SessionJoinRequest(BaseModel):
+    """Request for trainer to join a session."""
+
+    session_id: UUID
+
+
+class SessionJoinResponse(BaseModel):
+    """Response after trainer joins session."""
+
+    session_id: UUID
+    trainer_id: UUID
+    student_id: UUID
+    workout_name: str
+    is_shared: bool = True
+    status: SessionStatus
+    message: str = "Conectado a sessao com sucesso"
+
+    class Config:
+        from_attributes = True
+
+
+class SessionLeaveRequest(BaseModel):
+    """Request for trainer to leave a session."""
+
+    session_id: UUID
+
+
+class TrainerAdjustmentCreate(BaseModel):
+    """Create trainer adjustment during co-training."""
+
+    session_id: UUID
+    exercise_id: UUID
+    set_number: int | None = Field(None, ge=1)
+    suggested_weight_kg: float | None = Field(None, ge=0)
+    suggested_reps: int | None = Field(None, ge=1)
+    note: str | None = Field(None, max_length=255)
+
+
+class TrainerAdjustmentResponse(BaseModel):
+    """Trainer adjustment response."""
+
+    id: UUID
+    session_id: UUID
+    trainer_id: UUID
+    exercise_id: UUID
+    set_number: int | None = None
+    suggested_weight_kg: float | None = None
+    suggested_reps: int | None = None
+    note: str | None = None
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class SessionMessageCreate(BaseModel):
+    """Create message during co-training session."""
+
+    session_id: UUID
+    message: str = Field(..., min_length=1, max_length=500)
+
+
+class SessionMessageResponse(BaseModel):
+    """Session message response."""
+
+    id: UUID
+    session_id: UUID
+    sender_id: UUID
+    sender_name: str | None = None
+    message: str
+    sent_at: datetime
+    is_read: bool = False
+
+    class Config:
+        from_attributes = True
+
+
+class SessionStatusUpdate(BaseModel):
+    """Update session status."""
+
+    status: SessionStatus
+
+
+class ActiveSessionResponse(BaseModel):
+    """Response for active sessions (students currently training)."""
+
+    id: UUID
+    workout_id: UUID
+    workout_name: str
+    user_id: UUID
+    student_name: str
+    student_avatar: str | None = None
+    trainer_id: UUID | None = None
+    is_shared: bool = False
+    status: SessionStatus
+    started_at: datetime
+    current_exercise_index: int = 0
+    total_exercises: int = 0
+    completed_sets: int = 0
 
     class Config:
         from_attributes = True
@@ -305,6 +433,16 @@ class ProgramCreate(BaseModel):
     difficulty: Difficulty = Difficulty.INTERMEDIATE
     split_type: SplitType = SplitType.ABC
     duration_weeks: int | None = Field(None, ge=1, le=52)
+    # Diet configuration
+    include_diet: bool = False
+    diet_type: str | None = Field(None, max_length=50)
+    daily_calories: int | None = Field(None, ge=500, le=10000)
+    protein_grams: int | None = Field(None, ge=0, le=1000)
+    carbs_grams: int | None = Field(None, ge=0, le=2000)
+    fat_grams: int | None = Field(None, ge=0, le=500)
+    meals_per_day: int | None = Field(None, ge=1, le=10)
+    diet_notes: str | None = None
+    # Flags
     is_template: bool = False
     is_public: bool = False
     organization_id: UUID | None = None
@@ -320,6 +458,16 @@ class ProgramUpdate(BaseModel):
     difficulty: Difficulty | None = None
     split_type: SplitType | None = None
     duration_weeks: int | None = Field(None, ge=1, le=52)
+    # Diet configuration
+    include_diet: bool | None = None
+    diet_type: str | None = Field(None, max_length=50)
+    daily_calories: int | None = Field(None, ge=500, le=10000)
+    protein_grams: int | None = Field(None, ge=0, le=1000)
+    carbs_grams: int | None = Field(None, ge=0, le=2000)
+    fat_grams: int | None = Field(None, ge=0, le=500)
+    meals_per_day: int | None = Field(None, ge=1, le=10)
+    diet_notes: str | None = None
+    # Flags
     is_template: bool | None = None
     is_public: bool | None = None
 
@@ -334,12 +482,36 @@ class ProgramResponse(BaseModel):
     difficulty: Difficulty
     split_type: SplitType
     duration_weeks: int | None = None
+    # Diet configuration
+    include_diet: bool = False
+    diet_type: str | None = None
+    daily_calories: int | None = None
+    protein_grams: int | None = None
+    carbs_grams: int | None = None
+    fat_grams: int | None = None
+    meals_per_day: int | None = None
+    diet_notes: str | None = None
+    # Flags
     is_template: bool
     is_public: bool
     created_by_id: UUID
     organization_id: UUID | None = None
+    source_template_id: UUID | None = None
     created_at: datetime
     program_workouts: list[ProgramWorkoutResponse] = []
+
+    @field_validator("source_template_id", mode="before")
+    @classmethod
+    def convert_source_template_id(cls, v: str | UUID | None) -> UUID | None:
+        """Convert string to UUID for SQLite TEXT column compatibility."""
+        if v is None:
+            return None
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(v)
+        except (ValueError, TypeError):
+            return None
 
     class Config:
         from_attributes = True
@@ -357,7 +529,22 @@ class ProgramListResponse(BaseModel):
     is_template: bool
     is_public: bool
     workout_count: int = 0
+    created_by_id: UUID | None = None
+    source_template_id: UUID | None = None
     created_at: datetime
+
+    @field_validator("source_template_id", mode="before")
+    @classmethod
+    def convert_source_template_id(cls, v: str | UUID | None) -> UUID | None:
+        """Convert string to UUID for SQLite TEXT column compatibility."""
+        if v is None:
+            return None
+        if isinstance(v, UUID):
+            return v
+        try:
+            return UUID(v)
+        except (ValueError, TypeError):
+            return None
 
     class Config:
         from_attributes = True
@@ -374,6 +561,7 @@ class CatalogProgramResponse(BaseModel):
     duration_weeks: int | None = None
     workout_count: int = 0
     creator_name: str | None = None
+    created_by_id: UUID | None = None
     created_at: datetime
 
     class Config:

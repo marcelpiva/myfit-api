@@ -18,7 +18,7 @@ from src.domains.users.schemas import (
 )
 from src.domains.users.service import UserService
 from src.domains.organizations.service import OrganizationService
-from src.domains.organizations.schemas import UserMembershipResponse, OrganizationInMembership
+from src.domains.organizations.schemas import UserMembershipResponse, OrganizationInMembership, InviteResponse
 
 router = APIRouter()
 
@@ -211,3 +211,30 @@ async def get_my_memberships(
         )
 
     return result
+
+
+@router.get("/me/pending-invites", response_model=list[InviteResponse])
+async def get_my_pending_invites(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[InviteResponse]:
+    """Get all pending invites for the current user's email."""
+    org_service = OrganizationService(db)
+    invites = await org_service.get_pending_invites_for_email(current_user.email)
+    return [
+        InviteResponse(
+            id=invite.id,
+            email=invite.email,
+            role=invite.role,
+            organization_id=invite.organization_id,
+            organization_name=invite.organization.name if invite.organization else "Unknown",
+            invited_by_name=invite.invited_by.name if invite.invited_by else "Unknown",
+            expires_at=invite.expires_at,
+            created_at=invite.created_at,
+            is_expired=invite.is_expired,
+            is_accepted=invite.is_accepted,
+            token=invite.token,  # Include token for accept functionality
+        )
+        for invite in invites
+        if not invite.is_expired and not invite.is_accepted
+    ]

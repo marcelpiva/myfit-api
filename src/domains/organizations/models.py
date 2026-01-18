@@ -176,7 +176,8 @@ class OrganizationInvite(Base, UUIDMixin, TimestampMixin):
     @property
     def is_expired(self) -> bool:
         """Check if invite has expired."""
-        now = datetime.utcnow()
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
         return now > self.expires_at
 
     @property

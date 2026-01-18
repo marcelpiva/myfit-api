@@ -10,6 +10,7 @@ from src.domains.auth.dependencies import CurrentUser
 from src.domains.organizations.schemas import (
     AcceptInviteRequest,
     InviteCreate,
+    InvitePreviewResponse,
     InviteResponse,
     MemberCreate,
     MemberResponse,
@@ -23,6 +24,52 @@ from src.domains.organizations.service import OrganizationService
 from src.domains.users.service import UserService
 
 router = APIRouter()
+
+
+# Public invite preview (no auth required)
+
+@router.get("/invite/preview/{token}", response_model=InvitePreviewResponse)
+async def preview_invite(
+    token: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InvitePreviewResponse:
+    """Get invite details by token (public, no auth required).
+
+    This endpoint allows users to preview invite details before
+    logging in or creating an account.
+    """
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    invite = await org_service.get_invite_by_token(token)
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found",
+        )
+
+    if invite.is_expired:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invite has expired",
+        )
+
+    if invite.is_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invite already accepted",
+        )
+
+    # Get organization and inviter details
+    org = await org_service.get_organization_by_id(invite.organization_id)
+    inviter = await user_service.get_user_by_id(invite.invited_by_id)
+
+    return InvitePreviewResponse(
+        organization_name=org.name if org else "Unknown",
+        invited_by_name=inviter.name if inviter else "Unknown",
+        role=invite.role,
+        email=invite.email,
+    )
 
 
 # Organization CRUD

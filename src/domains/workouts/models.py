@@ -72,6 +72,27 @@ class MuscleGroup(str, enum.Enum):
     CARDIO = "cardio"
 
 
+class TechniqueType(str, enum.Enum):
+    """Advanced training technique types."""
+
+    NORMAL = "normal"
+    SUPERSET = "superset"
+    DROPSET = "dropset"
+    TRISET = "triset"
+    GIANTSET = "giantset"
+    REST_PAUSE = "rest_pause"
+    CLUSTER = "cluster"
+
+
+class SessionStatus(str, enum.Enum):
+    """Workout session status for co-training."""
+
+    WAITING = "waiting"  # Session created, waiting to start
+    ACTIVE = "active"  # Session in progress
+    PAUSED = "paused"  # Temporarily paused
+    COMPLETED = "completed"  # Session finished
+
+
 class Exercise(Base, UUIDMixin, TimestampMixin):
     """Exercise model representing a single exercise."""
 
@@ -125,10 +146,10 @@ class Workout(Base, UUIDMixin, TimestampMixin):
     is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    created_by_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,  # NULL for system templates
     )
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
@@ -137,7 +158,7 @@ class Workout(Base, UUIDMixin, TimestampMixin):
     )
 
     # Relationships
-    created_by: Mapped["User"] = relationship("User")
+    created_by: Mapped["User | None"] = relationship("User")
     organization: Mapped["Organization | None"] = relationship("Organization")
     exercises: Mapped[list["WorkoutExercise"]] = relationship(
         "WorkoutExercise",
@@ -179,7 +200,18 @@ class WorkoutExercise(Base, UUIDMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     superset_with: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), nullable=True
-    )  # For supersets
+    )  # For supersets (legacy)
+
+    # Advanced technique fields
+    execution_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    isometric_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    technique_type: Mapped[TechniqueType] = mapped_column(
+        Enum(TechniqueType, name="technique_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=TechniqueType.NORMAL,
+        nullable=False,
+    )
+    exercise_group_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    exercise_group_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
     workout: Mapped["Workout"] = relationship(
@@ -261,6 +293,19 @@ class WorkoutSession(Base, UUIDMixin):
         nullable=False,
     )
 
+    # Co-training fields
+    trainer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_shared: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    status: Mapped[SessionStatus] = mapped_column(
+        Enum(SessionStatus, name="session_status_enum", values_callable=lambda x: [e.value for e in x]),
+        default=SessionStatus.WAITING,
+        nullable=False,
+    )
+
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
@@ -273,6 +318,8 @@ class WorkoutSession(Base, UUIDMixin):
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5
+    student_feedback: Mapped[str | None] = mapped_column(Text, nullable=True)
+    trainer_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
     assignment: Mapped["WorkoutAssignment | None"] = relationship(
@@ -280,19 +327,30 @@ class WorkoutSession(Base, UUIDMixin):
         back_populates="sessions",
     )
     workout: Mapped["Workout"] = relationship("Workout")
-    user: Mapped["User"] = relationship("User")
+    user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
+    trainer: Mapped["User | None"] = relationship("User", foreign_keys=[trainer_id])
     sets: Mapped[list["WorkoutSessionSet"]] = relationship(
         "WorkoutSessionSet",
         back_populates="session",
         lazy="selectin",
+    )
+    messages: Mapped[list["SessionMessage"]] = relationship(
+        "SessionMessage",
+        back_populates="session",
+        lazy="selectin",
+        order_by="SessionMessage.sent_at",
     )
 
     @property
     def is_completed(self) -> bool:
         return self.completed_at is not None
 
+    @property
+    def is_active(self) -> bool:
+        return self.status == SessionStatus.ACTIVE
+
     def __repr__(self) -> str:
-        return f"<WorkoutSession id={self.id} workout={self.workout_id}>"
+        return f"<WorkoutSession id={self.id} workout={self.workout_id} status={self.status.value}>"
 
 
 class WorkoutSessionSet(Base, UUIDMixin):
@@ -334,6 +392,79 @@ class WorkoutSessionSet(Base, UUIDMixin):
         return f"<WorkoutSessionSet session={self.session_id} set={self.set_number}>"
 
 
+class SessionMessage(Base, UUIDMixin):
+    """Quick messages exchanged during a shared workout session (co-training)."""
+
+    __tablename__ = "session_messages"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    sender_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    message: Mapped[str] = mapped_column(String(500), nullable=False)
+    sent_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    is_read: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Relationships
+    session: Mapped["WorkoutSession"] = relationship(
+        "WorkoutSession",
+        back_populates="messages",
+    )
+    sender: Mapped["User"] = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<SessionMessage session={self.session_id} sender={self.sender_id}>"
+
+
+class TrainerAdjustment(Base, UUIDMixin):
+    """Trainer adjustments made during a co-training session."""
+
+    __tablename__ = "trainer_adjustments"
+
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    exercise_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("exercises.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    set_number: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    suggested_weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    suggested_reps: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+
+    # Relationships
+    session: Mapped["WorkoutSession"] = relationship("WorkoutSession")
+    trainer: Mapped["User"] = relationship("User")
+    exercise: Mapped["Exercise"] = relationship("Exercise")
+
+    def __repr__(self) -> str:
+        return f"<TrainerAdjustment session={self.session_id} exercise={self.exercise_id}>"
+
+
 class WorkoutProgram(Base, UUIDMixin, TimestampMixin):
     """Workout Program - a structured collection of workouts (e.g., ABC split)."""
 
@@ -358,22 +489,37 @@ class WorkoutProgram(Base, UUIDMixin, TimestampMixin):
     )
     duration_weeks: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
+    # Diet configuration
+    include_diet: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    diet_type: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    daily_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    protein_grams: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    carbs_grams: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    fat_grams: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    meals_per_day: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    diet_notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    created_by_id: Mapped[uuid.UUID] = mapped_column(
+    created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,  # NULL for system templates
     )
     organization_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("organizations.id", ondelete="SET NULL"),
         nullable=True,
     )
+    # Track the original template when program is imported from catalog
+    source_template_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=True,
+    )
 
     # Relationships
-    created_by: Mapped["User"] = relationship("User")
+    created_by: Mapped["User | None"] = relationship("User")
     organization: Mapped["Organization | None"] = relationship("Organization")
     program_workouts: Mapped[list["ProgramWorkout"]] = relationship(
         "ProgramWorkout",

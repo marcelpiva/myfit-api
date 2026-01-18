@@ -154,3 +154,12 @@ class AcceptInviteRequest(BaseModel):
     """Accept invitation request."""
 
     token: str
+
+
+class InvitePreviewResponse(BaseModel):
+    """Public invite preview response (no auth required)."""
+
+    organization_name: str
+    invited_by_name: str
+    role: UserRole
+    email: str

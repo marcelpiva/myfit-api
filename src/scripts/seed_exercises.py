@@ -111,6 +111,7 @@ EXERCISES = [
         "equipment": ["barbell", "bench"],
         "description": "Exercicio composto para desenvolvimento do peitoral",
         "instructions": "Deite no banco, segure a barra na largura dos ombros, desça ate o peito e empurre.",
+        "video_url": "https://www.youtube.com/watch?v=rT7DgCr-3pg",
     },
     {
         "name": "Supino Inclinado com Halteres",
@@ -119,6 +120,7 @@ EXERCISES = [
         "equipment": ["dumbbell", "incline_bench"],
         "description": "Foco na parte superior do peitoral",
         "instructions": "No banco inclinado (30-45 graus), desça os halteres ate o peito e empurre.",
+        "video_url": "https://www.youtube.com/watch?v=8iPEnn-ltC8",
     },
     {
         "name": "Supino Declinado",
@@ -126,6 +128,7 @@ EXERCISES = [
         "secondary_muscles": ["triceps"],
         "equipment": ["barbell", "decline_bench"],
         "description": "Foco na parte inferior do peitoral",
+        "video_url": "https://www.youtube.com/watch?v=LfyQBUKR8SE",
     },
     {
         "name": "Crucifixo com Halteres",
@@ -134,6 +137,7 @@ EXERCISES = [
         "equipment": ["dumbbell", "bench"],
         "description": "Exercicio de isolamento para o peitoral",
         "instructions": "Deitado no banco, abra os bracos em arco ate sentir alongamento no peito.",
+        "video_url": "https://www.youtube.com/watch?v=eozdVDA78K0",
     },
     {
         "name": "Crossover no Cabo",
@@ -141,6 +145,7 @@ EXERCISES = [
         "secondary_muscles": ["shoulders"],
         "equipment": ["cable"],
         "description": "Exercicio de isolamento com cabos",
+        "video_url": "https://www.youtube.com/watch?v=taI4XduLpTk",
     },
     {
         "name": "Flexao de Bracos",
@@ -149,6 +154,7 @@ EXERCISES = [
         "equipment": ["bodyweight"],
         "description": "Exercicio classico com peso corporal",
         "instructions": "Mantenha o corpo reto, desça ate o peito quase tocar o chao.",
+        "video_url": "https://www.youtube.com/watch?v=IODxDxX7oi4",
     },
     {
         "name": "Mergulho em Paralelas (Peito)",
@@ -156,6 +162,7 @@ EXERCISES = [
         "secondary_muscles": ["triceps", "shoulders"],
         "equipment": ["parallel_bars"],
         "description": "Incline o corpo para frente para focar no peitoral",
+        "video_url": "https://www.youtube.com/watch?v=2z8JmcrW-As",
     },
 
     # COSTAS (Back)
@@ -166,6 +173,7 @@ EXERCISES = [
         "equipment": ["pull_up_bar"],
         "description": "Exercicio fundamental para costas",
         "instructions": "Pegada um pouco mais larga que os ombros, puxe ate o queixo passar a barra.",
+        "video_url": "https://www.youtube.com/watch?v=eGo4IYlbE5g",
     },
     {
         "name": "Remada Curvada com Barra",
@@ -174,6 +182,7 @@ EXERCISES = [
         "equipment": ["barbell"],
         "description": "Exercicio composto para espessura das costas",
         "instructions": "Incline o tronco a 45 graus, puxe a barra ate a cintura.",
+        "video_url": "https://www.youtube.com/watch?v=FWJR5Ve8bnQ",
     },
     {
         "name": "Puxada Frontal",
@@ -181,6 +190,7 @@ EXERCISES = [
         "secondary_muscles": ["biceps"],
         "equipment": ["cable", "lat_pulldown"],
         "description": "Foco no latissimo do dorso",
+        "video_url": "https://www.youtube.com/watch?v=CAwf7n6Luuc",
     },
     {
         "name": "Remada Unilateral com Halter",
@@ -189,6 +199,7 @@ EXERCISES = [
         "equipment": ["dumbbell", "bench"],
         "description": "Exercicio unilateral para costas",
         "instructions": "Apoie um joelho e mao no banco, puxe o halter ate a cintura.",
+        "video_url": "https://www.youtube.com/watch?v=pYcpY20QaE8",
     },
     {
         "name": "Remada Cavalinho",
@@ -196,6 +207,7 @@ EXERCISES = [
         "secondary_muscles": ["biceps"],
         "equipment": ["t_bar"],
         "description": "Excelente para espessura das costas",
+        "video_url": "https://www.youtube.com/watch?v=j3Igk5nyZE4",
     },
     {
         "name": "Pullover com Halter",
@@ -203,6 +215,7 @@ EXERCISES = [
         "secondary_muscles": ["chest", "triceps"],
         "equipment": ["dumbbell", "bench"],
         "description": "Trabalha latissimo e serrátil",
+        "video_url": "https://www.youtube.com/watch?v=FK4rHfWKEac",
     },
     {
         "name": "Remada Baixa no Cabo",
@@ -210,6 +223,7 @@ EXERCISES = [
         "secondary_muscles": ["biceps"],
         "equipment": ["cable"],
         "description": "Remada sentado com cabo",
+        "video_url": "https://www.youtube.com/watch?v=GZbfZ033f74",
     },
 
     # OMBROS (Shoulders)
@@ -220,6 +234,7 @@ EXERCISES = [
         "equipment": ["barbell"],
         "description": "Exercicio composto para ombros",
         "instructions": "Em pe ou sentado, empurre a barra acima da cabeca.",
+        "video_url": "https://www.youtube.com/watch?v=2yjwXTZQDDI",
     },
     {
         "name": "Desenvolvimento com Halteres",
@@ -227,6 +242,7 @@ EXERCISES = [
         "secondary_muscles": ["triceps"],
         "equipment": ["dumbbell"],
         "description": "Permite maior amplitude de movimento",
+        "video_url": "https://www.youtube.com/watch?v=qEwKCR5JCog",
     },
     {
         "name": "Elevacao Lateral",
@@ -234,12 +250,14 @@ EXERCISES = [
         "equipment": ["dumbbell"],
         "description": "Isolamento para deltoide lateral",
         "instructions": "Levante os halteres lateralmente ate a altura dos ombros.",
+        "video_url": "https://www.youtube.com/watch?v=3VcKaXpzqRo",
     },
     {
         "name": "Elevacao Frontal",
         "muscle_group": MuscleGroup.SHOULDERS,
         "equipment": ["dumbbell"],
         "description": "Foco no deltoide anterior",
+        "video_url": "https://www.youtube.com/watch?v=sOcYlBI85xE",
     },
     {
         "name": "Crucifixo Inverso",
@@ -247,12 +265,14 @@ EXERCISES = [
         "secondary_muscles": ["back"],
         "equipment": ["dumbbell", "machine"],
         "description": "Foco no deltoide posterior",
+        "video_url": "https://www.youtube.com/watch?v=lPt0GqwaqEw",
     },
     {
         "name": "Encolhimento com Barra",
         "muscle_group": MuscleGroup.SHOULDERS,
         "equipment": ["barbell"],
         "description": "Trabalha o trapezio",
+        "video_url": "https://www.youtube.com/watch?v=NAqCVe2mwzM",
     },
 
     # BICEPS
@@ -263,6 +283,7 @@ EXERCISES = [
         "equipment": ["barbell"],
         "description": "Exercicio basico para biceps",
         "instructions": "Mantenha os cotovelos fixos ao lado do corpo, flexione os bracos.",
+        "video_url": "https://www.youtube.com/watch?v=kwG2ipFRgfo",
     },
     {
         "name": "Rosca Alternada com Halteres",
@@ -270,6 +291,7 @@ EXERCISES = [
         "secondary_muscles": ["forearms"],
         "equipment": ["dumbbell"],
         "description": "Permite supinacao durante o movimento",
+        "video_url": "https://www.youtube.com/watch?v=sAq_ocpRh_I",
     },
     {
         "name": "Rosca Martelo",
@@ -277,6 +299,7 @@ EXERCISES = [
         "secondary_muscles": ["forearms"],
         "equipment": ["dumbbell"],
         "description": "Trabalha braquial e braquiorradial",
+        "video_url": "https://www.youtube.com/watch?v=zC3nLlEvin4",
     },
     {
         "name": "Rosca Concentrada",
@@ -284,18 +307,21 @@ EXERCISES = [
         "equipment": ["dumbbell"],
         "description": "Isolamento maximo do biceps",
         "instructions": "Sentado, apoie o cotovelo na coxa e flexione o braco.",
+        "video_url": "https://www.youtube.com/watch?v=0AUGkch3tzc",
     },
     {
         "name": "Rosca Scott",
         "muscle_group": MuscleGroup.BICEPS,
         "equipment": ["barbell", "preacher_bench"],
         "description": "Enfatiza a porcao inferior do biceps",
+        "video_url": "https://www.youtube.com/watch?v=fIWP-FRFNU0",
     },
     {
         "name": "Rosca no Cabo",
         "muscle_group": MuscleGroup.BICEPS,
         "equipment": ["cable"],
         "description": "Tensao constante durante todo o movimento",
+        "video_url": "https://www.youtube.com/watch?v=NFzTWp2qpiE",
     },
 
     # TRICEPS
@@ -305,6 +331,7 @@ EXERCISES = [
         "equipment": ["cable", "rope"],
         "description": "Excelente para cabeca lateral do triceps",
         "instructions": "Mantenha os cotovelos fixos, estenda os bracos e afaste as cordas no final.",
+        "video_url": "https://www.youtube.com/watch?v=kiuVA0gs3EI",
     },
     {
         "name": "Triceps Testa",
@@ -312,12 +339,14 @@ EXERCISES = [
         "equipment": ["barbell", "bench"],
         "description": "Trabalha a cabeca longa do triceps",
         "instructions": "Deitado, desça a barra ate a testa e estenda os bracos.",
+        "video_url": "https://www.youtube.com/watch?v=d_KZxkY_0cM",
     },
     {
         "name": "Triceps Frances",
         "muscle_group": MuscleGroup.TRICEPS,
         "equipment": ["dumbbell"],
         "description": "Trabalha a cabeca longa do triceps",
+        "video_url": "https://www.youtube.com/watch?v=nRiJVZDpdL0",
     },
     {
         "name": "Mergulho no Banco",
@@ -325,12 +354,14 @@ EXERCISES = [
         "secondary_muscles": ["chest", "shoulders"],
         "equipment": ["bench"],
         "description": "Exercicio com peso corporal para triceps",
+        "video_url": "https://www.youtube.com/watch?v=0326dy_-CzM",
     },
     {
         "name": "Triceps Coice",
         "muscle_group": MuscleGroup.TRICEPS,
         "equipment": ["dumbbell"],
         "description": "Isolamento do triceps",
+        "video_url": "https://www.youtube.com/watch?v=6SS6K3lAwZ8",
     },
 
     # PERNAS (Legs)
@@ -341,6 +372,7 @@ EXERCISES = [
         "equipment": ["barbell", "squat_rack"],
         "description": "Rei dos exercicios para pernas",
         "instructions": "Barra nas costas, desça ate as coxas ficarem paralelas ao chao.",
+        "video_url": "https://www.youtube.com/watch?v=ultWZbUMPL8",
     },
     {
         "name": "Leg Press 45 Graus",
@@ -348,12 +380,14 @@ EXERCISES = [
         "secondary_muscles": ["glutes", "hamstrings"],
         "equipment": ["leg_press"],
         "description": "Permite trabalhar com cargas altas com seguranca",
+        "video_url": "https://www.youtube.com/watch?v=IZxyjW7MPJQ",
     },
     {
         "name": "Cadeira Extensora",
         "muscle_group": MuscleGroup.QUADRICEPS,
         "equipment": ["leg_extension"],
         "description": "Isolamento do quadriceps",
+        "video_url": "https://www.youtube.com/watch?v=YyvSfVjQeL0",
     },
     {
         "name": "Agachamento Hack",
@@ -361,6 +395,7 @@ EXERCISES = [
         "secondary_muscles": ["glutes"],
         "equipment": ["hack_squat"],
         "description": "Variacao guiada do agachamento",
+        "video_url": "https://www.youtube.com/watch?v=0tn5K9NlCfo",
     },
     {
         "name": "Afundo com Halteres",
@@ -368,12 +403,14 @@ EXERCISES = [
         "secondary_muscles": ["glutes", "hamstrings"],
         "equipment": ["dumbbell"],
         "description": "Exercicio unilateral para pernas",
+        "video_url": "https://www.youtube.com/watch?v=D7KaRcUTQeE",
     },
     {
         "name": "Mesa Flexora",
         "muscle_group": MuscleGroup.HAMSTRINGS,
         "equipment": ["leg_curl"],
         "description": "Isolamento dos isquiotibiais",
+        "video_url": "https://www.youtube.com/watch?v=1Tq3QdYUuHs",
     },
     {
         "name": "Stiff",
@@ -382,6 +419,7 @@ EXERCISES = [
         "equipment": ["barbell"],
         "description": "Trabalha posterior de coxa e gluteos",
         "instructions": "Mantenha as pernas quase estendidas, incline o tronco ate sentir alongamento.",
+        "video_url": "https://www.youtube.com/watch?v=1uDiW5--rAE",
     },
     {
         "name": "Levantamento Terra",
@@ -389,6 +427,7 @@ EXERCISES = [
         "secondary_muscles": ["back", "glutes", "quadriceps"],
         "equipment": ["barbell"],
         "description": "Exercicio composto para posterior",
+        "video_url": "https://www.youtube.com/watch?v=op9kVnSso6Q",
     },
 
     # GLUTEOS (Glutes)
@@ -399,12 +438,14 @@ EXERCISES = [
         "equipment": ["barbell", "bench"],
         "description": "Melhor exercicio para ativacao glutea",
         "instructions": "Apoie as costas no banco, empurre o quadril para cima.",
+        "video_url": "https://www.youtube.com/watch?v=SEdqd1n0cvg",
     },
     {
         "name": "Gluteo na Polia",
         "muscle_group": MuscleGroup.GLUTES,
         "equipment": ["cable"],
         "description": "Isolamento do gluteo com cabo",
+        "video_url": "https://www.youtube.com/watch?v=uFDZmLKIRCw",
     },
     {
         "name": "Elevacao Pelvica",
@@ -412,6 +453,7 @@ EXERCISES = [
         "secondary_muscles": ["hamstrings"],
         "equipment": ["bodyweight"],
         "description": "Versao do hip thrust no chao",
+        "video_url": "https://www.youtube.com/watch?v=8bbE64NuDTU",
     },
 
     # PANTURRILHA (Calves)
@@ -421,12 +463,14 @@ EXERCISES = [
         "equipment": ["calf_raise_machine"],
         "description": "Trabalha o gastrocnemio",
         "instructions": "Suba na ponta dos pes e desça alongando bem.",
+        "video_url": "https://www.youtube.com/watch?v=Yh5TXz-wPpA",
     },
     {
         "name": "Panturrilha Sentado",
         "muscle_group": MuscleGroup.CALVES,
         "equipment": ["seated_calf"],
         "description": "Foco no soleo",
+        "video_url": "https://www.youtube.com/watch?v=Yh5TXz-wPpA",
     },
 
     # ABDOMEN (Abs)
@@ -436,6 +480,7 @@ EXERCISES = [
         "equipment": ["bodyweight"],
         "description": "Exercicio basico para abdomen",
         "instructions": "Deitado, contraia o abdomen levantando os ombros do chao.",
+        "video_url": "https://www.youtube.com/watch?v=Xyd_fa5zoEU",
     },
     {
         "name": "Prancha",
@@ -444,18 +489,21 @@ EXERCISES = [
         "equipment": ["bodyweight"],
         "description": "Isometrico para core",
         "instructions": "Mantenha o corpo reto apoiado nos antebracos e pontas dos pes.",
+        "video_url": "https://www.youtube.com/watch?v=pSHjTRCQxIw",
     },
     {
         "name": "Elevacao de Pernas",
         "muscle_group": MuscleGroup.ABS,
         "equipment": ["bodyweight", "dip_station"],
         "description": "Trabalha a parte inferior do abdomen",
+        "video_url": "https://www.youtube.com/watch?v=l4kQd9eWclE",
     },
     {
         "name": "Abdominal Obliquo",
         "muscle_group": MuscleGroup.ABS,
         "equipment": ["bodyweight"],
         "description": "Trabalha os obliquos",
+        "video_url": "https://www.youtube.com/watch?v=pDFCx4pHLt0",
     },
     {
         "name": "Roda Abdominal",
@@ -463,6 +511,7 @@ EXERCISES = [
         "secondary_muscles": ["back", "shoulders"],
         "equipment": ["ab_wheel"],
         "description": "Exercicio avancado para core",
+        "video_url": "https://www.youtube.com/watch?v=rqiTPdK1c_I",
     },
 
     # CARDIO
@@ -472,6 +521,7 @@ EXERCISES = [
         "secondary_muscles": ["quadriceps", "calves"],
         "equipment": ["treadmill"],
         "description": "Cardio classico",
+        "video_url": "https://www.youtube.com/watch?v=8SQ2Tldsnqc",
     },
     {
         "name": "Bicicleta Ergometrica",
@@ -479,12 +529,14 @@ EXERCISES = [
         "secondary_muscles": ["quadriceps"],
         "equipment": ["stationary_bike"],
         "description": "Cardio de baixo impacto",
+        "video_url": "https://www.youtube.com/watch?v=gWvdCwHUPog",
     },
     {
         "name": "Eliptico",
         "muscle_group": MuscleGroup.CARDIO,
         "equipment": ["elliptical"],
         "description": "Cardio de baixo impacto para corpo inteiro",
+        "video_url": "https://www.youtube.com/watch?v=L7Rwz9BPBPU",
     },
     {
         "name": "Pular Corda",
@@ -492,6 +544,7 @@ EXERCISES = [
         "secondary_muscles": ["calves", "shoulders"],
         "equipment": ["jump_rope"],
         "description": "Cardio de alta intensidade",
+        "video_url": "https://www.youtube.com/watch?v=1BZM2Vre5oc",
     },
     {
         "name": "Burpee",
@@ -499,6 +552,246 @@ EXERCISES = [
         "secondary_muscles": ["chest", "quadriceps", "abs"],
         "equipment": ["bodyweight"],
         "description": "Exercicio de corpo inteiro de alta intensidade",
+        "video_url": "https://www.youtube.com/watch?v=dZgVxmf6jkA",
+    },
+
+    # ==================== NOVOS EXERCICIOS ====================
+
+    # Gestantes/Mobilidade
+    {
+        "name": "Agachamento com Apoio",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento seguro com apoio em cadeira ou parede",
+        "instructions": "Segure em uma cadeira ou parede para apoio. Desça controladamente ate onde for confortavel.",
+    },
+    {
+        "name": "Exercicio de Kegel",
+        "muscle_group": MuscleGroup.ABS,
+        "equipment": ["bodyweight"],
+        "description": "Fortalecimento do assoalho pelvico",
+        "instructions": "Contraia os musculos do assoalho pelvico por 5 segundos, relaxe por 5 segundos. Repita.",
+    },
+    {
+        "name": "Cat-Cow (Gato-Vaca)",
+        "muscle_group": MuscleGroup.BACK,
+        "secondary_muscles": ["abs"],
+        "equipment": ["bodyweight"],
+        "description": "Mobilidade de coluna em quatro apoios",
+        "instructions": "Em quatro apoios, alterne entre arquear as costas (gato) e afundar (vaca).",
+    },
+    {
+        "name": "Alongamento de Quadril",
+        "muscle_group": MuscleGroup.GLUTES,
+        "secondary_muscles": ["hamstrings"],
+        "equipment": ["bodyweight"],
+        "description": "Alongamento para flexores de quadril",
+        "instructions": "Em posicao de avanço, afunde o quadril para baixo alongando a parte frontal.",
+    },
+    {
+        "name": "Caminhada Leve",
+        "muscle_group": MuscleGroup.CARDIO,
+        "secondary_muscles": ["quadriceps", "calves"],
+        "equipment": ["treadmill"],
+        "description": "Caminhada em ritmo leve na esteira",
+        "instructions": "Caminhe em ritmo confortavel, mantendo boa postura.",
+    },
+
+    # Terceira Idade
+    {
+        "name": "Sentar e Levantar",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Exercicio funcional de levantar da cadeira",
+        "instructions": "Sente em uma cadeira, levante sem usar as maos, sente novamente controladamente.",
+    },
+    {
+        "name": "Subida no Step",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "secondary_muscles": ["glutes", "calves"],
+        "equipment": ["step"],
+        "description": "Subida em degrau baixo para fortalecimento",
+        "instructions": "Suba no step com um pe, traga o outro, desça controladamente.",
+    },
+    {
+        "name": "Flexao na Parede",
+        "muscle_group": MuscleGroup.CHEST,
+        "secondary_muscles": ["triceps", "shoulders"],
+        "equipment": ["bodyweight"],
+        "description": "Flexao adaptada na parede para iniciantes",
+        "instructions": "Apoie as maos na parede, flexione os bracos trazendo o peito a parede.",
+    },
+    {
+        "name": "Remada com Elastico",
+        "muscle_group": MuscleGroup.BACK,
+        "secondary_muscles": ["biceps"],
+        "equipment": ["resistance_band"],
+        "description": "Remada usando banda elastica",
+        "instructions": "Pise no elastico, puxe as alças ate o abdomen, contraia as costas.",
+    },
+    {
+        "name": "Equilibrio Unipodal",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "equipment": ["bodyweight"],
+        "description": "Treino de equilibrio em uma perna",
+        "instructions": "Fique em pe em uma perna so, mantenha por 30 segundos, troque de lado.",
+    },
+    {
+        "name": "Marcha Estacionaria",
+        "muscle_group": MuscleGroup.CARDIO,
+        "secondary_muscles": ["quadriceps"],
+        "equipment": ["bodyweight"],
+        "description": "Marcha no lugar para aquecimento",
+        "instructions": "Marche no lugar elevando os joelhos de forma controlada.",
+    },
+
+    # Kids/Coordenacao
+    {
+        "name": "Polichinelo",
+        "muscle_group": MuscleGroup.CARDIO,
+        "secondary_muscles": ["shoulders", "calves"],
+        "equipment": ["bodyweight"],
+        "description": "Exercicio classico de aquecimento",
+        "instructions": "Salte abrindo pernas e bracos simultaneamente, retorne a posicao inicial.",
+    },
+    {
+        "name": "Corrida Estacionaria",
+        "muscle_group": MuscleGroup.CARDIO,
+        "secondary_muscles": ["quadriceps", "calves"],
+        "equipment": ["bodyweight"],
+        "description": "Corrida no lugar",
+        "instructions": "Corra no lugar elevando os joelhos, mantenha ritmo constante.",
+    },
+    {
+        "name": "Escalador (Mountain Climber)",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "secondary_muscles": ["abs", "shoulders", "quadriceps"],
+        "equipment": ["bodyweight"],
+        "description": "Exercicio de alta intensidade para core",
+        "instructions": "Em posicao de prancha, alterne trazendo os joelhos ao peito rapidamente.",
+    },
+    {
+        "name": "Agachamento com Salto",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "secondary_muscles": ["glutes", "calves"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento pliometrico",
+        "instructions": "Faca um agachamento e salte explosivamente, aterrisse suavemente.",
+    },
+    {
+        "name": "Skipping (Elevacao de Joelhos)",
+        "muscle_group": MuscleGroup.CARDIO,
+        "secondary_muscles": ["quadriceps", "abs"],
+        "equipment": ["bodyweight"],
+        "description": "Corrida com elevacao alta de joelhos",
+        "instructions": "Corra no lugar elevando os joelhos ate a altura do quadril.",
+    },
+
+    # Mobilidade/Reabilitacao
+    {
+        "name": "Bird-Dog",
+        "muscle_group": MuscleGroup.ABS,
+        "secondary_muscles": ["back", "glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Exercicio de estabilizacao de core",
+        "instructions": "Em quatro apoios, estenda braco e perna opostos, mantenha 3 segundos.",
+    },
+    {
+        "name": "Ponte de Gluteos Unilateral",
+        "muscle_group": MuscleGroup.GLUTES,
+        "secondary_muscles": ["hamstrings"],
+        "equipment": ["bodyweight"],
+        "description": "Elevacao de quadril com uma perna",
+        "instructions": "Deite, eleve o quadril usando apenas uma perna, mantenha a outra estendida.",
+    },
+    {
+        "name": "Rotacao de Tronco",
+        "muscle_group": MuscleGroup.ABS,
+        "secondary_muscles": ["back"],
+        "equipment": ["bodyweight"],
+        "description": "Mobilidade de coluna toracica",
+        "instructions": "Sentado ou em pe, gire o tronco para cada lado mantendo quadril fixo.",
+    },
+    {
+        "name": "Face Pull com Elastico",
+        "muscle_group": MuscleGroup.SHOULDERS,
+        "secondary_muscles": ["back"],
+        "equipment": ["resistance_band"],
+        "description": "Fortalecimento de deltoide posterior",
+        "instructions": "Puxe o elastico em direcao ao rosto, abrindo os cotovelos.",
+    },
+    {
+        "name": "Abducao de Quadril",
+        "muscle_group": MuscleGroup.GLUTES,
+        "equipment": ["bodyweight"],
+        "description": "Fortalecimento de gluteo medio",
+        "instructions": "Deitado de lado, eleve a perna de cima mantendo-a estendida.",
+    },
+    {
+        "name": "Extensao de Coluna (Superman)",
+        "muscle_group": MuscleGroup.BACK,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Fortalecimento de extensores da coluna",
+        "instructions": "Deitado de barriga para baixo, eleve bracos e pernas simultaneamente.",
+    },
+    {
+        "name": "Rotacao Externa de Ombro",
+        "muscle_group": MuscleGroup.SHOULDERS,
+        "equipment": ["resistance_band"],
+        "description": "Fortalecimento do manguito rotador",
+        "instructions": "Cotovelo junto ao corpo, gire o antebraco para fora contra resistencia.",
+    },
+
+    # HIIT/Funcional
+    {
+        "name": "Box Jump",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "secondary_muscles": ["glutes", "calves"],
+        "equipment": ["box"],
+        "description": "Salto pliometrico em caixa",
+        "instructions": "Salte sobre a caixa aterrissando com ambos os pes, desça controladamente.",
+    },
+    {
+        "name": "Kettlebell Swing",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "secondary_muscles": ["glutes", "hamstrings", "shoulders"],
+        "equipment": ["kettlebell"],
+        "description": "Balanco de kettlebell para posterior",
+        "instructions": "Balançe o kettlebell entre as pernas e projete a frente usando o quadril.",
+    },
+    {
+        "name": "Battle Ropes",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "secondary_muscles": ["shoulders", "abs"],
+        "equipment": ["battle_ropes"],
+        "description": "Treino de cordas para condicionamento",
+        "instructions": "Segure as cordas e faca ondas alternadas ou simultaneas.",
+    },
+    {
+        "name": "Farmers Walk",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "secondary_muscles": ["forearms", "abs"],
+        "equipment": ["dumbbell"],
+        "description": "Caminhada com peso nas maos",
+        "instructions": "Segure halteres pesados e caminhe mantendo postura ereta.",
+    },
+    {
+        "name": "Thruster",
+        "muscle_group": MuscleGroup.FULL_BODY,
+        "secondary_muscles": ["quadriceps", "shoulders"],
+        "equipment": ["dumbbell"],
+        "description": "Agachamento + desenvolvimento combinados",
+        "instructions": "Faca um agachamento frontal e ao subir empurre os pesos acima da cabeca.",
+    },
+    {
+        "name": "Wall Sit (Cadeirinha)",
+        "muscle_group": MuscleGroup.QUADRICEPS,
+        "equipment": ["bodyweight"],
+        "description": "Isometrico de quadriceps contra parede",
+        "instructions": "Apoie as costas na parede e desça ate 90 graus, mantenha a posicao.",
     },
 ]
 
@@ -537,6 +830,7 @@ async def seed_exercises(session: AsyncSession, clear_existing: bool = False) ->
             description=exercise_data.get("description"),
             instructions=exercise_data.get("instructions"),
             image_url=image_url,
+            video_url=exercise_data.get("video_url"),
             is_custom=False,
             is_public=True,
         )
