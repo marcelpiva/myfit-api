@@ -398,10 +398,10 @@ class ActiveSessionResponse(BaseModel):
         from_attributes = True
 
 
-# Program schemas
+# Plan schemas
 
-class ProgramWorkoutInput(BaseModel):
-    """Input for adding workout to program."""
+class PlanWorkoutInput(BaseModel):
+    """Input for adding workout to plan."""
 
     workout_id: UUID | None = None  # None if creating new workout inline
     label: str = Field(default="A", max_length=50)
@@ -414,8 +414,8 @@ class ProgramWorkoutInput(BaseModel):
     muscle_groups: list[str] | None = Field(default=None, description="Target muscle groups")
 
 
-class ProgramWorkoutResponse(BaseModel):
-    """Program workout response."""
+class PlanWorkoutResponse(BaseModel):
+    """Plan workout response."""
 
     id: UUID
     workout_id: UUID
@@ -428,8 +428,8 @@ class ProgramWorkoutResponse(BaseModel):
         from_attributes = True
 
 
-class ProgramCreate(BaseModel):
-    """Create program request."""
+class PlanCreate(BaseModel):
+    """Create plan request."""
 
     name: str = Field(min_length=2, max_length=255)
     description: str | None = None
@@ -450,11 +450,11 @@ class ProgramCreate(BaseModel):
     is_template: bool = False
     is_public: bool = False
     organization_id: UUID | None = None
-    workouts: list[ProgramWorkoutInput] | None = None
+    workouts: list[PlanWorkoutInput] | None = None
 
 
-class ProgramUpdate(BaseModel):
-    """Update program request."""
+class PlanUpdate(BaseModel):
+    """Update plan request."""
 
     name: str | None = Field(None, min_length=2, max_length=255)
     description: str | None = None
@@ -474,11 +474,11 @@ class ProgramUpdate(BaseModel):
     # Flags
     is_template: bool | None = None
     is_public: bool | None = None
-    workouts: list[ProgramWorkoutInput] | None = None
+    workouts: list[PlanWorkoutInput] | None = None
 
 
-class ProgramResponse(BaseModel):
-    """Program response."""
+class PlanResponse(BaseModel):
+    """Plan response."""
 
     id: UUID
     name: str
@@ -503,7 +503,7 @@ class ProgramResponse(BaseModel):
     organization_id: UUID | None = None
     source_template_id: UUID | None = None
     created_at: datetime
-    program_workouts: list[ProgramWorkoutResponse] = []
+    plan_workouts: list[PlanWorkoutResponse] = []
 
     @field_validator("source_template_id", mode="before")
     @classmethod
@@ -522,8 +522,8 @@ class ProgramResponse(BaseModel):
         from_attributes = True
 
 
-class ProgramListResponse(BaseModel):
-    """Program list item response."""
+class PlanListResponse(BaseModel):
+    """Plan list item response."""
 
     id: UUID
     name: str
@@ -555,7 +555,7 @@ class ProgramListResponse(BaseModel):
         from_attributes = True
 
 
-class CatalogProgramResponse(BaseModel):
+class CatalogPlanResponse(BaseModel):
     """Catalog template response with creator info."""
 
     id: UUID
@@ -573,12 +573,12 @@ class CatalogProgramResponse(BaseModel):
         from_attributes = True
 
 
-# Program assignment schemas
+# Plan assignment schemas
 
-class ProgramAssignmentCreate(BaseModel):
-    """Create program assignment request."""
+class PlanAssignmentCreate(BaseModel):
+    """Create plan assignment request."""
 
-    program_id: UUID
+    plan_id: UUID
     student_id: UUID
     start_date: date
     end_date: date | None = None
@@ -586,8 +586,8 @@ class ProgramAssignmentCreate(BaseModel):
     organization_id: UUID | None = None
 
 
-class ProgramAssignmentUpdate(BaseModel):
-    """Update program assignment request."""
+class PlanAssignmentUpdate(BaseModel):
+    """Update plan assignment request."""
 
     start_date: date | None = None
     end_date: date | None = None
@@ -595,11 +595,11 @@ class ProgramAssignmentUpdate(BaseModel):
     notes: str | None = None
 
 
-class ProgramAssignmentResponse(BaseModel):
-    """Program assignment response."""
+class PlanAssignmentResponse(BaseModel):
+    """Plan assignment response."""
 
     id: UUID
-    program_id: UUID
+    plan_id: UUID
     student_id: UUID
     trainer_id: UUID
     organization_id: UUID | None = None
@@ -608,7 +608,7 @@ class ProgramAssignmentResponse(BaseModel):
     is_active: bool
     notes: str | None = None
     created_at: datetime
-    program_name: str
+    plan_name: str
     student_name: str
 
     class Config:
@@ -622,9 +622,9 @@ class WorkoutContextInfo(BaseModel):
 
     workout_name: str | None = Field(default=None, description="Name of the workout")
     workout_label: str | None = Field(default=None, description="Workout label (A, B, C, etc.)")
-    program_name: str | None = Field(default=None, description="Name of the program")
-    program_goal: WorkoutGoal | None = Field(default=None, description="Program training goal")
-    program_split_type: SplitType | None = Field(default=None, description="Program split type")
+    plan_name: str | None = Field(default=None, description="Name of the plan")
+    plan_goal: WorkoutGoal | None = Field(default=None, description="Plan training goal")
+    plan_split_type: SplitType | None = Field(default=None, description="Plan split type")
     existing_exercises: list[str] | None = Field(default=None, description="Existing exercise names in workout")
     existing_exercise_count: int = Field(default=0, description="Number of exercises already in workout")
 
@@ -668,7 +668,7 @@ class ExerciseSuggestionResponse(BaseModel):
     message: str | None = Field(default=None, description="AI explanation or tips")
 
 
-# AI Program Generation schemas
+# AI Plan Generation schemas
 
 class EquipmentType(str):
     """Equipment availability types."""
@@ -689,8 +689,8 @@ class TrainingPreference(str):
     BODYWEIGHT = "bodyweight"
 
 
-class AIGenerateProgramRequest(BaseModel):
-    """Request for AI-generated workout program."""
+class AIGeneratePlanRequest(BaseModel):
+    """Request for AI-generated training plan."""
 
     goal: WorkoutGoal = Field(..., description="Training goal")
     difficulty: Difficulty = Field(..., description="Experience level")
@@ -699,7 +699,7 @@ class AIGenerateProgramRequest(BaseModel):
     equipment: str = Field(..., description="Equipment availability")
     injuries: list[str] | None = Field(default=None, description="Injuries or restrictions")
     preferences: str = Field(default="mixed", description="Training preferences")
-    duration_weeks: int = Field(default=8, ge=4, le=16, description="Program duration in weeks")
+    duration_weeks: int = Field(default=8, ge=4, le=16, description="Plan duration in weeks")
 
 
 class AIGeneratedWorkout(BaseModel):
@@ -712,8 +712,8 @@ class AIGeneratedWorkout(BaseModel):
     exercises: list[SuggestedExercise]
 
 
-class AIGenerateProgramResponse(BaseModel):
-    """Response with AI-generated program structure."""
+class AIGeneratePlanResponse(BaseModel):
+    """Response with AI-generated plan structure."""
 
     name: str
     description: str | None = None

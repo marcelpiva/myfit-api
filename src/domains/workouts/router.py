@@ -24,25 +24,25 @@ from src.domains.users.service import UserService
 from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 from src.domains.workouts.schemas import (
     ActiveSessionResponse,
-    AIGenerateProgramRequest,
-    AIGenerateProgramResponse,
+    AIGeneratePlanRequest,
+    AIGeneratePlanResponse,
     AssignmentCreate,
     AssignmentResponse,
     AssignmentUpdate,
-    CatalogProgramResponse,
+    CatalogPlanResponse,
     ExerciseCreate,
     ExerciseResponse,
     ExerciseSuggestionRequest,
     ExerciseSuggestionResponse,
     ExerciseUpdate,
-    ProgramAssignmentCreate,
-    ProgramAssignmentResponse,
-    ProgramAssignmentUpdate,
-    ProgramCreate,
-    ProgramListResponse,
-    ProgramResponse,
-    ProgramUpdate,
-    ProgramWorkoutInput,
+    PlanAssignmentCreate,
+    PlanAssignmentResponse,
+    PlanAssignmentUpdate,
+    PlanCreate,
+    PlanListResponse,
+    PlanResponse,
+    PlanUpdate,
+    PlanWorkoutInput,
     SessionComplete,
     SessionJoinResponse,
     SessionListResponse,
@@ -225,9 +225,9 @@ async def suggest_exercises(
         context_dict = {
             "workout_name": request.context.workout_name,
             "workout_label": request.context.workout_label,
-            "program_name": request.context.program_name,
-            "program_goal": request.context.program_goal.value if request.context.program_goal else None,
-            "program_split_type": request.context.program_split_type.value if request.context.program_split_type else None,
+            "plan_name": request.context.plan_name,
+            "plan_goal": request.context.plan_goal.value if request.context.plan_goal else None,
+            "plan_split_type": request.context.plan_split_type.value if request.context.plan_split_type else None,
             "existing_exercises": request.context.existing_exercises,
             "existing_exercise_count": request.context.existing_exercise_count,
         }
@@ -616,10 +616,10 @@ async def add_set(
     return SessionSetResponse.model_validate(session_set)
 
 
-# Program endpoints
+# Plan endpoints
 
-@router.get("/programs", response_model=list[ProgramListResponse])
-async def list_programs(
+@router.get("/plans", response_model=list[PlanListResponse])
+async def list_plans(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: Annotated[UUID | None, Query()] = None,
@@ -627,10 +627,10 @@ async def list_programs(
     search: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[ProgramListResponse]:
-    """List workout programs for the current user."""
+) -> list[PlanListResponse]:
+    """List training plans for the current user."""
     workout_service = WorkoutService(db)
-    programs = await workout_service.list_programs(
+    plans = await workout_service.list_plans(
         user_id=current_user.id,
         organization_id=organization_id,
         templates_only=templates_only,
@@ -640,7 +640,7 @@ async def list_programs(
     )
 
     return [
-        ProgramListResponse(
+        PlanListResponse(
             id=p.id,
             name=p.name,
             goal=p.goal,
@@ -649,16 +649,16 @@ async def list_programs(
             duration_weeks=p.duration_weeks,
             is_template=p.is_template,
             is_public=p.is_public,
-            workout_count=len(p.program_workouts),
+            workout_count=len(p.plan_workouts),
             created_by_id=p.created_by_id,
             source_template_id=_str_to_uuid(p.source_template_id),
             created_at=p.created_at,
         )
-        for p in programs
+        for p in plans
     ]
 
 
-@router.get("/programs/catalog", response_model=list[CatalogProgramResponse])
+@router.get("/plans/catalog", response_model=list[CatalogPlanResponse])
 async def get_catalog_templates(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -668,7 +668,7 @@ async def get_catalog_templates(
     split_type: Annotated[SplitType | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-) -> list[CatalogProgramResponse]:
+) -> list[CatalogPlanResponse]:
     """Get public catalog templates (excluding user's own)."""
     workout_service = WorkoutService(db)
     templates = await workout_service.get_catalog_templates(
@@ -680,16 +680,16 @@ async def get_catalog_templates(
         limit=limit,
         offset=offset,
     )
-    return [CatalogProgramResponse(**t) for t in templates]
+    return [CatalogPlanResponse(**t) for t in templates]
 
 
-@router.post("/programs/generate-ai", response_model=AIGenerateProgramResponse)
-async def generate_program_with_ai(
-    request: AIGenerateProgramRequest,
+@router.post("/plans/generate-ai", response_model=AIGeneratePlanResponse)
+async def generate_plan_with_ai(
+    request: AIGeneratePlanRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> AIGenerateProgramResponse:
-    """Generate a workout program using AI (OpenAI) based on questionnaire answers."""
+) -> AIGeneratePlanResponse:
+    """Generate a training plan using AI (OpenAI) based on questionnaire answers."""
     workout_service = WorkoutService(db)
 
     # Get available exercises for AI to use
@@ -707,7 +707,7 @@ async def generate_program_with_ai(
     from src.domains.workouts.ai_service import AIExerciseService
     ai_service = AIExerciseService()
 
-    ai_result = await ai_service.generate_full_program(
+    ai_result = await ai_service.generate_full_plan(
         available_exercises=exercise_dicts,
         goal=request.goal,
         difficulty=request.difficulty,
@@ -721,10 +721,10 @@ async def generate_program_with_ai(
 
     if ai_result:
         # AI generation succeeded - return the result
-        return AIGenerateProgramResponse(**ai_result)
+        return AIGeneratePlanResponse(**ai_result)
 
     # Fallback to rule-based generation if AI is not available
-    result = await workout_service.generate_program_with_ai(
+    result = await workout_service.generate_plan_with_ai(
         user_id=current_user.id,
         goal=request.goal,
         difficulty=request.difficulty,
@@ -735,49 +735,49 @@ async def generate_program_with_ai(
         preferences=request.preferences,
         duration_weeks=request.duration_weeks,
     )
-    return AIGenerateProgramResponse(**result)
+    return AIGeneratePlanResponse(**result)
 
 
-@router.get("/programs/{program_id}", response_model=ProgramResponse)
-async def get_program(
-    program_id: UUID,
+@router.get("/plans/{plan_id}", response_model=PlanResponse)
+async def get_plan(
+    plan_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramResponse:
-    """Get program details with workouts."""
+) -> PlanResponse:
+    """Get plan details with workouts."""
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
     # Check access
     if (
-        not program.is_public
-        and program.created_by_id != current_user.id
-        and program.organization_id is None
+        not plan.is_public
+        and plan.created_by_id != current_user.id
+        and plan.organization_id is None
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
 
-    return ProgramResponse.model_validate(program)
+    return PlanResponse.model_validate(plan)
 
 
-@router.post("/programs", response_model=ProgramResponse, status_code=status.HTTP_201_CREATED)
-async def create_program(
-    request: ProgramCreate,
+@router.post("/plans", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan(
+    request: PlanCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramResponse:
-    """Create a new workout program."""
+) -> PlanResponse:
+    """Create a new training plan."""
     workout_service = WorkoutService(db)
 
-    program = await workout_service.create_program(
+    plan = await workout_service.create_plan(
         created_by_id=current_user.id,
         name=request.name,
         description=request.description,
@@ -795,8 +795,8 @@ async def create_program(
         for pw in request.workouts:
             if pw.workout_id:
                 # Use existing workout
-                await workout_service.add_workout_to_program(
-                    program_id=program.id,
+                await workout_service.add_workout_to_plan(
+                    plan_id=plan.id,
                     workout_id=pw.workout_id,
                     label=pw.label,
                     order=pw.order,
@@ -830,9 +830,9 @@ async def create_program(
                             exercise_group_id=ex.exercise_group_id,
                             exercise_group_order=ex.exercise_group_order,
                         )
-                # Add to program
-                await workout_service.add_workout_to_program(
-                    program_id=program.id,
+                # Add to plan
+                await workout_service.add_workout_to_plan(
+                    plan_id=plan.id,
                     workout_id=new_workout.id,
                     label=pw.label,
                     order=pw.order,
@@ -840,36 +840,36 @@ async def create_program(
                 )
 
         # Refresh to get workouts
-        program = await workout_service.get_program_by_id(program.id)
+        plan = await workout_service.get_plan_by_id(plan.id)
 
-    return ProgramResponse.model_validate(program)
+    return PlanResponse.model_validate(plan)
 
 
-@router.put("/programs/{program_id}", response_model=ProgramResponse)
-async def update_program(
-    program_id: UUID,
-    request: ProgramUpdate,
+@router.put("/plans/{plan_id}", response_model=PlanResponse)
+async def update_plan(
+    plan_id: UUID,
+    request: PlanUpdate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramResponse:
-    """Update a program (owner only)."""
+) -> PlanResponse:
+    """Update a plan (owner only)."""
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
-    if program.created_by_id != current_user.id:
+    if plan.created_by_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own programs",
+            detail="You can only edit your own plans",
         )
 
-    updated = await workout_service.update_program(
-        program=program,
+    updated = await workout_service.update_plan(
+        plan=plan,
         name=request.name,
         description=request.description,
         goal=request.goal,
@@ -891,14 +891,14 @@ async def update_program(
 
     # Update workouts if provided
     if request.workouts is not None:
-        # Get existing program_workouts and their workout IDs
-        existing_workout_ids = [pw.workout_id for pw in program.program_workouts]
+        # Get existing plan_workouts and their workout IDs
+        existing_workout_ids = [pw.workout_id for pw in plan.plan_workouts]
 
-        # Delete all existing program_workouts
-        for pw in list(program.program_workouts):
-            await workout_service.remove_workout_from_program(pw.id)
+        # Delete all existing plan_workouts
+        for pw in list(plan.plan_workouts):
+            await workout_service.remove_workout_from_plan(pw.id)
 
-        # Delete the old workouts (they were created specifically for this program)
+        # Delete the old workouts (they were created specifically for this plan)
         for workout_id in existing_workout_ids:
             workout = await workout_service.get_workout_by_id(workout_id)
             if workout:
@@ -908,8 +908,8 @@ async def update_program(
         for pw in request.workouts:
             if pw.workout_id:
                 # Use existing workout
-                await workout_service.add_workout_to_program(
-                    program_id=program_id,
+                await workout_service.add_workout_to_plan(
+                    plan_id=plan_id,
                     workout_id=pw.workout_id,
                     label=pw.label,
                     order=pw.order,
@@ -920,7 +920,7 @@ async def update_program(
                 new_workout = await workout_service.create_workout(
                     created_by_id=current_user.id,
                     name=pw.workout_name,
-                    difficulty=request.difficulty or program.difficulty,
+                    difficulty=request.difficulty or plan.difficulty,
                     target_muscles=pw.muscle_groups,
                 )
                 # Add exercises to new workout if provided
@@ -943,9 +943,9 @@ async def update_program(
                             exercise_group_id=ex.exercise_group_id,
                             exercise_group_order=ex.exercise_group_order,
                         )
-                # Add to program
-                await workout_service.add_workout_to_program(
-                    program_id=program_id,
+                # Add to plan
+                await workout_service.add_workout_to_plan(
+                    plan_id=plan_id,
                     workout_id=new_workout.id,
                     label=pw.label,
                     order=pw.order,
@@ -953,71 +953,71 @@ async def update_program(
                 )
 
         # Refresh to get updated workouts
-        updated = await workout_service.get_program_by_id(program_id)
+        updated = await workout_service.get_plan_by_id(plan_id)
 
-    return ProgramResponse.model_validate(updated)
+    return PlanResponse.model_validate(updated)
 
 
-@router.delete("/programs/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_program(
-    program_id: UUID,
+@router.delete("/plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan(
+    plan_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a program (owner only)."""
+    """Delete a plan (owner only)."""
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
-    if program.created_by_id != current_user.id:
+    if plan.created_by_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only delete your own programs",
+            detail="You can only delete your own plans",
         )
 
-    await workout_service.delete_program(program)
+    await workout_service.delete_plan(plan)
 
 
-@router.post("/programs/{program_id}/duplicate", response_model=ProgramResponse, status_code=status.HTTP_201_CREATED)
-async def duplicate_program(
-    program_id: UUID,
+@router.post("/plans/{plan_id}/duplicate", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
+async def duplicate_plan(
+    plan_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     duplicate_workouts: Annotated[bool, Query()] = True,
     new_name: Annotated[str | None, Query(max_length=100)] = None,
     from_catalog: Annotated[bool, Query()] = False,
-) -> ProgramResponse:
-    """Duplicate a program for the current user.
+) -> PlanResponse:
+    """Duplicate a plan for the current user.
 
     Args:
         from_catalog: If True, marks this as a catalog import and tracks the source template.
     """
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
     # Check access
-    if not program.is_public and program.created_by_id != current_user.id:
+    if not plan.is_public and plan.created_by_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
         )
 
     # If importing from catalog, track the source template
-    source_template_id = program_id if from_catalog else None
+    source_template_id = plan_id if from_catalog else None
 
-    new_program = await workout_service.duplicate_program(
-        program=program,
+    new_plan = await workout_service.duplicate_plan(
+        plan=plan,
         new_owner_id=current_user.id,
         new_name=new_name,
         duplicate_workouts=duplicate_workouts,
@@ -1025,36 +1025,36 @@ async def duplicate_program(
     )
 
     # Refresh to get full data
-    new_program = await workout_service.get_program_by_id(new_program.id)
-    return ProgramResponse.model_validate(new_program)
+    new_plan = await workout_service.get_plan_by_id(new_plan.id)
+    return PlanResponse.model_validate(new_plan)
 
 
-@router.post("/programs/{program_id}/workouts", response_model=ProgramResponse)
-async def add_workout_to_program(
-    program_id: UUID,
-    request: ProgramWorkoutInput,
+@router.post("/plans/{plan_id}/workouts", response_model=PlanResponse)
+async def add_workout_to_plan(
+    plan_id: UUID,
+    request: PlanWorkoutInput,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramResponse:
-    """Add a workout to a program."""
+) -> PlanResponse:
+    """Add a workout to a plan."""
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
-    if program.created_by_id != current_user.id:
+    if plan.created_by_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own programs",
+            detail="You can only edit your own plans",
         )
 
     if request.workout_id:
-        await workout_service.add_workout_to_program(
-            program_id=program_id,
+        await workout_service.add_workout_to_plan(
+            plan_id=plan_id,
             workout_id=request.workout_id,
             label=request.label,
             order=request.order,
@@ -1065,7 +1065,7 @@ async def add_workout_to_program(
         new_workout = await workout_service.create_workout(
             created_by_id=current_user.id,
             name=request.workout_name,
-            difficulty=program.difficulty,
+            difficulty=plan.difficulty,
             target_muscles=request.muscle_groups,
         )
         if request.workout_exercises:
@@ -1087,8 +1087,8 @@ async def add_workout_to_program(
                     exercise_group_id=ex.exercise_group_id,
                     exercise_group_order=ex.exercise_group_order,
                 )
-        await workout_service.add_workout_to_program(
-            program_id=program_id,
+        await workout_service.add_workout_to_plan(
+            plan_id=plan_id,
             workout_id=new_workout.id,
             label=request.label,
             order=request.order,
@@ -1100,57 +1100,57 @@ async def add_workout_to_program(
             detail="Either workout_id or workout_name must be provided",
         )
 
-    # Refresh program
-    program = await workout_service.get_program_by_id(program_id)
-    return ProgramResponse.model_validate(program)
+    # Refresh plan
+    plan = await workout_service.get_plan_by_id(plan_id)
+    return PlanResponse.model_validate(plan)
 
 
-@router.delete("/programs/{program_id}/workouts/{program_workout_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def remove_workout_from_program(
-    program_id: UUID,
-    program_workout_id: UUID,
+@router.delete("/plans/{plan_id}/workouts/{plan_workout_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_workout_from_plan(
+    plan_id: UUID,
+    plan_workout_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Remove a workout from a program."""
+    """Remove a workout from a plan."""
     workout_service = WorkoutService(db)
-    program = await workout_service.get_program_by_id(program_id)
+    plan = await workout_service.get_plan_by_id(plan_id)
 
-    if not program:
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
-    if program.created_by_id != current_user.id:
+    if plan.created_by_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own programs",
+            detail="You can only edit your own plans",
         )
 
-    await workout_service.remove_workout_from_program(program_workout_id)
+    await workout_service.remove_workout_from_plan(plan_workout_id)
 
 
-# Program assignment endpoints
+# Plan assignment endpoints
 
-@router.get("/programs/assignments", response_model=list[ProgramAssignmentResponse])
-async def list_program_assignments(
+@router.get("/plans/assignments", response_model=list[PlanAssignmentResponse])
+async def list_plan_assignments(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     as_trainer: Annotated[bool, Query()] = False,
     active_only: Annotated[bool, Query()] = True,
-) -> list[ProgramAssignmentResponse]:
-    """List program assignments (as student or trainer)."""
+) -> list[PlanAssignmentResponse]:
+    """List plan assignments (as student or trainer)."""
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
     if as_trainer:
-        assignments = await workout_service.list_trainer_program_assignments(
+        assignments = await workout_service.list_trainer_plan_assignments(
             trainer_id=current_user.id,
             active_only=active_only,
         )
     else:
-        assignments = await workout_service.list_student_program_assignments(
+        assignments = await workout_service.list_student_plan_assignments(
             student_id=current_user.id,
             active_only=active_only,
         )
@@ -1159,9 +1159,9 @@ async def list_program_assignments(
     for a in assignments:
         student = await user_service.get_user_by_id(a.student_id)
         result.append(
-            ProgramAssignmentResponse(
+            PlanAssignmentResponse(
                 id=a.id,
-                program_id=a.program_id,
+                plan_id=a.plan_id,
                 student_id=a.student_id,
                 trainer_id=a.trainer_id,
                 organization_id=a.organization_id,
@@ -1170,7 +1170,7 @@ async def list_program_assignments(
                 is_active=a.is_active,
                 notes=a.notes,
                 created_at=a.created_at,
-                program_name=a.program.name if a.program else "",
+                plan_name=a.plan.name if a.plan else "",
                 student_name=student.name if student else "",
             )
         )
@@ -1178,22 +1178,22 @@ async def list_program_assignments(
     return result
 
 
-@router.post("/programs/assignments", response_model=ProgramAssignmentResponse, status_code=status.HTTP_201_CREATED)
-async def create_program_assignment(
-    request: ProgramAssignmentCreate,
+@router.post("/plans/assignments", response_model=PlanAssignmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan_assignment(
+    request: PlanAssignmentCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramAssignmentResponse:
-    """Assign a program to a student."""
+) -> PlanAssignmentResponse:
+    """Assign a plan to a student."""
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
-    # Verify program exists
-    program = await workout_service.get_program_by_id(request.program_id)
-    if not program:
+    # Verify plan exists
+    plan = await workout_service.get_plan_by_id(request.plan_id)
+    if not plan:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Program not found",
+            detail="Plan not found",
         )
 
     # Verify student exists
@@ -1204,8 +1204,8 @@ async def create_program_assignment(
             detail="Student not found",
         )
 
-    assignment = await workout_service.create_program_assignment(
-        program_id=request.program_id,
+    assignment = await workout_service.create_plan_assignment(
+        plan_id=request.plan_id,
         student_id=request.student_id,
         trainer_id=current_user.id,
         start_date=request.start_date,
@@ -1214,9 +1214,9 @@ async def create_program_assignment(
         organization_id=request.organization_id,
     )
 
-    return ProgramAssignmentResponse(
+    return PlanAssignmentResponse(
         id=assignment.id,
-        program_id=assignment.program_id,
+        plan_id=assignment.plan_id,
         student_id=assignment.student_id,
         trainer_id=assignment.trainer_id,
         organization_id=assignment.organization_id,
@@ -1225,23 +1225,23 @@ async def create_program_assignment(
         is_active=assignment.is_active,
         notes=assignment.notes,
         created_at=assignment.created_at,
-        program_name=program.name,
+        plan_name=plan.name,
         student_name=student.name,
     )
 
 
-@router.put("/programs/assignments/{assignment_id}", response_model=ProgramAssignmentResponse)
-async def update_program_assignment(
+@router.put("/plans/assignments/{assignment_id}", response_model=PlanAssignmentResponse)
+async def update_plan_assignment(
     assignment_id: UUID,
-    request: ProgramAssignmentUpdate,
+    request: PlanAssignmentUpdate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ProgramAssignmentResponse:
-    """Update a program assignment (trainer only)."""
+) -> PlanAssignmentResponse:
+    """Update a plan assignment (trainer only)."""
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
-    assignment = await workout_service.get_program_assignment_by_id(assignment_id)
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
     if not assignment:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1254,7 +1254,7 @@ async def update_program_assignment(
             detail="You can only edit your own assignments",
         )
 
-    updated = await workout_service.update_program_assignment(
+    updated = await workout_service.update_plan_assignment(
         assignment=assignment,
         start_date=request.start_date,
         end_date=request.end_date,
@@ -1264,9 +1264,9 @@ async def update_program_assignment(
 
     student = await user_service.get_user_by_id(updated.student_id)
 
-    return ProgramAssignmentResponse(
+    return PlanAssignmentResponse(
         id=updated.id,
-        program_id=updated.program_id,
+        plan_id=updated.plan_id,
         student_id=updated.student_id,
         trainer_id=updated.trainer_id,
         organization_id=updated.organization_id,
@@ -1275,7 +1275,7 @@ async def update_program_assignment(
         is_active=updated.is_active,
         notes=updated.notes,
         created_at=updated.created_at,
-        program_name=updated.program.name if updated.program else "",
+        plan_name=updated.plan.name if updated.plan else "",
         student_name=student.name if student else "",
     )
 

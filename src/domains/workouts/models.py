@@ -469,10 +469,10 @@ class TrainerAdjustment(Base, UUIDMixin):
         return f"<TrainerAdjustment session={self.session_id} exercise={self.exercise_id}>"
 
 
-class WorkoutProgram(Base, UUIDMixin, TimestampMixin):
-    """Workout Program - a structured collection of workouts (e.g., ABC split)."""
+class TrainingPlan(Base, UUIDMixin, TimestampMixin):
+    """Training Plan - a structured collection of workouts (e.g., ABC split)."""
 
-    __tablename__ = "workout_programs"
+    __tablename__ = "training_plans"
 
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -525,26 +525,26 @@ class WorkoutProgram(Base, UUIDMixin, TimestampMixin):
     # Relationships
     created_by: Mapped["User | None"] = relationship("User")
     organization: Mapped["Organization | None"] = relationship("Organization")
-    program_workouts: Mapped[list["ProgramWorkout"]] = relationship(
-        "ProgramWorkout",
-        back_populates="program",
-        order_by="ProgramWorkout.order",
+    plan_workouts: Mapped[list["PlanWorkout"]] = relationship(
+        "PlanWorkout",
+        back_populates="plan",
+        order_by="PlanWorkout.order",
         lazy="selectin",
         cascade="all, delete-orphan",
     )
 
     def __repr__(self) -> str:
-        return f"<WorkoutProgram {self.name}>"
+        return f"<TrainingPlan {self.name}>"
 
 
-class ProgramWorkout(Base, UUIDMixin):
-    """Linking table between programs and workouts with order and metadata."""
+class PlanWorkout(Base, UUIDMixin):
+    """Linking table between training plans and workouts with order and metadata."""
 
-    __tablename__ = "program_workouts"
+    __tablename__ = "plan_workouts"
 
-    program_id: Mapped[uuid.UUID] = mapped_column(
+    plan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("workout_programs.id", ondelete="CASCADE"),
+        ForeignKey("training_plans.id", ondelete="CASCADE"),
         nullable=False,
     )
     workout_id: Mapped[uuid.UUID] = mapped_column(
@@ -561,24 +561,24 @@ class ProgramWorkout(Base, UUIDMixin):
     )  # 0=Monday, 6=Sunday (optional)
 
     # Relationships
-    program: Mapped["WorkoutProgram"] = relationship(
-        "WorkoutProgram",
-        back_populates="program_workouts",
+    plan: Mapped["TrainingPlan"] = relationship(
+        "TrainingPlan",
+        back_populates="plan_workouts",
     )
     workout: Mapped["Workout"] = relationship("Workout", lazy="joined")
 
     def __repr__(self) -> str:
-        return f"<ProgramWorkout program={self.program_id} workout={self.workout_id} label={self.label}>"
+        return f"<PlanWorkout plan={self.plan_id} workout={self.workout_id} label={self.label}>"
 
 
-class ProgramAssignment(Base, UUIDMixin, TimestampMixin):
-    """Assignment of a workout program to a student by a trainer."""
+class PlanAssignment(Base, UUIDMixin, TimestampMixin):
+    """Assignment of a training plan to a student by a trainer."""
 
-    __tablename__ = "program_assignments"
+    __tablename__ = "plan_assignments"
 
-    program_id: Mapped[uuid.UUID] = mapped_column(
+    plan_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("workout_programs.id", ondelete="CASCADE"),
+        ForeignKey("training_plans.id", ondelete="CASCADE"),
         nullable=False,
     )
     student_id: Mapped[uuid.UUID] = mapped_column(
@@ -603,12 +603,12 @@ class ProgramAssignment(Base, UUIDMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    program: Mapped["WorkoutProgram"] = relationship("WorkoutProgram")
+    plan: Mapped["TrainingPlan"] = relationship("TrainingPlan")
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id])
     trainer: Mapped["User"] = relationship("User", foreign_keys=[trainer_id])
 
     def __repr__(self) -> str:
-        return f"<ProgramAssignment program={self.program_id} student={self.student_id}>"
+        return f"<PlanAssignment plan={self.plan_id} student={self.student_id}>"
 
 
 # Import for type hints

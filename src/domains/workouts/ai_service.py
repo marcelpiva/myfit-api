@@ -97,14 +97,14 @@ class AIExerciseService:
         context_section = ""
         if context:
             context_parts = []
-            if context.get("program_name"):
-                context_parts.append(f"PROGRAMA: {context['program_name']}")
+            if context.get("plan_name"):
+                context_parts.append(f"PLANO: {context['plan_name']}")
             if context.get("workout_name"):
                 context_parts.append(f"TREINO: {context['workout_name']}")
             if context.get("workout_label"):
                 context_parts.append(f"LABEL: {context['workout_label']}")
-            if context.get("program_split_type"):
-                context_parts.append(f"DIVISAO: {context['program_split_type']}")
+            if context.get("plan_split_type"):
+                context_parts.append(f"DIVISAO: {context['plan_split_type']}")
             if context.get("existing_exercises"):
                 context_parts.append(f"EXERCICIOS JA NO TREINO: {', '.join(context['existing_exercises'])}")
             if context_parts:
@@ -353,7 +353,7 @@ Responda APENAS com um JSON valido no formato:
             "message": message,
         }
 
-    async def generate_full_program(
+    async def generate_full_plan(
         self,
         available_exercises: list[dict],
         goal: WorkoutGoal,
@@ -366,7 +366,7 @@ Responda APENAS com um JSON valido no formato:
         duration_weeks: int = 8,
     ) -> dict:
         """
-        Generate a complete workout program using OpenAI.
+        Generate a complete training plan using OpenAI.
 
         Falls back to None if AI is not available (caller should use rule-based).
         """
@@ -374,7 +374,7 @@ Responda APENAS com um JSON valido no formato:
             return None
 
         try:
-            return await self._ai_generate_program(
+            return await self._ai_generate_plan(
                 available_exercises=available_exercises,
                 goal=goal,
                 difficulty=difficulty,
@@ -386,10 +386,10 @@ Responda APENAS com um JSON valido no formato:
                 duration_weeks=duration_weeks,
             )
         except Exception as e:
-            print(f"AI program generation failed: {e}")
+            print(f"AI plan generation failed: {e}")
             return None
 
-    async def _ai_generate_program(
+    async def _ai_generate_plan(
         self,
         available_exercises: list[dict],
         goal: WorkoutGoal,
@@ -401,7 +401,7 @@ Responda APENAS com um JSON valido no formato:
         preferences: str = "mixed",
         duration_weeks: int = 8,
     ) -> dict:
-        """Use OpenAI to generate a complete workout program."""
+        """Use OpenAI to generate a complete training plan."""
 
         # Build exercise list for prompt (limit to avoid token limits)
         exercise_list = "\n".join([
@@ -487,7 +487,7 @@ IMPORTANTE: Para nivel AVANCADO, CADA treino DEVE ter pelo menos:
 - 1 bi-set ou tri-set
 """
 
-        prompt = f"""Voce e um personal trainer experiente. Crie um programa de treino COMPLETO com as seguintes caracteristicas:
+        prompt = f"""Voce e um personal trainer experiente. Crie um plano de treino COMPLETO com as seguintes caracteristicas:
 
 OBJETIVO: {goal_descriptions.get(goal, goal.value)}
 NIVEL: {difficulty_descriptions.get(difficulty, difficulty.value)}
@@ -495,7 +495,7 @@ DIAS POR SEMANA: {days_per_week}
 DURACAO POR SESSAO: {minutes_per_session} minutos
 EQUIPAMENTO: {equipment}
 PREFERENCIA: {preferences}
-DURACAO DO PROGRAMA: {duration_weeks} semanas
+DURACAO DO PLANO: {duration_weeks} semanas
 DIVISAO SUGERIDA: {split_info.get(days_per_week, "Personalizado")}
 {injuries_text}
 
@@ -518,8 +518,8 @@ REGRAS GERAIS:
 
 Responda APENAS com um JSON valido no formato:
 {{
-  "name": "Nome do Programa",
-  "description": "Descricao breve do programa",
+  "name": "Nome do Plano",
+  "description": "Descricao breve do plano",
   "workouts": [
     {{
       "label": "A",
@@ -545,7 +545,7 @@ Responda APENAS com um JSON valido no formato:
       ]
     }}
   ],
-  "message": "Dica geral sobre o programa"
+  "message": "Dica geral sobre o plano"
 }}"""
 
         response = await self.client.chat.completions.create(

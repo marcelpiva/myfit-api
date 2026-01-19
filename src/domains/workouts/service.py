@@ -11,18 +11,18 @@ from src.domains.workouts.models import (
     Difficulty,
     Exercise,
     MuscleGroup,
-    ProgramAssignment,
-    ProgramWorkout,
+    PlanAssignment,
+    PlanWorkout,
     SessionMessage,
     SessionStatus,
     SplitType,
     TechniqueType,
     TrainerAdjustment,
+    TrainingPlan,
     Workout,
     WorkoutAssignment,
     WorkoutExercise,
     WorkoutGoal,
-    WorkoutProgram,
     WorkoutSession,
     WorkoutSessionSet,
 )
@@ -601,23 +601,23 @@ class WorkoutService:
         await self.db.refresh(session_set)
         return session_set
 
-    # Program operations
+    # Plan operations
 
-    async def get_program_by_id(self, program_id: uuid.UUID) -> WorkoutProgram | None:
-        """Get a program by ID with workouts."""
+    async def get_plan_by_id(self, plan_id: uuid.UUID) -> TrainingPlan | None:
+        """Get a plan by ID with workouts."""
         result = await self.db.execute(
-            select(WorkoutProgram)
-            .where(WorkoutProgram.id == program_id)
+            select(TrainingPlan)
+            .where(TrainingPlan.id == plan_id)
             .options(
-                selectinload(WorkoutProgram.program_workouts)
-                .selectinload(ProgramWorkout.workout)
+                selectinload(TrainingPlan.plan_workouts)
+                .selectinload(PlanWorkout.workout)
                 .selectinload(Workout.exercises)
                 .selectinload(WorkoutExercise.exercise)
             )
         )
         return result.scalar_one_or_none()
 
-    async def list_programs(
+    async def list_plans(
         self,
         user_id: uuid.UUID,
         organization_id: uuid.UUID | None = None,
@@ -625,34 +625,34 @@ class WorkoutService:
         search: str | None = None,
         limit: int = 50,
         offset: int = 0,
-    ) -> list[WorkoutProgram]:
-        """List programs for a user."""
-        query = select(WorkoutProgram).options(
-            selectinload(WorkoutProgram.program_workouts)
+    ) -> list[TrainingPlan]:
+        """List plans for a user."""
+        query = select(TrainingPlan).options(
+            selectinload(TrainingPlan.plan_workouts)
         )
 
         if templates_only:
             # Show public templates + user's own templates
             conditions = [
-                and_(WorkoutProgram.is_template == True, WorkoutProgram.is_public == True),
-                and_(WorkoutProgram.created_by_id == user_id, WorkoutProgram.is_template == True),
+                and_(TrainingPlan.is_template == True, TrainingPlan.is_public == True),
+                and_(TrainingPlan.created_by_id == user_id, TrainingPlan.is_template == True),
             ]
             if organization_id:
                 conditions.append(
-                    and_(WorkoutProgram.organization_id == organization_id, WorkoutProgram.is_template == True)
+                    and_(TrainingPlan.organization_id == organization_id, TrainingPlan.is_template == True)
                 )
             query = query.where(or_(*conditions))
         else:
-            # Show only user's own programs (not templates from others)
-            conditions = [WorkoutProgram.created_by_id == user_id]
+            # Show only user's own plans (not templates from others)
+            conditions = [TrainingPlan.created_by_id == user_id]
             if organization_id:
-                conditions.append(WorkoutProgram.organization_id == organization_id)
+                conditions.append(TrainingPlan.organization_id == organization_id)
             query = query.where(or_(*conditions))
 
         if search:
-            query = query.where(WorkoutProgram.name.ilike(f"%{search}%"))
+            query = query.where(TrainingPlan.name.ilike(f"%{search}%"))
 
-        query = query.order_by(WorkoutProgram.created_at.desc()).limit(limit).offset(offset)
+        query = query.order_by(TrainingPlan.created_at.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
@@ -670,50 +670,50 @@ class WorkoutService:
         from src.domains.users.models import User
 
         query = (
-            select(WorkoutProgram, User.name.label("creator_name"))
-            .join(User, WorkoutProgram.created_by_id == User.id, isouter=True)
-            .options(selectinload(WorkoutProgram.program_workouts))
+            select(TrainingPlan, User.name.label("creator_name"))
+            .join(User, TrainingPlan.created_by_id == User.id, isouter=True)
+            .options(selectinload(TrainingPlan.plan_workouts))
             .where(
-                WorkoutProgram.is_template == True,
-                WorkoutProgram.is_public == True,
+                TrainingPlan.is_template == True,
+                TrainingPlan.is_public == True,
                 or_(
-                    WorkoutProgram.created_by_id == None,  # System templates
-                    WorkoutProgram.created_by_id != exclude_user_id,  # Other users' templates
+                    TrainingPlan.created_by_id == None,  # System templates
+                    TrainingPlan.created_by_id != exclude_user_id,  # Other users' templates
                 ),
             )
         )
 
         if search:
-            query = query.where(WorkoutProgram.name.ilike(f"%{search}%"))
+            query = query.where(TrainingPlan.name.ilike(f"%{search}%"))
         if goal:
-            query = query.where(WorkoutProgram.goal == goal)
+            query = query.where(TrainingPlan.goal == goal)
         if difficulty:
-            query = query.where(WorkoutProgram.difficulty == difficulty)
+            query = query.where(TrainingPlan.difficulty == difficulty)
         if split_type:
-            query = query.where(WorkoutProgram.split_type == split_type)
+            query = query.where(TrainingPlan.split_type == split_type)
 
-        query = query.order_by(WorkoutProgram.created_at.desc()).limit(limit).offset(offset)
+        query = query.order_by(TrainingPlan.created_at.desc()).limit(limit).offset(offset)
         result = await self.db.execute(query)
 
         templates = []
         for row in result.all():
-            program = row[0]
+            plan = row[0]
             creator_name = row[1]
             templates.append({
-                "id": program.id,
-                "name": program.name,
-                "goal": program.goal,
-                "difficulty": program.difficulty,
-                "split_type": program.split_type,
-                "duration_weeks": program.duration_weeks,
-                "workout_count": len(program.program_workouts),
+                "id": plan.id,
+                "name": plan.name,
+                "goal": plan.goal,
+                "difficulty": plan.difficulty,
+                "split_type": plan.split_type,
+                "duration_weeks": plan.duration_weeks,
+                "workout_count": len(plan.plan_workouts),
                 "creator_name": creator_name,
-                "created_by_id": program.created_by_id,
-                "created_at": program.created_at,
+                "created_by_id": plan.created_by_id,
+                "created_at": plan.created_at,
             })
         return templates
 
-    async def generate_program_with_ai(
+    async def generate_plan_with_ai(
         self,
         user_id: uuid.UUID,
         goal: WorkoutGoal,
@@ -725,7 +725,7 @@ class WorkoutService:
         preferences: str = "mixed",
         duration_weeks: int = 8,
     ) -> dict:
-        """Generate a workout program structure using AI/rules-based logic."""
+        """Generate a training plan structure using AI/rules-based logic."""
         # Determine split type based on days per week
         split_type = self._determine_split_type(days_per_week)
 
@@ -765,7 +765,7 @@ class WorkoutService:
                 "target_muscles": workout_info["muscles"],
             })
 
-        # Generate program name
+        # Generate plan name
         goal_names = {
             WorkoutGoal.HYPERTROPHY: "Hipertrofia",
             WorkoutGoal.STRENGTH: "Força",
@@ -774,17 +774,17 @@ class WorkoutService:
             WorkoutGoal.GENERAL_FITNESS: "Condicionamento",
             WorkoutGoal.FUNCTIONAL: "Funcional",
         }
-        program_name = f"Programa {goal_names.get(goal, 'Treino')} {days_per_week}x"
+        plan_name = f"Plano {goal_names.get(goal, 'Treino')} {days_per_week}x"
 
         return {
-            "name": program_name,
-            "description": f"Programa de {duration_weeks} semanas focado em {goal_names.get(goal, 'treino').lower()}.",
+            "name": plan_name,
+            "description": f"Plano de {duration_weeks} semanas focado em {goal_names.get(goal, 'treino').lower()}.",
             "goal": goal,
             "difficulty": difficulty,
             "split_type": split_type,
             "duration_weeks": duration_weeks,
             "workouts": workouts,
-            "message": "Programa gerado com base nas suas preferências. Revise os treinos e faça ajustes conforme necessário.",
+            "message": "Plano gerado com base nas suas preferências. Revise os treinos e faça ajustes conforme necessário.",
         }
 
     def _determine_split_type(self, days_per_week: int) -> SplitType:
@@ -1035,7 +1035,7 @@ class WorkoutService:
 
         return selected
 
-    async def create_program(
+    async def create_plan(
         self,
         created_by_id: uuid.UUID,
         name: str,
@@ -1047,9 +1047,9 @@ class WorkoutService:
         is_template: bool = False,
         is_public: bool = False,
         organization_id: uuid.UUID | None = None,
-    ) -> WorkoutProgram:
-        """Create a new workout program."""
-        program = WorkoutProgram(
+    ) -> TrainingPlan:
+        """Create a new training plan."""
+        plan = TrainingPlan(
             name=name,
             description=description,
             goal=goal,
@@ -1061,14 +1061,14 @@ class WorkoutService:
             created_by_id=created_by_id,
             organization_id=organization_id,
         )
-        self.db.add(program)
+        self.db.add(plan)
         await self.db.commit()
-        await self.db.refresh(program)
-        return program
+        await self.db.refresh(plan)
+        return plan
 
-    async def update_program(
+    async def update_plan(
         self,
-        program: WorkoutProgram,
+        plan: TrainingPlan,
         name: str | None = None,
         description: str | None = None,
         goal: WorkoutGoal | None = None,
@@ -1086,135 +1086,135 @@ class WorkoutService:
         fat_grams: int | None = None,
         meals_per_day: int | None = None,
         diet_notes: str | None = None,
-    ) -> WorkoutProgram:
-        """Update a program."""
+    ) -> TrainingPlan:
+        """Update a plan."""
         if name is not None:
-            program.name = name
+            plan.name = name
         if description is not None:
-            program.description = description
+            plan.description = description
         if goal is not None:
-            program.goal = goal
+            plan.goal = goal
         if difficulty is not None:
-            program.difficulty = difficulty
+            plan.difficulty = difficulty
         if split_type is not None:
-            program.split_type = split_type
+            plan.split_type = split_type
         if duration_weeks is not None:
-            program.duration_weeks = duration_weeks
+            plan.duration_weeks = duration_weeks
         if is_template is not None:
-            program.is_template = is_template
+            plan.is_template = is_template
         if is_public is not None:
-            program.is_public = is_public
+            plan.is_public = is_public
         # Diet fields
         if include_diet is not None:
-            program.include_diet = include_diet
+            plan.include_diet = include_diet
         if diet_type is not None:
-            program.diet_type = diet_type
+            plan.diet_type = diet_type
         if daily_calories is not None:
-            program.daily_calories = daily_calories
+            plan.daily_calories = daily_calories
         if protein_grams is not None:
-            program.protein_grams = protein_grams
+            plan.protein_grams = protein_grams
         if carbs_grams is not None:
-            program.carbs_grams = carbs_grams
+            plan.carbs_grams = carbs_grams
         if fat_grams is not None:
-            program.fat_grams = fat_grams
+            plan.fat_grams = fat_grams
         if meals_per_day is not None:
-            program.meals_per_day = meals_per_day
+            plan.meals_per_day = meals_per_day
         if diet_notes is not None:
-            program.diet_notes = diet_notes
+            plan.diet_notes = diet_notes
 
         await self.db.commit()
-        await self.db.refresh(program)
-        return program
+        await self.db.refresh(plan)
+        return plan
 
-    async def delete_program(self, program: WorkoutProgram) -> None:
-        """Delete a program."""
-        await self.db.delete(program)
+    async def delete_plan(self, plan: TrainingPlan) -> None:
+        """Delete a plan."""
+        await self.db.delete(plan)
         await self.db.commit()
 
-    async def add_workout_to_program(
+    async def add_workout_to_plan(
         self,
-        program_id: uuid.UUID,
+        plan_id: uuid.UUID,
         workout_id: uuid.UUID,
         label: str = "A",
         order: int = 0,
         day_of_week: int | None = None,
-    ) -> ProgramWorkout:
-        """Add a workout to a program."""
-        program_workout = ProgramWorkout(
-            program_id=program_id,
+    ) -> PlanWorkout:
+        """Add a workout to a plan."""
+        plan_workout = PlanWorkout(
+            plan_id=plan_id,
             workout_id=workout_id,
             label=label,
             order=order,
             day_of_week=day_of_week,
         )
-        self.db.add(program_workout)
+        self.db.add(plan_workout)
         await self.db.commit()
-        await self.db.refresh(program_workout)
-        return program_workout
+        await self.db.refresh(plan_workout)
+        return plan_workout
 
-    async def remove_workout_from_program(
+    async def remove_workout_from_plan(
         self,
-        program_workout_id: uuid.UUID,
+        plan_workout_id: uuid.UUID,
     ) -> None:
-        """Remove a workout from a program."""
+        """Remove a workout from a plan."""
         result = await self.db.execute(
-            select(ProgramWorkout).where(ProgramWorkout.id == program_workout_id)
+            select(PlanWorkout).where(PlanWorkout.id == plan_workout_id)
         )
-        program_workout = result.scalar_one_or_none()
-        if program_workout:
-            await self.db.delete(program_workout)
+        plan_workout = result.scalar_one_or_none()
+        if plan_workout:
+            await self.db.delete(plan_workout)
             await self.db.commit()
 
-    async def duplicate_program(
+    async def duplicate_plan(
         self,
-        program: WorkoutProgram,
+        plan: TrainingPlan,
         new_owner_id: uuid.UUID,
         new_name: str | None = None,
         duplicate_workouts: bool = True,
         source_template_id: uuid.UUID | None = None,
-    ) -> WorkoutProgram:
-        """Duplicate a program for another user.
+    ) -> TrainingPlan:
+        """Duplicate a plan for another user.
 
         Args:
             source_template_id: If provided, marks this as an import from catalog.
-                               Pass the original program's ID to track the import origin.
+                               Pass the original plan's ID to track the import origin.
         """
         # Generate a numbered name if no custom name provided
         if not new_name:
-            existing_programs = await self.list_programs(
+            existing_plans = await self.list_plans(
                 user_id=new_owner_id,
                 limit=500,
             )
-            existing_names = [p.name for p in existing_programs]
-            new_name = self._get_next_copy_name(program.name, existing_names)
+            existing_names = [p.name for p in existing_plans]
+            new_name = self._get_next_copy_name(plan.name, existing_names)
 
-        new_program = WorkoutProgram(
+        new_plan = TrainingPlan(
             name=new_name,
-            description=program.description,
-            goal=program.goal,
-            difficulty=program.difficulty,
-            split_type=program.split_type,
-            duration_weeks=program.duration_weeks,
+            description=plan.description,
+            goal=plan.goal,
+            difficulty=plan.difficulty,
+            split_type=plan.split_type,
+            duration_weeks=plan.duration_weeks,
             # Copy diet configuration
-            include_diet=program.include_diet,
-            diet_type=program.diet_type,
-            daily_calories=program.daily_calories,
-            protein_grams=program.protein_grams,
-            carbs_grams=program.carbs_grams,
-            fat_grams=program.fat_grams,
-            meals_per_day=program.meals_per_day,
-            diet_notes=program.diet_notes,
+            include_diet=plan.include_diet,
+            diet_type=plan.diet_type,
+            daily_calories=plan.daily_calories,
+            protein_grams=plan.protein_grams,
+            carbs_grams=plan.carbs_grams,
+            fat_grams=plan.fat_grams,
+            meals_per_day=plan.meals_per_day,
+            diet_notes=plan.diet_notes,
             # Flags
             is_template=False,
             is_public=False,
             created_by_id=new_owner_id,
             source_template_id=source_template_id,  # Track import origin if provided
         )
-        self.db.add(new_program)
+        self.db.add(new_plan)
         await self.db.flush()
 
-        # Copy program workouts (and optionally duplicate workouts)
-        for pw in program.program_workouts:
+        # Copy plan workouts (and optionally duplicate workouts)
+        for pw in plan.plan_workouts:
             if duplicate_workouts:
                 # Duplicate the workout itself (keeping the original name)
                 new_workout = await self.duplicate_workout(
@@ -1227,8 +1227,8 @@ class WorkoutService:
                 # Reference the same workout
                 workout_id = pw.workout_id
 
-            new_pw = ProgramWorkout(
-                program_id=new_program.id,
+            new_pw = PlanWorkout(
+                plan_id=new_plan.id,
                 workout_id=workout_id,
                 label=pw.label,
                 order=pw.order,
@@ -1237,71 +1237,71 @@ class WorkoutService:
             self.db.add(new_pw)
 
         await self.db.commit()
-        await self.db.refresh(new_program)
-        return new_program
+        await self.db.refresh(new_plan)
+        return new_plan
 
-    # Program assignment operations
+    # Plan assignment operations
 
-    async def get_program_assignment_by_id(
+    async def get_plan_assignment_by_id(
         self,
         assignment_id: uuid.UUID,
-    ) -> ProgramAssignment | None:
-        """Get a program assignment by ID."""
+    ) -> PlanAssignment | None:
+        """Get a plan assignment by ID."""
         result = await self.db.execute(
-            select(ProgramAssignment)
-            .where(ProgramAssignment.id == assignment_id)
-            .options(selectinload(ProgramAssignment.program))
+            select(PlanAssignment)
+            .where(PlanAssignment.id == assignment_id)
+            .options(selectinload(PlanAssignment.plan))
         )
         return result.scalar_one_or_none()
 
-    async def list_student_program_assignments(
+    async def list_student_plan_assignments(
         self,
         student_id: uuid.UUID,
         active_only: bool = True,
-    ) -> list[ProgramAssignment]:
-        """List program assignments for a student."""
-        query = select(ProgramAssignment).where(
-            ProgramAssignment.student_id == student_id
+    ) -> list[PlanAssignment]:
+        """List plan assignments for a student."""
+        query = select(PlanAssignment).where(
+            PlanAssignment.student_id == student_id
         ).options(
-            selectinload(ProgramAssignment.program)
-            .selectinload(WorkoutProgram.program_workouts)
+            selectinload(PlanAssignment.plan)
+            .selectinload(TrainingPlan.plan_workouts)
         )
 
         if active_only:
-            query = query.where(ProgramAssignment.is_active == True)
+            query = query.where(PlanAssignment.is_active == True)
 
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def list_trainer_program_assignments(
+    async def list_trainer_plan_assignments(
         self,
         trainer_id: uuid.UUID,
         active_only: bool = True,
-    ) -> list[ProgramAssignment]:
-        """List program assignments created by a trainer."""
-        query = select(ProgramAssignment).where(
-            ProgramAssignment.trainer_id == trainer_id
-        ).options(selectinload(ProgramAssignment.program))
+    ) -> list[PlanAssignment]:
+        """List plan assignments created by a trainer."""
+        query = select(PlanAssignment).where(
+            PlanAssignment.trainer_id == trainer_id
+        ).options(selectinload(PlanAssignment.plan))
 
         if active_only:
-            query = query.where(ProgramAssignment.is_active == True)
+            query = query.where(PlanAssignment.is_active == True)
 
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
-    async def create_program_assignment(
+    async def create_plan_assignment(
         self,
-        program_id: uuid.UUID,
+        plan_id: uuid.UUID,
         student_id: uuid.UUID,
         trainer_id: uuid.UUID,
         start_date: date,
         end_date: date | None = None,
         notes: str | None = None,
         organization_id: uuid.UUID | None = None,
-    ) -> ProgramAssignment:
-        """Create a program assignment."""
-        assignment = ProgramAssignment(
-            program_id=program_id,
+    ) -> PlanAssignment:
+        """Create a plan assignment."""
+        assignment = PlanAssignment(
+            plan_id=plan_id,
             student_id=student_id,
             trainer_id=trainer_id,
             start_date=start_date,
@@ -1314,15 +1314,15 @@ class WorkoutService:
         await self.db.refresh(assignment)
         return assignment
 
-    async def update_program_assignment(
+    async def update_plan_assignment(
         self,
-        assignment: ProgramAssignment,
+        assignment: PlanAssignment,
         start_date: date | None = None,
         end_date: date | None = None,
         is_active: bool | None = None,
         notes: str | None = None,
-    ) -> ProgramAssignment:
-        """Update a program assignment."""
+    ) -> PlanAssignment:
+        """Update a plan assignment."""
         if start_date is not None:
             assignment.start_date = start_date
         if end_date is not None:
