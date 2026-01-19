@@ -224,6 +224,38 @@ class WorkoutExercise(Base, UUIDMixin):
     )
     exercise: Mapped["Exercise"] = relationship("Exercise", lazy="joined")
 
+    @property
+    def estimated_seconds(self) -> int:
+        """Calculate estimated time for this exercise in seconds."""
+        # Base execution time per set (45s average)
+        exec_time_per_set = 45
+
+        # Adjust for isometric holds
+        if self.isometric_seconds:
+            exec_time_per_set = self.isometric_seconds + 10  # hold + setup time
+
+        # Adjust for technique
+        technique = self.technique_type.value if self.technique_type else "normal"
+        if technique == "dropset":
+            exec_time_per_set = 90  # longer execution, multiple drops
+            rest_between = 0
+        elif technique == "rest_pause":
+            exec_time_per_set = 60  # includes 10-15s micro-pauses
+            rest_between = self.rest_seconds
+        elif technique == "cluster":
+            exec_time_per_set = 75  # fractioned sets with intra-set rest
+            rest_between = self.rest_seconds
+        elif technique in ("biset", "superset", "triset", "giantset"):
+            # For grouped exercises, rest is only counted on last exercise
+            # The first exercises have rest_seconds = 0
+            rest_between = self.rest_seconds
+        else:
+            rest_between = self.rest_seconds
+
+        # Total time: execution + rest between sets (not after last set)
+        total = (self.sets * exec_time_per_set) + ((self.sets - 1) * rest_between)
+        return total
+
     def __repr__(self) -> str:
         return f"<WorkoutExercise workout={self.workout_id} exercise={self.exercise_id}>"
 

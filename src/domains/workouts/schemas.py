@@ -94,6 +94,7 @@ class WorkoutExerciseResponse(BaseModel):
     technique_type: TechniqueType = TechniqueType.NORMAL
     exercise_group_id: str | None = None
     exercise_group_order: int = 0
+    estimated_seconds: int = Field(default=0, description="Estimated time in seconds for this exercise")
     exercise: ExerciseResponse
 
     class Config:
