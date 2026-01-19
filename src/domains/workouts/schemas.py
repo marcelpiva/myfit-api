@@ -69,6 +69,7 @@ class WorkoutExerciseInput(BaseModel):
     superset_with: UUID | None = None
     # Advanced technique fields
     execution_instructions: str | None = None
+    group_instructions: str | None = None
     isometric_seconds: int | None = Field(None, ge=0, le=60)
     technique_type: TechniqueType = TechniqueType.NORMAL
     exercise_group_id: str | None = Field(None, max_length=50)
@@ -88,6 +89,7 @@ class WorkoutExerciseResponse(BaseModel):
     superset_with: UUID | None = None
     # Advanced technique fields
     execution_instructions: str | None = None
+    group_instructions: str | None = None
     isometric_seconds: int | None = None
     technique_type: TechniqueType = TechniqueType.NORMAL
     exercise_group_id: str | None = None
@@ -408,6 +410,8 @@ class ProgramWorkoutInput(BaseModel):
     # For inline workout creation
     workout_name: str | None = Field(None, min_length=2, max_length=255)
     workout_exercises: list[WorkoutExerciseInput] | None = None
+    # Target muscle groups for this workout
+    muscle_groups: list[str] | None = Field(default=None, description="Target muscle groups")
 
 
 class ProgramWorkoutResponse(BaseModel):
@@ -470,6 +474,7 @@ class ProgramUpdate(BaseModel):
     # Flags
     is_template: bool | None = None
     is_public: bool | None = None
+    workouts: list[ProgramWorkoutInput] | None = None
 
 
 class ProgramResponse(BaseModel):
@@ -612,6 +617,18 @@ class ProgramAssignmentResponse(BaseModel):
 
 # AI Suggestion schemas
 
+class WorkoutContextInfo(BaseModel):
+    """Workout context information for AI suggestions."""
+
+    workout_name: str | None = Field(default=None, description="Name of the workout")
+    workout_label: str | None = Field(default=None, description="Workout label (A, B, C, etc.)")
+    program_name: str | None = Field(default=None, description="Name of the program")
+    program_goal: WorkoutGoal | None = Field(default=None, description="Program training goal")
+    program_split_type: SplitType | None = Field(default=None, description="Program split type")
+    existing_exercises: list[str] | None = Field(default=None, description="Existing exercise names in workout")
+    existing_exercise_count: int = Field(default=0, description="Number of exercises already in workout")
+
+
 class ExerciseSuggestionRequest(BaseModel):
     """Request for AI exercise suggestions."""
 
@@ -620,6 +637,9 @@ class ExerciseSuggestionRequest(BaseModel):
     difficulty: Difficulty = Field(default=Difficulty.INTERMEDIATE, description="Difficulty level")
     count: int = Field(default=6, ge=1, le=12, description="Number of exercises to suggest")
     exclude_exercise_ids: list[UUID] | None = Field(default=None, description="Exercises to exclude")
+    # Workout context
+    context: WorkoutContextInfo | None = Field(default=None, description="Workout/program context")
+    allow_advanced_techniques: bool = Field(default=True, description="Allow suggesting advanced techniques")
 
 
 class SuggestedExercise(BaseModel):
@@ -633,6 +653,12 @@ class SuggestedExercise(BaseModel):
     rest_seconds: int = Field(default=60, ge=0, le=300)
     order: int = 0
     reason: str | None = Field(default=None, description="AI reason for this suggestion")
+    # Advanced technique fields
+    technique_type: TechniqueType = Field(default=TechniqueType.NORMAL, description="Exercise technique type")
+    exercise_group_id: str | None = Field(default=None, description="Group ID for bi-set, tri-set, etc.")
+    exercise_group_order: int = Field(default=0, description="Order within group")
+    execution_instructions: str | None = Field(default=None, description="Execution instructions")
+    isometric_seconds: int | None = Field(default=None, description="Isometric hold duration")
 
 
 class ExerciseSuggestionResponse(BaseModel):
@@ -682,6 +708,7 @@ class AIGeneratedWorkout(BaseModel):
     label: str
     name: str
     order: int
+    target_muscles: list[str] = Field(default_factory=list, description="Target muscle groups for this workout")
     exercises: list[SuggestedExercise]
 
 

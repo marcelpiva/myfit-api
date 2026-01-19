@@ -77,9 +77,10 @@ class TechniqueType(str, enum.Enum):
 
     NORMAL = "normal"
     SUPERSET = "superset"
-    DROPSET = "dropset"
+    BISET = "biset"
     TRISET = "triset"
     GIANTSET = "giantset"
+    DROPSET = "dropset"
     REST_PAUSE = "rest_pause"
     CLUSTER = "cluster"
 
@@ -165,11 +166,13 @@ class Workout(Base, UUIDMixin, TimestampMixin):
         back_populates="workout",
         order_by="WorkoutExercise.order",
         lazy="selectin",
+        passive_deletes=True,  # Let DB handle CASCADE DELETE
     )
     assignments: Mapped[list["WorkoutAssignment"]] = relationship(
         "WorkoutAssignment",
         back_populates="workout",
         lazy="selectin",
+        passive_deletes=True,  # Let DB handle CASCADE DELETE
     )
 
     def __repr__(self) -> str:
@@ -204,6 +207,7 @@ class WorkoutExercise(Base, UUIDMixin):
 
     # Advanced technique fields
     execution_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
+    group_instructions: Mapped[str | None] = mapped_column(Text, nullable=True)
     isometric_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)
     technique_type: Mapped[TechniqueType] = mapped_column(
         Enum(TechniqueType, name="technique_type_enum", values_callable=lambda x: [e.value for e in x]),

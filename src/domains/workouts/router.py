@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.service import UserService
-from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 from src.domains.workouts.schemas import (
     ActiveSessionResponse,
     AIGenerateProgramRequest,
@@ -219,6 +219,19 @@ async def suggest_exercises(
     # Get AI suggestions
     exclude_ids = [str(eid) for eid in request.exclude_exercise_ids] if request.exclude_exercise_ids else None
 
+    # Build context dict if provided
+    context_dict = None
+    if request.context:
+        context_dict = {
+            "workout_name": request.context.workout_name,
+            "workout_label": request.context.workout_label,
+            "program_name": request.context.program_name,
+            "program_goal": request.context.program_goal.value if request.context.program_goal else None,
+            "program_split_type": request.context.program_split_type.value if request.context.program_split_type else None,
+            "existing_exercises": request.context.existing_exercises,
+            "existing_exercise_count": request.context.existing_exercise_count,
+        }
+
     result = await ai_service.suggest_exercises(
         available_exercises=exercises_data,
         muscle_groups=request.muscle_groups,
@@ -226,6 +239,8 @@ async def suggest_exercises(
         difficulty=request.difficulty,
         count=request.count,
         exclude_ids=exclude_ids,
+        context=context_dict,
+        allow_advanced_techniques=request.allow_advanced_techniques,
     )
 
     # Convert to response format
@@ -239,6 +254,11 @@ async def suggest_exercises(
             rest_seconds=s["rest_seconds"],
             order=s["order"],
             reason=s.get("reason"),
+            technique_type=TechniqueType(s.get("technique_type", "normal")),
+            exercise_group_id=s.get("exercise_group_id"),
+            exercise_group_order=s.get("exercise_group_order", 0),
+            execution_instructions=s.get("execution_instructions"),
+            isometric_seconds=s.get("isometric_seconds"),
         )
         for s in result["suggestions"]
     ]
@@ -669,8 +689,41 @@ async def generate_program_with_ai(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AIGenerateProgramResponse:
-    """Generate a workout program using AI based on questionnaire answers."""
+    """Generate a workout program using AI (OpenAI) based on questionnaire answers."""
     workout_service = WorkoutService(db)
+
+    # Get available exercises for AI to use
+    all_exercises = await workout_service.list_exercises(user_id=current_user.id, limit=500)
+    exercise_dicts = [
+        {
+            "id": str(ex.id),
+            "name": ex.name,
+            "muscle_group": ex.muscle_group.value if ex.muscle_group else "other",
+        }
+        for ex in all_exercises
+    ]
+
+    # Try AI-based generation first (100% AI with OpenAI)
+    from src.domains.workouts.ai_service import AIExerciseService
+    ai_service = AIExerciseService()
+
+    ai_result = await ai_service.generate_full_program(
+        available_exercises=exercise_dicts,
+        goal=request.goal,
+        difficulty=request.difficulty,
+        days_per_week=request.days_per_week,
+        minutes_per_session=request.minutes_per_session,
+        equipment=request.equipment,
+        injuries=request.injuries,
+        preferences=request.preferences,
+        duration_weeks=request.duration_weeks,
+    )
+
+    if ai_result:
+        # AI generation succeeded - return the result
+        return AIGenerateProgramResponse(**ai_result)
+
+    # Fallback to rule-based generation if AI is not available
     result = await workout_service.generate_program_with_ai(
         user_id=current_user.id,
         goal=request.goal,
@@ -755,6 +808,7 @@ async def create_program(
                     created_by_id=current_user.id,
                     name=pw.workout_name,
                     difficulty=request.difficulty,
+                    target_muscles=pw.muscle_groups,
                 )
                 # Add exercises to new workout if provided
                 if pw.workout_exercises:
@@ -770,6 +824,7 @@ async def create_program(
                             superset_with=ex.superset_with,
                             # Advanced technique fields
                             execution_instructions=ex.execution_instructions,
+                            group_instructions=ex.group_instructions,
                             isometric_seconds=ex.isometric_seconds,
                             technique_type=ex.technique_type,
                             exercise_group_id=ex.exercise_group_id,
@@ -823,7 +878,82 @@ async def update_program(
         duration_weeks=request.duration_weeks,
         is_template=request.is_template,
         is_public=request.is_public,
+        # Diet fields
+        include_diet=request.include_diet,
+        diet_type=request.diet_type,
+        daily_calories=request.daily_calories,
+        protein_grams=request.protein_grams,
+        carbs_grams=request.carbs_grams,
+        fat_grams=request.fat_grams,
+        meals_per_day=request.meals_per_day,
+        diet_notes=request.diet_notes,
     )
+
+    # Update workouts if provided
+    if request.workouts is not None:
+        # Get existing program_workouts and their workout IDs
+        existing_workout_ids = [pw.workout_id for pw in program.program_workouts]
+
+        # Delete all existing program_workouts
+        for pw in list(program.program_workouts):
+            await workout_service.remove_workout_from_program(pw.id)
+
+        # Delete the old workouts (they were created specifically for this program)
+        for workout_id in existing_workout_ids:
+            workout = await workout_service.get_workout_by_id(workout_id)
+            if workout:
+                await workout_service.delete_workout(workout)
+
+        # Create new workouts based on the provided data
+        for pw in request.workouts:
+            if pw.workout_id:
+                # Use existing workout
+                await workout_service.add_workout_to_program(
+                    program_id=program_id,
+                    workout_id=pw.workout_id,
+                    label=pw.label,
+                    order=pw.order,
+                    day_of_week=pw.day_of_week,
+                )
+            elif pw.workout_name:
+                # Create new workout inline
+                new_workout = await workout_service.create_workout(
+                    created_by_id=current_user.id,
+                    name=pw.workout_name,
+                    difficulty=request.difficulty or program.difficulty,
+                    target_muscles=pw.muscle_groups,
+                )
+                # Add exercises to new workout if provided
+                if pw.workout_exercises:
+                    for ex in pw.workout_exercises:
+                        await workout_service.add_exercise_to_workout(
+                            workout_id=new_workout.id,
+                            exercise_id=ex.exercise_id,
+                            order=ex.order,
+                            sets=ex.sets,
+                            reps=ex.reps,
+                            rest_seconds=ex.rest_seconds,
+                            notes=ex.notes,
+                            superset_with=ex.superset_with,
+                            # Advanced technique fields
+                            execution_instructions=ex.execution_instructions,
+                            group_instructions=ex.group_instructions,
+                            isometric_seconds=ex.isometric_seconds,
+                            technique_type=ex.technique_type,
+                            exercise_group_id=ex.exercise_group_id,
+                            exercise_group_order=ex.exercise_group_order,
+                        )
+                # Add to program
+                await workout_service.add_workout_to_program(
+                    program_id=program_id,
+                    workout_id=new_workout.id,
+                    label=pw.label,
+                    order=pw.order,
+                    day_of_week=pw.day_of_week,
+                )
+
+        # Refresh to get updated workouts
+        updated = await workout_service.get_program_by_id(program_id)
 
     return ProgramResponse.model_validate(updated)
 
@@ -860,8 +990,13 @@ async def duplicate_program(
     db: Annotated[AsyncSession, Depends(get_db)],
     duplicate_workouts: Annotated[bool, Query()] = True,
     new_name: Annotated[str | None, Query(max_length=100)] = None,
+    from_catalog: Annotated[bool, Query()] = False,
 ) -> ProgramResponse:
-    """Duplicate a program for the current user."""
+    """Duplicate a program for the current user.
+
+    Args:
+        from_catalog: If True, marks this as a catalog import and tracks the source template.
+    """
     workout_service = WorkoutService(db)
     program = await workout_service.get_program_by_id(program_id)
 
@@ -878,11 +1013,15 @@ async def duplicate_program(
             detail="Access denied",
         )
 
+    # If importing from catalog, track the source template
+    source_template_id = program_id if from_catalog else None
+
     new_program = await workout_service.duplicate_program(
         program=program,
         new_owner_id=current_user.id,
         new_name=new_name,
         duplicate_workouts=duplicate_workouts,
+        source_template_id=source_template_id,
     )
 
     # Refresh to get full data
@@ -927,6 +1066,7 @@ async def add_workout_to_program(
             created_by_id=current_user.id,
             name=request.workout_name,
             difficulty=program.difficulty,
+            target_muscles=request.muscle_groups,
         )
         if request.workout_exercises:
             for ex in request.workout_exercises:
@@ -941,6 +1081,7 @@ async def add_workout_to_program(
                     superset_with=ex.superset_with,
                     # Advanced technique fields
                     execution_instructions=ex.execution_instructions,
+                    group_instructions=ex.group_instructions,
                     isometric_seconds=ex.isometric_seconds,
                     technique_type=ex.technique_type,
                     exercise_group_id=ex.exercise_group_id,
@@ -1236,6 +1377,7 @@ async def create_workout(
                 superset_with=ex.superset_with,
                 # Advanced technique fields
                 execution_instructions=ex.execution_instructions,
+                group_instructions=ex.group_instructions,
                 isometric_seconds=ex.isometric_seconds,
                 technique_type=ex.technique_type,
                 exercise_group_id=ex.exercise_group_id,
@@ -1375,6 +1517,7 @@ async def add_exercise(
         superset_with=request.superset_with,
         # Advanced technique fields
         execution_instructions=request.execution_instructions,
+        group_instructions=request.group_instructions,
         isometric_seconds=request.isometric_seconds,
         technique_type=request.technique_type,
         exercise_group_id=request.exercise_group_id,

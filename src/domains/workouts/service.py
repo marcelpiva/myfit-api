@@ -3,7 +3,7 @@ import re
 import uuid
 from datetime import date, datetime, timezone
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -295,7 +295,11 @@ class WorkoutService:
         return workout
 
     async def delete_workout(self, workout: Workout) -> None:
-        """Delete a workout."""
+        """Delete a workout and its related exercises."""
+        # Delete related exercises first to avoid ORM cascade issues
+        await self.db.execute(
+            delete(WorkoutExercise).where(WorkoutExercise.workout_id == workout.id)
+        )
         await self.db.delete(workout)
         await self.db.commit()
 
@@ -311,6 +315,7 @@ class WorkoutService:
         superset_with: uuid.UUID | None = None,
         # Advanced technique fields
         execution_instructions: str | None = None,
+        group_instructions: str | None = None,
         isometric_seconds: int | None = None,
         technique_type: TechniqueType = TechniqueType.NORMAL,
         exercise_group_id: str | None = None,
@@ -328,6 +333,7 @@ class WorkoutService:
             superset_with=superset_with,
             # Advanced technique fields
             execution_instructions=execution_instructions,
+            group_instructions=group_instructions,
             isometric_seconds=isometric_seconds,
             technique_type=technique_type,
             exercise_group_id=exercise_group_id,
@@ -394,6 +400,7 @@ class WorkoutService:
                 superset_with=we.superset_with,
                 # Advanced technique fields
                 execution_instructions=we.execution_instructions,
+                group_instructions=we.group_instructions,
                 isometric_seconds=we.isometric_seconds,
                 technique_type=we.technique_type,
                 exercise_group_id=we.exercise_group_id,
@@ -755,6 +762,7 @@ class WorkoutService:
                 "name": workout_info["name"],
                 "order": idx,
                 "exercises": exercises,
+                "target_muscles": workout_info["muscles"],
             })
 
         # Generate program name
@@ -764,7 +772,7 @@ class WorkoutService:
             WorkoutGoal.FAT_LOSS: "Emagrecimento",
             WorkoutGoal.ENDURANCE: "Resistência",
             WorkoutGoal.GENERAL_FITNESS: "Condicionamento",
-            WorkoutGoal.SPORT_SPECIFIC: "Desempenho",
+            WorkoutGoal.FUNCTIONAL: "Funcional",
         }
         program_name = f"Programa {goal_names.get(goal, 'Treino')} {days_per_week}x"
 
@@ -790,7 +798,7 @@ class WorkoutService:
         elif days_per_week == 5:
             return SplitType.ABCDE
         else:
-            return SplitType.PPL
+            return SplitType.PUSH_PULL_LEGS
 
     def _generate_workout_structure(
         self,
@@ -810,7 +818,7 @@ class WorkoutService:
                 {"label": "C", "name": "Treino Superior B", "muscles": ["chest", "back", "shoulders", "arms"]},
                 {"label": "D", "name": "Treino Inferior B", "muscles": ["legs", "glutes", "calves"]},
             ],
-            SplitType.PPL: [
+            SplitType.PUSH_PULL_LEGS: [
                 {"label": "A", "name": "Treino Push (Empurrar)", "muscles": ["chest", "shoulders", "triceps"]},
                 {"label": "B", "name": "Treino Pull (Puxar)", "muscles": ["back", "biceps"]},
                 {"label": "C", "name": "Treino Legs (Pernas)", "muscles": ["legs", "glutes", "calves"]},
@@ -867,7 +875,7 @@ class WorkoutService:
             injury_mapping = {
                 "shoulder": [MuscleGroup.SHOULDERS],
                 "knee": [MuscleGroup.QUADRICEPS, MuscleGroup.HAMSTRINGS],
-                "back": [MuscleGroup.LOWER_BACK, MuscleGroup.LATS, MuscleGroup.TRAPS],
+                "back": [MuscleGroup.BACK],
                 "wrist": [MuscleGroup.FOREARMS],
             }
 
@@ -898,7 +906,7 @@ class WorkoutService:
         # Map muscle names to MuscleGroup enum
         muscle_mapping = {
             "chest": MuscleGroup.CHEST,
-            "back": MuscleGroup.LATS,
+            "back": MuscleGroup.BACK,
             "shoulders": MuscleGroup.SHOULDERS,
             "legs": MuscleGroup.QUADRICEPS,
             "glutes": MuscleGroup.GLUTES,
@@ -906,6 +914,9 @@ class WorkoutService:
             "arms": MuscleGroup.BICEPS,
             "biceps": MuscleGroup.BICEPS,
             "triceps": MuscleGroup.TRICEPS,
+            "abs": MuscleGroup.ABS,
+            "hamstrings": MuscleGroup.HAMSTRINGS,
+            "forearms": MuscleGroup.FOREARMS,
         }
 
         # Determine number of exercises based on time
@@ -918,14 +929,24 @@ class WorkoutService:
             WorkoutGoal.FAT_LOSS: {"sets": 3, "reps": "12-15", "rest": 45},
             WorkoutGoal.ENDURANCE: {"sets": 3, "reps": "15-20", "rest": 30},
             WorkoutGoal.GENERAL_FITNESS: {"sets": 3, "reps": "10-12", "rest": 60},
-            WorkoutGoal.SPORT_SPECIFIC: {"sets": 4, "reps": "6-10", "rest": 90},
+            WorkoutGoal.FUNCTIONAL: {"sets": 3, "reps": "10-12", "rest": 60},
         }
         config = goal_config.get(goal, goal_config[WorkoutGoal.GENERAL_FITNESS])
 
+        import random
+        import uuid as uuid_module
+
         selected = []
         exercises_per_muscle = max(1, exercises_per_workout // len(target_muscles))
+        used_exercise_ids = set()
 
-        for muscle_name in target_muscles:
+        # For advanced difficulty with hypertrophy, we'll add techniques
+        use_advanced_techniques = (
+            difficulty == Difficulty.ADVANCED and
+            goal in [WorkoutGoal.HYPERTROPHY, WorkoutGoal.STRENGTH]
+        )
+
+        for muscle_idx, muscle_name in enumerate(target_muscles):
             muscle_group = muscle_mapping.get(muscle_name)
             if not muscle_group:
                 continue
@@ -933,14 +954,68 @@ class WorkoutService:
             # Find exercises for this muscle group
             muscle_exercises = [
                 ex for ex in available_exercises
-                if ex.muscle_group == muscle_group
+                if ex.muscle_group == muscle_group and ex.id not in used_exercise_ids
             ]
 
-            # Select exercises (randomize in production, for now take first N)
-            import random
-            if muscle_exercises:
-                random.shuffle(muscle_exercises)
-                for ex in muscle_exercises[:exercises_per_muscle]:
+            if not muscle_exercises:
+                continue
+
+            random.shuffle(muscle_exercises)
+
+            # Decide technique for this muscle group
+            technique_type = "normal"
+            group_id = None
+            execution_instructions = None
+            isometric_seconds = None
+
+            if use_advanced_techniques:
+                technique_roll = random.random()
+
+                # 30% chance of dropset for last exercise of the muscle group
+                if technique_roll < 0.3:
+                    technique_type = "dropset"
+                    execution_instructions = "Reduza a carga em 20-30% a cada drop. Faça 2-3 drops."
+                # 20% chance of bi-set (need 2+ exercises)
+                elif technique_roll < 0.5 and len(muscle_exercises) >= 2:
+                    technique_type = "superset"
+                    group_id = str(uuid_module.uuid4())
+                # 15% chance of isometric hold
+                elif technique_roll < 0.65:
+                    technique_type = "normal"
+                    isometric_seconds = random.choice([3, 5, 7])
+                    execution_instructions = f"Pause por {isometric_seconds}s na contração máxima."
+                # 10% chance of rest-pause
+                elif technique_roll < 0.75:
+                    technique_type = "rest_pause"
+                    execution_instructions = "Faça até a falha, descanse 10-15s, repita 2-3 vezes."
+
+            # For bi-set/tri-set, add multiple exercises with same group_id
+            if technique_type == "superset" and len(muscle_exercises) >= 2:
+                group_order = 0
+                for ex in muscle_exercises[:2]:  # Bi-set = 2 exercises
+                    selected.append({
+                        "exercise_id": ex.id,
+                        "name": ex.name,
+                        "muscle_group": ex.muscle_group,
+                        "sets": config["sets"],
+                        "reps": config["reps"],
+                        "rest_seconds": 0 if group_order < 1 else config["rest"],
+                        "order": len(selected),
+                        "reason": f"Bi-set para {muscle_name}",
+                        "technique_type": technique_type,
+                        "exercise_group_id": group_id,
+                        "exercise_group_order": group_order,
+                        "execution_instructions": "Sem descanso entre exercícios do bi-set.",
+                        "isometric_seconds": None,
+                    })
+                    used_exercise_ids.add(ex.id)
+                    group_order += 1
+            else:
+                # Normal or single-exercise technique
+                for i, ex in enumerate(muscle_exercises[:exercises_per_muscle]):
+                    # Apply technique only to last exercise of the muscle group
+                    apply_technique = (i == exercises_per_muscle - 1) and technique_type != "normal"
+
                     selected.append({
                         "exercise_id": ex.id,
                         "name": ex.name,
@@ -949,8 +1024,14 @@ class WorkoutService:
                         "reps": config["reps"],
                         "rest_seconds": config["rest"],
                         "order": len(selected),
-                        "reason": f"Exercício para {muscle_name}",
+                        "reason": f"Exercício para {muscle_name}" + (f" com {technique_type}" if apply_technique else ""),
+                        "technique_type": technique_type if apply_technique else "normal",
+                        "exercise_group_id": None,
+                        "exercise_group_order": 0,
+                        "execution_instructions": execution_instructions if apply_technique else None,
+                        "isometric_seconds": isometric_seconds if apply_technique and isometric_seconds else None,
                     })
+                    used_exercise_ids.add(ex.id)
 
         return selected
 
@@ -996,6 +1077,15 @@ class WorkoutService:
         duration_weeks: int | None = None,
         is_template: bool | None = None,
         is_public: bool | None = None,
+        # Diet fields
+        include_diet: bool | None = None,
+        diet_type: str | None = None,
+        daily_calories: int | None = None,
+        protein_grams: int | None = None,
+        carbs_grams: int | None = None,
+        fat_grams: int | None = None,
+        meals_per_day: int | None = None,
+        diet_notes: str | None = None,
     ) -> WorkoutProgram:
         """Update a program."""
         if name is not None:
@@ -1014,6 +1104,23 @@ class WorkoutService:
             program.is_template = is_template
         if is_public is not None:
             program.is_public = is_public
+        # Diet fields
+        if include_diet is not None:
+            program.include_diet = include_diet
+        if diet_type is not None:
+            program.diet_type = diet_type
+        if daily_calories is not None:
+            program.daily_calories = daily_calories
+        if protein_grams is not None:
+            program.protein_grams = protein_grams
+        if carbs_grams is not None:
+            program.carbs_grams = carbs_grams
+        if fat_grams is not None:
+            program.fat_grams = fat_grams
+        if meals_per_day is not None:
+            program.meals_per_day = meals_per_day
+        if diet_notes is not None:
+            program.diet_notes = diet_notes
 
         await self.db.commit()
         await self.db.refresh(program)
@@ -1064,8 +1171,14 @@ class WorkoutService:
         new_owner_id: uuid.UUID,
         new_name: str | None = None,
         duplicate_workouts: bool = True,
+        source_template_id: uuid.UUID | None = None,
     ) -> WorkoutProgram:
-        """Duplicate a program for another user."""
+        """Duplicate a program for another user.
+
+        Args:
+            source_template_id: If provided, marks this as an import from catalog.
+                               Pass the original program's ID to track the import origin.
+        """
         # Generate a numbered name if no custom name provided
         if not new_name:
             existing_programs = await self.list_programs(
@@ -1095,7 +1208,7 @@ class WorkoutService:
             is_template=False,
             is_public=False,
             created_by_id=new_owner_id,
-            source_template_id=None,  # Local duplication should not inherit template origin
+            source_template_id=source_template_id,  # Track import origin if provided
         )
         self.db.add(new_program)
         await self.db.flush()
