@@ -1985,3 +1985,64 @@ async def run_migration_rename_program_to_plan(
             return {"status": "error", "message": str(e), "completed": results}
 
     return {"status": "success", "message": "Migration completed", "results": results}
+
+
+@router.post("/migrate/add-plan-diet-columns")
+async def run_migration_add_plan_diet_columns(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Add missing diet columns to training_plans table.
+
+    Requires a secret key for security.
+    """
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    results = []
+
+    async with db.begin():
+        try:
+            # Check which columns are missing and add them
+            columns_to_add = [
+                ("include_diet", "BOOLEAN DEFAULT FALSE NOT NULL"),
+                ("diet_type", "VARCHAR(50)"),
+                ("daily_calories", "INTEGER"),
+                ("protein_grams", "INTEGER"),
+                ("carbs_grams", "INTEGER"),
+                ("fat_grams", "INTEGER"),
+                ("meals_per_day", "INTEGER"),
+                ("diet_notes", "TEXT"),
+            ]
+
+            for col_name, col_type in columns_to_add:
+                # Check if column exists
+                check_col = await db.execute(
+                    text("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        AND table_name = 'training_plans'
+                        AND column_name = :col_name
+                    """),
+                    {"col_name": col_name}
+                )
+                if check_col.fetchone() is None:
+                    await db.execute(
+                        text(f"ALTER TABLE training_plans ADD COLUMN {col_name} {col_type}")
+                    )
+                    results.append(f"Added column {col_name}")
+                else:
+                    results.append(f"Column {col_name} already exists")
+
+        except Exception as e:
+            return {"status": "error", "message": str(e), "completed": results}
+
+    return {"status": "success", "message": "Migration completed", "results": results}
