@@ -1987,6 +1987,34 @@ async def run_migration_rename_program_to_plan(
     return {"status": "success", "message": "Migration completed", "results": results}
 
 
+@router.get("/debug/training-plans-columns")
+async def debug_training_plans_columns(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Debug secret key"),
+) -> dict:
+    """Debug endpoint to check training_plans table columns."""
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid secret",
+        )
+
+    from sqlalchemy import text
+
+    result = await db.execute(text("""
+        SELECT column_name, data_type, is_nullable
+        FROM information_schema.columns
+        WHERE table_name = 'training_plans'
+        ORDER BY ordinal_position
+    """))
+    columns = [{"name": row[0], "type": row[1], "nullable": row[2]} for row in result.fetchall()]
+
+    return {"columns": columns}
+
+
 @router.post("/migrate/add-plan-diet-columns")
 async def run_migration_add_plan_diet_columns(
     db: Annotated[AsyncSession, Depends(get_db)],
