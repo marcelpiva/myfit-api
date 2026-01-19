@@ -126,14 +126,14 @@ class AIExerciseService:
         # If specific techniques are required, build a restricted prompt
         if allowed_techniques and len(allowed_techniques) > 0:
             technique_descriptions = {
-                "normal": '"normal": Exercicio padrao',
-                "dropset": '"dropset": Dropset - reducao de carga sem descanso',
-                "rest_pause": '"rest_pause": Rest-pause - pausas curtas de 10-15s',
-                "cluster": '"cluster": Cluster set - series fracionadas',
-                "biset": '"biset": Bi-set - dois exercicios do mesmo grupo SEM descanso',
-                "superset": '"superset": Superset - dois exercicios de grupos DIFERENTES sem descanso',
-                "triset": '"triset": Tri-set - tres exercicios sem descanso',
-                "giantset": '"giantset": Giant set - quatro ou mais exercicios sem descanso',
+                "normal": '"normal": Exercicio padrao (1 exercicio isolado)',
+                "dropset": '"dropset": Dropset - reducao de carga sem descanso (1 exercicio)',
+                "rest_pause": '"rest_pause": Rest-pause - pausas curtas de 10-15s (1 exercicio)',
+                "cluster": '"cluster": Cluster set - series fracionadas (1 exercicio)',
+                "biset": '"biset": Bi-set - EXATAMENTE 2 exercicios do MESMO grupo muscular, sem descanso entre eles',
+                "superset": '"superset": Superset - EXATAMENTE 2 exercicios de grupos musculares DIFERENTES (antagonistas), sem descanso entre eles',
+                "triset": '"triset": Tri-set - EXATAMENTE 3 exercicios do mesmo grupo muscular, sem descanso entre eles',
+                "giantset": '"giantset": Giant set - 4 OU MAIS exercicios, sem descanso entre eles',
             }
 
             allowed_list = [technique_descriptions.get(t, f'"{t}"') for t in allowed_techniques if t in technique_descriptions]
@@ -144,37 +144,55 @@ class AIExerciseService:
 
             if only_group_techniques:
                 # Calculate pairs/groups needed
-                if "biset" in allowed_techniques or "superset" in allowed_techniques:
-                    group_size = 2
-                elif "triset" in allowed_techniques:
+                if "triset" in allowed_techniques:
                     group_size = 3
-                else:
+                elif "giantset" in allowed_techniques:
                     group_size = 4
+                elif "biset" in allowed_techniques or "superset" in allowed_techniques:
+                    group_size = 2
+                else:
+                    group_size = 2
+
+                num_groups = count // group_size
 
                 techniques_section = f"""
 
 TECNICAS PERMITIDAS (OBRIGATORIO usar APENAS estas):
 {chr(10).join('- ' + t for t in allowed_list)}
 
-REGRA CRITICA: Voce DEVE usar SOMENTE as tecnicas listadas acima.
-NAO crie exercicios com technique_type "normal" - TODOS devem usar as tecnicas permitidas.
+REGRAS CRITICAS - LEIA COM ATENCAO:
+1. NAO crie exercicios com technique_type "normal" - TODOS devem usar as tecnicas permitidas
+2. Voce DEVE criar EXATAMENTE {num_groups} grupos de {group_size} exercicios cada
 
-Como "normal" NAO esta permitido, TODOS os {count} exercicios devem estar em grupos de {group_size}.
-Isso significa que voce deve criar {count // group_size} grupos.
+REGRAS DE QUANTIDADE POR TECNICA:
+- biset: EXATAMENTE 2 exercicios por grupo (mesmo grupo muscular)
+- superset: EXATAMENTE 2 exercicios por grupo (grupos musculares diferentes/antagonistas)
+- triset: EXATAMENTE 3 exercicios por grupo (mesmo grupo muscular)
+- giantset: MINIMO 4 exercicios por grupo
 
-REGRAS OBRIGATORIAS PARA GRUPOS:
-1. Gere um UUID unico para cada grupo (ex: "group-" + 8 caracteres aleatorios)
+REGRAS DE GRUPOS MUSCULARES:
+- BI-SET: Os 2 exercicios DEVEM ser do MESMO grupo muscular (ex: 2 exercicios de peito)
+- SUPERSET: Os 2 exercicios DEVEM ser de grupos DIFERENTES (ex: 1 peito + 1 costas)
+- TRI-SET: Os 3 exercicios DEVEM ser do MESMO grupo muscular (ex: 3 exercicios de biceps)
+- GIANT-SET: Os 4+ exercicios podem ser do mesmo ou diferentes grupos
+
+REGRAS DE ESTRUTURA JSON:
+1. Gere um UUID unico para cada grupo (ex: "group-abc12345")
 2. TODOS exercicios do grupo devem ter o MESMO "exercise_group_id"
 3. Use "exercise_group_order": 0 para o primeiro, 1 para o segundo, etc.
 4. TODOS exceto o ultimo do grupo: "rest_seconds": 0
 5. Ultimo exercicio do grupo: "rest_seconds": 60-90
-6. Para bi-set do mesmo grupo muscular: "technique_type": "biset"
-7. Para superset de grupos diferentes: "technique_type": "superset"
 
-EXEMPLO de bi-set:
+EXEMPLO de bi-set (2 exercicios de peito):
 [
-  {{"exercise_id": "...", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 0, "rest_seconds": 0}},
-  {{"exercise_id": "...", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 1, "rest_seconds": 60}}
+  {{"exercise_id": "...", "muscle_group": "chest", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 0, "rest_seconds": 0}},
+  {{"exercise_id": "...", "muscle_group": "chest", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 1, "rest_seconds": 60}}
+]
+
+EXEMPLO de superset (peito + costas):
+[
+  {{"exercise_id": "...", "muscle_group": "chest", "technique_type": "superset", "exercise_group_id": "group-xyz789", "exercise_group_order": 0, "rest_seconds": 0}},
+  {{"exercise_id": "...", "muscle_group": "back", "technique_type": "superset", "exercise_group_id": "group-xyz789", "exercise_group_order": 1, "rest_seconds": 60}}
 ]"""
             else:
                 techniques_section = f"""
@@ -184,12 +202,18 @@ TECNICAS PERMITIDAS (use APENAS estas):
 
 IMPORTANTE: Voce DEVE usar SOMENTE as tecnicas listadas acima. NAO use outras tecnicas.
 
-REGRAS PARA BI-SET/SUPERSET/TRI-SET/GIANT-SET:
+REGRAS DE QUANTIDADE POR TECNICA:
+- biset: EXATAMENTE 2 exercicios do MESMO grupo muscular
+- superset: EXATAMENTE 2 exercicios de grupos DIFERENTES (antagonistas)
+- triset: EXATAMENTE 3 exercicios do mesmo grupo muscular
+- giantset: MINIMO 4 exercicios
+
+REGRAS DE ESTRUTURA PARA GRUPOS:
 1. Gere um UUID unico para cada grupo (ex: "group-" + 8 caracteres)
 2. TODOS exercicios do grupo devem ter o MESMO "exercise_group_id"
-3. Use "exercise_group_order": 0 para o primeiro, 1 para o segundo, etc.
-4. TODOS exceto o ultimo do grupo: "rest_seconds": 0
-5. Ultimo exercicio do grupo: "rest_seconds": 60-90"""
+3. Use "exercise_group_order": 0, 1, 2... para ordenar dentro do grupo
+4. TODOS exceto o ultimo: "rest_seconds": 0
+5. Ultimo do grupo: "rest_seconds": 60-90"""
 
         elif allow_advanced_techniques and difficulty != Difficulty.BEGINNER:
             # Original behavior - allow all techniques
@@ -335,18 +359,233 @@ Responda APENAS com um JSON valido no formato:
                     s["exercise_group_id"] = None
                     s["exercise_group_order"] = 0
 
-                # Group techniques without group_id should be converted to normal
-                # BUT only if "normal" is allowed
-                if s["technique_type"] in group_techniques and not s.get("exercise_group_id"):
-                    if allowed_techniques and "normal" not in allowed_techniques:
-                        # Generate a group_id since we can't fall back to normal
-                        s["exercise_group_id"] = f"group-{uuid.uuid4().hex[:8]}"
-                    else:
-                        s["technique_type"] = "normal"
-
                 validated_suggestions.append(s)
 
+        # POST-VALIDATION: Validate group sizes match technique requirements
+        # Rules:
+        # - biset/superset: exactly 2 exercises
+        # - triset: exactly 3 exercises
+        # - giantset: 4+ exercises
+        validated_suggestions = self._validate_and_fix_groups(
+            validated_suggestions,
+            exercises,
+            allowed_techniques,
+            group_techniques,
+        )
+
         result["suggestions"] = validated_suggestions
+        return result
+
+    def _validate_and_fix_groups(
+        self,
+        suggestions: list[dict[str, Any]],
+        available_exercises: list[dict[str, Any]],
+        allowed_techniques: list[str] | None,
+        group_techniques: set[str],
+    ) -> list[dict[str, Any]]:
+        """
+        Validate that exercise groups have the correct number of exercises
+        and follow the rules for each technique.
+
+        Rules:
+        - Bi-set: exactly 2 exercises of the SAME muscle group
+        - Superset: exactly 2 exercises of DIFFERENT muscle groups (antagonist)
+        - Tri-set: exactly 3 exercises (same muscle group area)
+        - Giant set: 4+ exercises
+        """
+
+        # Required group sizes for each technique
+        technique_sizes = {
+            "biset": 2,      # EXACTLY 2 exercises, SAME muscle group
+            "superset": 2,   # EXACTLY 2 exercises, DIFFERENT muscle groups (antagonist)
+            "triset": 3,     # EXACTLY 3 exercises, SAME muscle group
+            "giantset": 4,   # MINIMUM 4 exercises (no max), any muscle groups
+        }
+
+        # Group exercises by group_id
+        groups: dict[str, list[dict[str, Any]]] = {}
+        ungrouped: list[dict[str, Any]] = []
+
+        for s in suggestions:
+            group_id = s.get("exercise_group_id")
+            if group_id:
+                if group_id not in groups:
+                    groups[group_id] = []
+                groups[group_id].append(s)
+            else:
+                ungrouped.append(s)
+
+        # Get used exercise IDs
+        used_ids = {s["exercise_id"] for s in suggestions}
+
+        # Get available exercises not yet used
+        available_unused = [
+            ex for ex in available_exercises
+            if str(ex["id"]) not in used_ids
+        ]
+
+        # Validate each group
+        fixed_grouped: list[dict[str, Any]] = []
+
+        for group_id, group_exercises in groups.items():
+            if not group_exercises:
+                continue
+
+            technique = group_exercises[0]["technique_type"]
+            required_size = technique_sizes.get(technique, 2)
+            current_size = len(group_exercises)
+
+            if technique == "giantset":
+                # Giant set needs at least 4
+                if current_size >= 4:
+                    # Valid giant set
+                    fixed_grouped.extend(group_exercises)
+                elif current_size >= 2 and available_unused:
+                    # Try to complete to 4
+                    needed = 4 - current_size
+                    for _ in range(needed):
+                        if available_unused:
+                            new_ex = available_unused.pop(0)
+                            group_exercises.append({
+                                "exercise_id": str(new_ex["id"]),
+                                "name": new_ex["name"],
+                                "muscle_group": new_ex["muscle_group"],
+                                "sets": group_exercises[0].get("sets", 3),
+                                "reps": group_exercises[0].get("reps", "10-12"),
+                                "rest_seconds": 0,
+                                "order": len(suggestions) + len(fixed_grouped),
+                                "reason": f"Adicionado para completar giant set",
+                                "technique_type": technique,
+                                "exercise_group_id": group_id,
+                                "exercise_group_order": len(group_exercises) - 1,
+                                "execution_instructions": None,
+                                "isometric_seconds": None,
+                            })
+                            used_ids.add(str(new_ex["id"]))
+
+                    # Set rest times correctly (0 for all except last)
+                    for i, ex in enumerate(group_exercises):
+                        ex["exercise_group_order"] = i
+                        ex["rest_seconds"] = 60 if i == len(group_exercises) - 1 else 0
+
+                    if len(group_exercises) >= 4:
+                        fixed_grouped.extend(group_exercises)
+                    else:
+                        # Convert to normal if can't complete
+                        for ex in group_exercises:
+                            if allowed_techniques and "normal" not in allowed_techniques:
+                                # Keep as incomplete group (best effort)
+                                fixed_grouped.append(ex)
+                            else:
+                                ex["technique_type"] = "normal"
+                                ex["exercise_group_id"] = None
+                                ex["exercise_group_order"] = 0
+                                ex["rest_seconds"] = 60
+                                ungrouped.append(ex)
+                else:
+                    # Convert to normal
+                    for ex in group_exercises:
+                        if allowed_techniques and "normal" not in allowed_techniques:
+                            fixed_grouped.append(ex)
+                        else:
+                            ex["technique_type"] = "normal"
+                            ex["exercise_group_id"] = None
+                            ex["exercise_group_order"] = 0
+                            ex["rest_seconds"] = 60
+                            ungrouped.append(ex)
+
+            elif current_size == required_size:
+                # Perfect match
+                # Ensure rest times are correct
+                for i, ex in enumerate(group_exercises):
+                    ex["exercise_group_order"] = i
+                    ex["rest_seconds"] = 60 if i == required_size - 1 else 0
+                fixed_grouped.extend(group_exercises)
+
+            elif current_size < required_size:
+                # Need more exercises to complete the group
+                needed = required_size - current_size
+                added = 0
+
+                for _ in range(needed):
+                    if available_unused:
+                        new_ex = available_unused.pop(0)
+                        group_exercises.append({
+                            "exercise_id": str(new_ex["id"]),
+                            "name": new_ex["name"],
+                            "muscle_group": new_ex["muscle_group"],
+                            "sets": group_exercises[0].get("sets", 3),
+                            "reps": group_exercises[0].get("reps", "10-12"),
+                            "rest_seconds": 0,
+                            "order": len(suggestions) + len(fixed_grouped) + added,
+                            "reason": f"Adicionado para completar {technique}",
+                            "technique_type": technique,
+                            "exercise_group_id": group_id,
+                            "exercise_group_order": current_size + added,
+                            "execution_instructions": None,
+                            "isometric_seconds": None,
+                        })
+                        used_ids.add(str(new_ex["id"]))
+                        added += 1
+
+                # Check if we completed the group
+                if len(group_exercises) == required_size:
+                    # Set rest times correctly
+                    for i, ex in enumerate(group_exercises):
+                        ex["exercise_group_order"] = i
+                        ex["rest_seconds"] = 60 if i == required_size - 1 else 0
+                    fixed_grouped.extend(group_exercises)
+                else:
+                    # Couldn't complete - convert to normal if allowed
+                    for ex in group_exercises:
+                        if allowed_techniques and "normal" not in allowed_techniques:
+                            # Keep incomplete but can't convert to normal
+                            fixed_grouped.append(ex)
+                        else:
+                            ex["technique_type"] = "normal"
+                            ex["exercise_group_id"] = None
+                            ex["exercise_group_order"] = 0
+                            ex["rest_seconds"] = 60
+                            ungrouped.append(ex)
+
+            else:
+                # Too many exercises - split into proper groups
+                # Create complete groups and leave extras
+                num_complete_groups = current_size // required_size
+                remainder = current_size % required_size
+
+                idx = 0
+                for g in range(num_complete_groups):
+                    new_group_id = f"group-{uuid.uuid4().hex[:8]}"
+                    for order in range(required_size):
+                        ex = group_exercises[idx]
+                        ex["exercise_group_id"] = new_group_id
+                        ex["exercise_group_order"] = order
+                        ex["rest_seconds"] = 60 if order == required_size - 1 else 0
+                        fixed_grouped.append(ex)
+                        idx += 1
+
+                # Handle remainder
+                for i in range(remainder):
+                    ex = group_exercises[idx]
+                    if allowed_techniques and "normal" not in allowed_techniques:
+                        # Create a new incomplete group (best effort)
+                        fixed_grouped.append(ex)
+                    else:
+                        ex["technique_type"] = "normal"
+                        ex["exercise_group_id"] = None
+                        ex["exercise_group_order"] = 0
+                        ex["rest_seconds"] = 60
+                        ungrouped.append(ex)
+                    idx += 1
+
+        # Combine and reorder
+        result = fixed_grouped + ungrouped
+
+        # Reorder all exercises
+        for i, ex in enumerate(result):
+            ex["order"] = i
+
         return result
 
     def _rule_based_suggest(
@@ -493,7 +732,15 @@ Responda APENAS com um JSON valido no formato:
         allowed_techniques: list[str],
         context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Generate exercises in pairs/groups when only group techniques are allowed."""
+        """
+        Generate exercises in pairs/groups when only group techniques are allowed.
+
+        Rules:
+        - Bi-set: 2 exercises from SAME muscle group
+        - Superset: 2 exercises from DIFFERENT muscle groups (antagonist)
+        - Tri-set: 3 exercises from SAME muscle group
+        - Giant-set: 4+ exercises (any)
+        """
 
         suggestions = []
         used_ids = set()
@@ -503,41 +750,268 @@ Responda APENAS com um JSON valido no formato:
         if context and context.get("existing_exercises"):
             existing_names = {name.lower() for name in context["existing_exercises"]}
 
-        # Determine group size based on allowed techniques
+        # Determine group size and technique based on allowed techniques
         if "triset" in allowed_techniques:
             group_size = 3
             technique = "triset"
+            same_muscle = True  # Tri-set = same muscle group
         elif "giantset" in allowed_techniques:
             group_size = 4
             technique = "giantset"
+            same_muscle = False  # Giant set = any
+        elif "biset" in allowed_techniques:
+            group_size = 2
+            technique = "biset"
+            same_muscle = True  # Bi-set = SAME muscle group
+        elif "superset" in allowed_techniques:
+            group_size = 2
+            technique = "superset"
+            same_muscle = False  # Superset = DIFFERENT muscle groups
         else:
             group_size = 2
-            technique = "biset" if "biset" in allowed_techniques else "superset"
+            technique = "biset"
+            same_muscle = True
 
-        # Get all available exercises
-        available = [
-            ex for ex in exercises
-            if ex["muscle_group"].lower() in [mg.lower() for mg in muscle_groups]
-            and str(ex["id"]) not in used_ids
-            and ex["name"].lower() not in existing_names
-        ]
+        # Organize exercises by muscle group
+        exercises_by_muscle: dict[str, list[dict[str, Any]]] = {}
+        for ex in exercises:
+            mg = ex["muscle_group"].lower()
+            if mg in [m.lower() for m in muscle_groups]:
+                if ex["name"].lower() not in existing_names:
+                    if mg not in exercises_by_muscle:
+                        exercises_by_muscle[mg] = []
+                    exercises_by_muscle[mg].append(ex)
 
-        # Create groups
         num_groups = count // group_size
-        exercise_idx = 0
 
+        if technique == "superset":
+            # Superset: pair exercises from DIFFERENT muscle groups
+            suggestions = self._generate_supersets(
+                exercises_by_muscle, num_groups, group_size, sets, reps, rest, used_ids
+            )
+        elif technique in ("biset", "triset"):
+            # Bi-set/Tri-set: group exercises from SAME muscle group
+            suggestions = self._generate_same_muscle_groups(
+                exercises_by_muscle, num_groups, group_size, sets, reps, rest, technique, used_ids
+            )
+        else:
+            # Giant-set: any combination
+            all_available = []
+            for mg_exercises in exercises_by_muscle.values():
+                all_available.extend(mg_exercises)
+
+            for group_num in range(num_groups):
+                group_id = f"group-{uuid.uuid4().hex[:8]}"
+
+                for order_in_group in range(group_size):
+                    if not all_available:
+                        break
+
+                    ex = all_available.pop(0)
+                    ex_rest = rest if order_in_group == group_size - 1 else 0
+
+                    suggestions.append({
+                        "exercise_id": str(ex["id"]),
+                        "name": ex["name"],
+                        "muscle_group": ex["muscle_group"],
+                        "sets": sets,
+                        "reps": reps,
+                        "rest_seconds": ex_rest,
+                        "order": len(suggestions),
+                        "reason": f"Giant set - exercicio {order_in_group + 1}",
+                        "technique_type": technique,
+                        "exercise_group_id": group_id,
+                        "exercise_group_order": order_in_group,
+                        "execution_instructions": None,
+                        "isometric_seconds": None,
+                    })
+                    used_ids.add(str(ex["id"]))
+
+        return {
+            "suggestions": suggestions[:count],
+            "message": f"Treino com {technique}s para maior intensidade.",
+        }
+
+    def _generate_supersets(
+        self,
+        exercises_by_muscle: dict[str, list[dict[str, Any]]],
+        num_groups: int,
+        group_size: int,
+        sets: int,
+        reps: str,
+        rest: int,
+        used_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        """
+        Generate supersets - pairs of exercises from DIFFERENT muscle groups.
+
+        Superset rule: 2 exercises from antagonist/different muscle groups.
+        Example: chest + back, biceps + triceps, quads + hamstrings
+        """
+        suggestions = []
+        muscle_list = list(exercises_by_muscle.keys())
+
+        if len(muscle_list) < 2:
+            # Not enough different muscle groups for supersets
+            # Fall back to using what we have
+            all_exercises = []
+            for mg_exercises in exercises_by_muscle.values():
+                all_exercises.extend(mg_exercises)
+
+            for group_num in range(num_groups):
+                group_id = f"group-{uuid.uuid4().hex[:8]}"
+                for order in range(group_size):
+                    if all_exercises:
+                        ex = all_exercises.pop(0)
+                        ex_rest = rest if order == group_size - 1 else 0
+                        suggestions.append({
+                            "exercise_id": str(ex["id"]),
+                            "name": ex["name"],
+                            "muscle_group": ex["muscle_group"],
+                            "sets": sets,
+                            "reps": reps,
+                            "rest_seconds": ex_rest,
+                            "order": len(suggestions),
+                            "reason": f"Superset - exercicio {order + 1}",
+                            "technique_type": "superset",
+                            "exercise_group_id": group_id,
+                            "exercise_group_order": order,
+                            "execution_instructions": None,
+                            "isometric_seconds": None,
+                        })
+                        used_ids.add(str(ex["id"]))
+            return suggestions
+
+        # Create superset pairs from different muscle groups
+        muscle_idx = 0
         for group_num in range(num_groups):
             group_id = f"group-{uuid.uuid4().hex[:8]}"
 
-            for order_in_group in range(group_size):
-                if exercise_idx >= len(available):
+            # Get two different muscle groups
+            mg1 = muscle_list[muscle_idx % len(muscle_list)]
+            mg2 = muscle_list[(muscle_idx + 1) % len(muscle_list)]
+
+            # Get exercise from first muscle group
+            if exercises_by_muscle[mg1]:
+                ex1 = exercises_by_muscle[mg1].pop(0)
+                suggestions.append({
+                    "exercise_id": str(ex1["id"]),
+                    "name": ex1["name"],
+                    "muscle_group": ex1["muscle_group"],
+                    "sets": sets,
+                    "reps": reps,
+                    "rest_seconds": 0,  # No rest before second exercise
+                    "order": len(suggestions),
+                    "reason": f"Superset - {ex1['muscle_group']}",
+                    "technique_type": "superset",
+                    "exercise_group_id": group_id,
+                    "exercise_group_order": 0,
+                    "execution_instructions": None,
+                    "isometric_seconds": None,
+                })
+                used_ids.add(str(ex1["id"]))
+
+                # Get exercise from second (different) muscle group
+                if exercises_by_muscle[mg2]:
+                    ex2 = exercises_by_muscle[mg2].pop(0)
+                    suggestions.append({
+                        "exercise_id": str(ex2["id"]),
+                        "name": ex2["name"],
+                        "muscle_group": ex2["muscle_group"],
+                        "sets": sets,
+                        "reps": reps,
+                        "rest_seconds": rest,  # Rest after superset
+                        "order": len(suggestions),
+                        "reason": f"Superset - {ex2['muscle_group']}",
+                        "technique_type": "superset",
+                        "exercise_group_id": group_id,
+                        "exercise_group_order": 1,
+                        "execution_instructions": None,
+                        "isometric_seconds": None,
+                    })
+                    used_ids.add(str(ex2["id"]))
+
+            muscle_idx += 2  # Move to next pair of muscles
+
+        return suggestions
+
+    def _generate_same_muscle_groups(
+        self,
+        exercises_by_muscle: dict[str, list[dict[str, Any]]],
+        num_groups: int,
+        group_size: int,
+        sets: int,
+        reps: str,
+        rest: int,
+        technique: str,
+        used_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        """
+        Generate bi-sets or tri-sets - exercises from the SAME muscle group.
+
+        Bi-set rule: 2 exercises from the same muscle group
+        Tri-set rule: 3 exercises from the same muscle group
+        """
+        suggestions = []
+
+        # Find muscle groups with enough exercises
+        viable_muscles = [
+            mg for mg, exercises in exercises_by_muscle.items()
+            if len(exercises) >= group_size
+        ]
+
+        if not viable_muscles:
+            # Not enough exercises in any single muscle group
+            # Use what we have, combining from different groups if needed
+            all_exercises = []
+            for mg_exercises in exercises_by_muscle.values():
+                all_exercises.extend(mg_exercises)
+
+            for group_num in range(num_groups):
+                group_id = f"group-{uuid.uuid4().hex[:8]}"
+                for order in range(group_size):
+                    if all_exercises:
+                        ex = all_exercises.pop(0)
+                        ex_rest = rest if order == group_size - 1 else 0
+                        suggestions.append({
+                            "exercise_id": str(ex["id"]),
+                            "name": ex["name"],
+                            "muscle_group": ex["muscle_group"],
+                            "sets": sets,
+                            "reps": reps,
+                            "rest_seconds": ex_rest,
+                            "order": len(suggestions),
+                            "reason": f"{technique.capitalize()} - exercicio {order + 1}",
+                            "technique_type": technique,
+                            "exercise_group_id": group_id,
+                            "exercise_group_order": order,
+                            "execution_instructions": None,
+                            "isometric_seconds": None,
+                        })
+                        used_ids.add(str(ex["id"]))
+            return suggestions
+
+        # Create groups from same muscle group
+        muscle_idx = 0
+        for group_num in range(num_groups):
+            # Cycle through viable muscle groups
+            mg = viable_muscles[muscle_idx % len(viable_muscles)]
+
+            # Check if this muscle group still has enough exercises
+            while len(exercises_by_muscle[mg]) < group_size and len(viable_muscles) > 1:
+                viable_muscles.remove(mg)
+                if not viable_muscles:
                     break
+                mg = viable_muscles[muscle_idx % len(viable_muscles)]
 
-                ex = available[exercise_idx]
-                exercise_idx += 1
+            if not viable_muscles or len(exercises_by_muscle[mg]) < group_size:
+                break
 
-                # Last exercise in group gets rest, others get 0
-                ex_rest = rest if order_in_group == group_size - 1 else 0
+            group_id = f"group-{uuid.uuid4().hex[:8]}"
+
+            for order in range(group_size):
+                ex = exercises_by_muscle[mg].pop(0)
+                ex_rest = rest if order == group_size - 1 else 0
 
                 suggestions.append({
                     "exercise_id": str(ex["id"]),
@@ -547,19 +1021,18 @@ Responda APENAS com um JSON valido no formato:
                     "reps": reps,
                     "rest_seconds": ex_rest,
                     "order": len(suggestions),
-                    "reason": f"{technique.capitalize()} - exercicio {order_in_group + 1} do grupo",
+                    "reason": f"{technique.capitalize()} de {ex['muscle_group']} - exercicio {order + 1}",
                     "technique_type": technique,
                     "exercise_group_id": group_id,
-                    "exercise_group_order": order_in_group,
+                    "exercise_group_order": order,
                     "execution_instructions": None,
                     "isometric_seconds": None,
                 })
                 used_ids.add(str(ex["id"]))
 
-        return {
-            "suggestions": suggestions[:count],
-            "message": f"Treino com {technique}s para maior intensidade.",
-        }
+            muscle_idx += 1
+
+        return suggestions
 
     async def generate_full_plan(
         self,
