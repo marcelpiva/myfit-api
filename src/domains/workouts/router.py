@@ -1987,12 +1987,13 @@ async def run_migration_rename_program_to_plan(
     return {"status": "success", "message": "Migration completed", "results": results}
 
 
-@router.get("/debug/training-plans-columns")
-async def debug_training_plans_columns(
+@router.get("/debug/table-columns")
+async def debug_table_columns(
     db: Annotated[AsyncSession, Depends(get_db)],
     secret: str = Query(..., description="Debug secret key"),
+    table_name: str = Query(..., description="Table name"),
 ) -> dict:
-    """Debug endpoint to check training_plans table columns."""
+    """Debug endpoint to check table columns."""
     import os
     expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
 
@@ -2007,12 +2008,45 @@ async def debug_training_plans_columns(
     result = await db.execute(text("""
         SELECT column_name, data_type, is_nullable
         FROM information_schema.columns
-        WHERE table_name = 'training_plans'
+        WHERE table_name = :table_name
         ORDER BY ordinal_position
-    """))
+    """), {"table_name": table_name})
     columns = [{"name": row[0], "type": row[1], "nullable": row[2]} for row in result.fetchall()]
 
-    return {"columns": columns}
+    return {"table": table_name, "columns": columns}
+
+
+@router.post("/migrate/add-source-template-id")
+async def run_migration_add_source_template_id(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Add missing source_template_id column to training_plans table."""
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    async with db.begin():
+        check_col = await db.execute(
+            text("""
+                SELECT column_name FROM information_schema.columns
+                WHERE table_schema = 'public'
+                AND table_name = 'training_plans'
+                AND column_name = 'source_template_id'
+            """)
+        )
+        if check_col.fetchone() is None:
+            await db.execute(text("ALTER TABLE training_plans ADD COLUMN source_template_id UUID"))
+            return {"status": "success", "message": "Added source_template_id column"}
+        else:
+            return {"status": "already_exists", "message": "source_template_id column already exists"}
 
 
 @router.post("/migrate/add-plan-diet-columns")
