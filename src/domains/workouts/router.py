@@ -2051,6 +2051,45 @@ async def debug_test_list_plans(
         return {"error": str(e), "traceback": traceback.format_exc()}
 
 
+@router.get("/debug/test-orm-plan")
+async def debug_test_orm_plan(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Debug secret key"),
+) -> dict:
+    """Debug endpoint to test ORM query for training plans."""
+    import os
+    import traceback
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid secret",
+        )
+
+    try:
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from src.domains.workouts.models import TrainingPlan
+
+        # Test ORM query
+        query = select(TrainingPlan).options(selectinload(TrainingPlan.plan_workouts)).limit(1)
+        result = await db.execute(query)
+        plan = result.scalars().first()
+
+        if plan:
+            return {
+                "id": str(plan.id),
+                "name": plan.name,
+                "goal": plan.goal.value if plan.goal else None,
+                "difficulty": plan.difficulty.value if plan.difficulty else None,
+                "plan_workouts_count": len(plan.plan_workouts) if plan.plan_workouts else 0,
+            }
+        return {"message": "No plan found"}
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 @router.post("/migrate/add-source-template-id")
 async def run_migration_add_source_template_id(
     db: Annotated[AsyncSession, Depends(get_db)],
