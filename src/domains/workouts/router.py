@@ -2210,6 +2210,13 @@ async def run_migration_add_workout_exercise_columns(
             else:
                 results.append("technique_type_enum already exists")
 
+            # Get enum values to find the correct default
+            enum_values = await db.execute(
+                text("SELECT enumlabel FROM pg_enum WHERE enumtypid = 'technique_type_enum'::regtype ORDER BY enumsortorder")
+            )
+            enum_list = [row[0] for row in enum_values.fetchall()]
+            results.append(f"Enum values: {enum_list}")
+
             # Add technique_type column if it doesn't exist
             check_col = await db.execute(
                 text("""
@@ -2220,10 +2227,12 @@ async def run_migration_add_workout_exercise_columns(
                 """)
             )
             if check_col.fetchone() is None:
+                # Use the first enum value as default
+                default_value = enum_list[0] if enum_list else "normal"
                 await db.execute(
-                    text("ALTER TABLE workout_exercises ADD COLUMN technique_type technique_type_enum DEFAULT 'Normal' NOT NULL")
+                    text(f"ALTER TABLE workout_exercises ADD COLUMN technique_type technique_type_enum DEFAULT '{default_value}' NOT NULL")
                 )
-                results.append("Added column technique_type")
+                results.append(f"Added column technique_type with default '{default_value}'")
             else:
                 results.append("Column technique_type already exists")
 
