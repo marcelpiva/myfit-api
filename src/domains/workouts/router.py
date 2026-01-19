@@ -2049,6 +2049,31 @@ async def run_migration_add_source_template_id(
             return {"status": "already_exists", "message": "source_template_id column already exists"}
 
 
+@router.post("/migrate/fix-created-by-nullable")
+async def run_migration_fix_created_by_nullable(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Fix created_by_id column to allow NULL for system templates."""
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    async with db.begin():
+        try:
+            await db.execute(text("ALTER TABLE training_plans ALTER COLUMN created_by_id DROP NOT NULL"))
+            return {"status": "success", "message": "Made created_by_id nullable"}
+        except Exception as e:
+            return {"status": "error", "message": str(e)}
+
+
 @router.post("/migrate/add-plan-diet-columns")
 async def run_migration_add_plan_diet_columns(
     db: Annotated[AsyncSession, Depends(get_db)],
