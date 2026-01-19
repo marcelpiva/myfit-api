@@ -2016,6 +2016,41 @@ async def debug_table_columns(
     return {"table": table_name, "columns": columns}
 
 
+@router.get("/debug/test-list-plans")
+async def debug_test_list_plans(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Debug secret key"),
+) -> dict:
+    """Debug endpoint to test list_plans query."""
+    import os
+    import traceback
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid secret",
+        )
+
+    from sqlalchemy import text
+
+    try:
+        # Try a simple query first
+        result = await db.execute(text("SELECT COUNT(*) FROM training_plans"))
+        count = result.scalar()
+
+        # Try to get one record
+        result2 = await db.execute(text("SELECT id, name, created_by_id FROM training_plans LIMIT 1"))
+        row = result2.fetchone()
+
+        return {
+            "count": count,
+            "sample_row": {"id": str(row[0]), "name": row[1], "created_by_id": str(row[2]) if row[2] else None} if row else None
+        }
+    except Exception as e:
+        return {"error": str(e), "traceback": traceback.format_exc()}
+
+
 @router.post("/migrate/add-source-template-id")
 async def run_migration_add_source_template_id(
     db: Annotated[AsyncSession, Depends(get_db)],
