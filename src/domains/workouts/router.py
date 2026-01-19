@@ -1885,3 +1885,81 @@ async def stream_session_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ==================== Migration Endpoint ====================
+
+@router.post("/migrate/rename-program-to-plan")
+async def run_migration_rename_program_to_plan(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Run database migration to rename program tables to plan.
+
+    Requires a secret key for security.
+    """
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    results = []
+
+    async with db.begin():
+        # Check if old tables exist
+        check_old = await db.execute(
+            text("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'workout_programs'
+            """)
+        )
+        has_old = check_old.fetchone() is not None
+
+        check_new = await db.execute(
+            text("""
+                SELECT table_name FROM information_schema.tables
+                WHERE table_schema = 'public'
+                AND table_name = 'training_plans'
+            """)
+        )
+        has_new = check_new.fetchone() is not None
+
+        if has_new and not has_old:
+            return {"status": "already_migrated", "message": "Migration already completed"}
+
+        if not has_old and not has_new:
+            return {"status": "fresh_install", "message": "No tables to migrate"}
+
+        # Run migrations
+        try:
+            # 1. Rename workout_programs -> training_plans
+            await db.execute(text("ALTER TABLE workout_programs RENAME TO training_plans"))
+            results.append("Renamed workout_programs -> training_plans")
+
+            # 2. Rename program_workouts -> plan_workouts
+            await db.execute(text("ALTER TABLE program_workouts RENAME TO plan_workouts"))
+            results.append("Renamed program_workouts -> plan_workouts")
+
+            # 3. Rename program_id column in plan_workouts
+            await db.execute(text("ALTER TABLE plan_workouts RENAME COLUMN program_id TO plan_id"))
+            results.append("Renamed plan_workouts.program_id -> plan_id")
+
+            # 4. Rename program_assignments -> plan_assignments
+            await db.execute(text("ALTER TABLE program_assignments RENAME TO plan_assignments"))
+            results.append("Renamed program_assignments -> plan_assignments")
+
+            # 5. Rename program_id column in plan_assignments
+            await db.execute(text("ALTER TABLE plan_assignments RENAME COLUMN program_id TO plan_id"))
+            results.append("Renamed plan_assignments.program_id -> plan_id")
+
+        except Exception as e:
+            return {"status": "error", "message": str(e), "completed": results}
+
+    return {"status": "success", "message": "Migration completed", "results": results}
