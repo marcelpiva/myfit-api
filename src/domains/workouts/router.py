@@ -1937,8 +1937,30 @@ async def run_migration_rename_program_to_plan(
         if not has_old and not has_new:
             return {"status": "fresh_install", "message": "No tables to migrate"}
 
-        # Run migrations
+        # Both old and new tables exist - drop empty new tables and rename old ones
         try:
+            if has_new and has_old:
+                # Check if new tables are empty (SQLAlchemy created them)
+                count_new = await db.execute(text("SELECT COUNT(*) FROM training_plans"))
+                new_count = count_new.scalar() or 0
+
+                count_old = await db.execute(text("SELECT COUNT(*) FROM workout_programs"))
+                old_count = count_old.scalar() or 0
+
+                results.append(f"Old workout_programs has {old_count} rows, new training_plans has {new_count} rows")
+
+                if new_count == 0 and old_count > 0:
+                    # Drop empty new tables and rename old ones
+                    # First drop tables that depend on training_plans
+                    await db.execute(text("DROP TABLE IF EXISTS plan_workouts CASCADE"))
+                    results.append("Dropped empty plan_workouts")
+
+                    await db.execute(text("DROP TABLE IF EXISTS plan_assignments CASCADE"))
+                    results.append("Dropped empty plan_assignments")
+
+                    await db.execute(text("DROP TABLE IF EXISTS training_plans CASCADE"))
+                    results.append("Dropped empty training_plans")
+
             # 1. Rename workout_programs -> training_plans
             await db.execute(text("ALTER TABLE workout_programs RENAME TO training_plans"))
             results.append("Renamed workout_programs -> training_plans")
