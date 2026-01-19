@@ -26,11 +26,16 @@ class AIExerciseService:
         exclude_ids: list[str] | None = None,
         context: dict[str, Any] | None = None,
         allow_advanced_techniques: bool = True,
+        allowed_techniques: list[str] | None = None,
     ) -> dict[str, Any]:
         """
         Use AI to suggest the best exercises based on context.
 
         Falls back to rule-based selection if AI is not available.
+
+        Args:
+            allowed_techniques: If provided, ONLY these techniques are allowed.
+                               E.g., ['biset', 'superset'] means only bi-sets and supersets.
         """
         # Filter available exercises by muscle group
         filtered = [
@@ -50,7 +55,9 @@ class AIExerciseService:
             try:
                 return await self._ai_suggest(
                     filtered, muscle_groups, goal, difficulty, count,
-                    context=context, allow_advanced_techniques=allow_advanced_techniques
+                    context=context,
+                    allow_advanced_techniques=allow_advanced_techniques,
+                    allowed_techniques=allowed_techniques,
                 )
             except Exception as e:
                 print(f"AI suggestion failed, falling back to rules: {e}")
@@ -58,7 +65,9 @@ class AIExerciseService:
         # Fallback to rule-based selection
         return self._rule_based_suggest(
             filtered, muscle_groups, goal, difficulty, count,
-            context=context, allow_advanced_techniques=allow_advanced_techniques
+            context=context,
+            allow_advanced_techniques=allow_advanced_techniques,
+            allowed_techniques=allowed_techniques,
         )
 
     async def _ai_suggest(
@@ -70,6 +79,7 @@ class AIExerciseService:
         count: int,
         context: dict[str, Any] | None = None,
         allow_advanced_techniques: bool = True,
+        allowed_techniques: list[str] | None = None,
     ) -> dict[str, Any]:
         """Use OpenAI to intelligently select and configure exercises."""
 
@@ -112,7 +122,77 @@ class AIExerciseService:
 
         # Build advanced techniques section
         techniques_section = ""
-        if allow_advanced_techniques and difficulty != Difficulty.BEGINNER:
+
+        # If specific techniques are required, build a restricted prompt
+        if allowed_techniques and len(allowed_techniques) > 0:
+            technique_descriptions = {
+                "normal": '"normal": Exercicio padrao',
+                "dropset": '"dropset": Dropset - reducao de carga sem descanso',
+                "rest_pause": '"rest_pause": Rest-pause - pausas curtas de 10-15s',
+                "cluster": '"cluster": Cluster set - series fracionadas',
+                "biset": '"biset": Bi-set - dois exercicios do mesmo grupo SEM descanso',
+                "superset": '"superset": Superset - dois exercicios de grupos DIFERENTES sem descanso',
+                "triset": '"triset": Tri-set - tres exercicios sem descanso',
+                "giantset": '"giantset": Giant set - quatro ou mais exercicios sem descanso',
+            }
+
+            allowed_list = [technique_descriptions.get(t, f'"{t}"') for t in allowed_techniques if t in technique_descriptions]
+
+            # Check if only group techniques are allowed (no normal)
+            group_techniques = {"biset", "superset", "triset", "giantset"}
+            only_group_techniques = all(t in group_techniques for t in allowed_techniques)
+
+            if only_group_techniques:
+                # Calculate pairs/groups needed
+                if "biset" in allowed_techniques or "superset" in allowed_techniques:
+                    group_size = 2
+                elif "triset" in allowed_techniques:
+                    group_size = 3
+                else:
+                    group_size = 4
+
+                techniques_section = f"""
+
+TECNICAS PERMITIDAS (OBRIGATORIO usar APENAS estas):
+{chr(10).join('- ' + t for t in allowed_list)}
+
+REGRA CRITICA: Voce DEVE usar SOMENTE as tecnicas listadas acima.
+NAO crie exercicios com technique_type "normal" - TODOS devem usar as tecnicas permitidas.
+
+Como "normal" NAO esta permitido, TODOS os {count} exercicios devem estar em grupos de {group_size}.
+Isso significa que voce deve criar {count // group_size} grupos.
+
+REGRAS OBRIGATORIAS PARA GRUPOS:
+1. Gere um UUID unico para cada grupo (ex: "group-" + 8 caracteres aleatorios)
+2. TODOS exercicios do grupo devem ter o MESMO "exercise_group_id"
+3. Use "exercise_group_order": 0 para o primeiro, 1 para o segundo, etc.
+4. TODOS exceto o ultimo do grupo: "rest_seconds": 0
+5. Ultimo exercicio do grupo: "rest_seconds": 60-90
+6. Para bi-set do mesmo grupo muscular: "technique_type": "biset"
+7. Para superset de grupos diferentes: "technique_type": "superset"
+
+EXEMPLO de bi-set:
+[
+  {{"exercise_id": "...", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 0, "rest_seconds": 0}},
+  {{"exercise_id": "...", "technique_type": "biset", "exercise_group_id": "group-abc123", "exercise_group_order": 1, "rest_seconds": 60}}
+]"""
+            else:
+                techniques_section = f"""
+
+TECNICAS PERMITIDAS (use APENAS estas):
+{chr(10).join('- ' + t for t in allowed_list)}
+
+IMPORTANTE: Voce DEVE usar SOMENTE as tecnicas listadas acima. NAO use outras tecnicas.
+
+REGRAS PARA BI-SET/SUPERSET/TRI-SET/GIANT-SET:
+1. Gere um UUID unico para cada grupo (ex: "group-" + 8 caracteres)
+2. TODOS exercicios do grupo devem ter o MESMO "exercise_group_id"
+3. Use "exercise_group_order": 0 para o primeiro, 1 para o segundo, etc.
+4. TODOS exceto o ultimo do grupo: "rest_seconds": 0
+5. Ultimo exercicio do grupo: "rest_seconds": 60-90"""
+
+        elif allow_advanced_techniques and difficulty != Difficulty.BEGINNER:
+            # Original behavior - allow all techniques
             techniques_section = """
 
 TECNICAS AVANCADAS (opcional - use quando apropriado):
@@ -124,12 +204,13 @@ TIPOS DE TECNICA:
 - "rest_pause": Rest-pause - pausas curtas de 10-15s entre mini-series
 - "cluster": Cluster set - series fracionadas com descanso intra-serie
 - "isometric": Isometrico - pausa estatica em um ponto do movimento
-- "bi_set": Bi-set - dois exercicios do mesmo grupo muscular sem descanso
-- "tri_set": Tri-set - tres exercicios do mesmo grupo muscular sem descanso
-- "giant_set": Giant set - quatro ou mais exercicios sem descanso
+- "biset": Bi-set - dois exercicios do mesmo grupo muscular sem descanso
+- "superset": Superset - dois exercicios de grupos diferentes sem descanso
+- "triset": Tri-set - tres exercicios sem descanso
+- "giantset": Giant set - quatro ou mais exercicios sem descanso
 
 REGRAS PARA TECNICAS:
-1. Para bi-set/tri-set/giant_set: agrupe exercicios consecutivos usando o mesmo "exercise_group_id"
+1. Para biset/superset/triset/giantset: agrupe exercicios consecutivos usando o mesmo "exercise_group_id"
 2. Dentro do grupo, use "exercise_group_order" para indicar a ordem (0, 1, 2...)
 3. Use "execution_instructions" para instrucoes especificas da tecnica
 4. Para isometric, defina "isometric_seconds" (ex: 3-5 segundos)
@@ -234,6 +315,19 @@ Responda APENAS com um JSON valido no formato:
                 # Validate technique_type against database values
                 if technique not in valid_db_techniques:
                     technique = "normal"
+
+                # ENFORCE allowed_techniques restriction
+                if allowed_techniques and len(allowed_techniques) > 0:
+                    if technique not in allowed_techniques:
+                        # Technique not allowed - use first allowed technique
+                        # Prefer group techniques if they're in the allowed list
+                        for allowed in allowed_techniques:
+                            if allowed in group_techniques:
+                                technique = allowed
+                                break
+                        else:
+                            technique = allowed_techniques[0]
+
                 s["technique_type"] = technique
 
                 # IMPORTANT: Single-exercise techniques should NEVER have a group_id
@@ -242,8 +336,13 @@ Responda APENAS com um JSON valido no formato:
                     s["exercise_group_order"] = 0
 
                 # Group techniques without group_id should be converted to normal
+                # BUT only if "normal" is allowed
                 if s["technique_type"] in group_techniques and not s.get("exercise_group_id"):
-                    s["technique_type"] = "normal"
+                    if allowed_techniques and "normal" not in allowed_techniques:
+                        # Generate a group_id since we can't fall back to normal
+                        s["exercise_group_id"] = f"group-{uuid.uuid4().hex[:8]}"
+                    else:
+                        s["technique_type"] = "normal"
 
                 validated_suggestions.append(s)
 
@@ -259,6 +358,7 @@ Responda APENAS com um JSON valido no formato:
         count: int,
         context: dict[str, Any] | None = None,
         allow_advanced_techniques: bool = True,
+        allowed_techniques: list[str] | None = None,
     ) -> dict[str, Any]:
         """Rule-based fallback for exercise selection."""
 
@@ -274,6 +374,20 @@ Responda APENAS com um JSON valido no formato:
         sets, reps, rest, message = config_map.get(
             goal, (3, "10-12", 60, "Bom treino!")
         )
+
+        # Check if only group techniques are allowed (no normal)
+        group_techniques = {"biset", "superset", "triset", "giantset"}
+        only_group_techniques = (
+            allowed_techniques
+            and len(allowed_techniques) > 0
+            and all(t in group_techniques for t in allowed_techniques)
+        )
+
+        # If only group techniques are allowed, use the paired suggestion method
+        if only_group_techniques:
+            return self._generate_paired_suggestions(
+                exercises, muscle_groups, goal, count, sets, reps, rest, allowed_techniques, context
+            )
 
         suggestions = []
         used_ids = set()
@@ -296,6 +410,25 @@ Responda APENAS com um JSON valido no formato:
             ]
 
             for i, ex in enumerate(group_exercises[:exercises_per_group]):
+                technique = "normal"
+                execution_instructions = None
+                reason = f"Exercicio para {ex['muscle_group']}"
+
+                # For advanced users with hypertrophy goal, suggest dropset on last exercise of each group
+                if (allow_advanced_techniques
+                    and difficulty == Difficulty.ADVANCED
+                    and goal == WorkoutGoal.HYPERTROPHY
+                    and i == exercises_per_group - 1):
+                    # Only use dropset if it's allowed
+                    if not allowed_techniques or "dropset" in allowed_techniques:
+                        technique = "dropset"
+                        execution_instructions = "Faca 2-3 reducoes de carga de 20-30%"
+                        reason = f"Dropset para maxima hipertrofia em {ex['muscle_group']}"
+
+                # Enforce allowed_techniques
+                if allowed_techniques and technique not in allowed_techniques:
+                    technique = allowed_techniques[0] if allowed_techniques else "normal"
+
                 suggestion = {
                     "exercise_id": str(ex["id"]),
                     "name": ex["name"],
@@ -304,22 +437,13 @@ Responda APENAS com um JSON valido no formato:
                     "reps": reps,
                     "rest_seconds": rest,
                     "order": len(suggestions),
-                    "reason": f"Exercicio para {ex['muscle_group']}",
-                    "technique_type": "normal",
+                    "reason": reason,
+                    "technique_type": technique,
                     "exercise_group_id": None,
                     "exercise_group_order": 0,
-                    "execution_instructions": None,
+                    "execution_instructions": execution_instructions,
                     "isometric_seconds": None,
                 }
-
-                # For advanced users with hypertrophy goal, suggest dropset on last exercise of each group
-                if (allow_advanced_techniques
-                    and difficulty == Difficulty.ADVANCED
-                    and goal == WorkoutGoal.HYPERTROPHY
-                    and i == exercises_per_group - 1):
-                    suggestion["technique_type"] = "dropset"
-                    suggestion["execution_instructions"] = "Faca 2-3 reducoes de carga de 20-30%"
-                    suggestion["reason"] = f"Dropset para maxima hipertrofia em {ex['muscle_group']}"
 
                 suggestions.append(suggestion)
                 used_ids.add(str(ex["id"]))
@@ -330,6 +454,10 @@ Responda APENAS com um JSON valido no formato:
             if remaining <= 0:
                 break
             if str(ex["id"]) not in used_ids and ex["name"].lower() not in existing_names:
+                technique = "normal"
+                if allowed_techniques and "normal" not in allowed_techniques:
+                    technique = allowed_techniques[0]
+
                 suggestions.append({
                     "exercise_id": str(ex["id"]),
                     "name": ex["name"],
@@ -339,7 +467,7 @@ Responda APENAS com um JSON valido no formato:
                     "rest_seconds": rest,
                     "order": len(suggestions),
                     "reason": f"Exercicio complementar para {ex['muscle_group']}",
-                    "technique_type": "normal",
+                    "technique_type": technique,
                     "exercise_group_id": None,
                     "exercise_group_order": 0,
                     "execution_instructions": None,
@@ -351,6 +479,86 @@ Responda APENAS com um JSON valido no formato:
         return {
             "suggestions": suggestions[:count],
             "message": message,
+        }
+
+    def _generate_paired_suggestions(
+        self,
+        exercises: list[dict[str, Any]],
+        muscle_groups: list[str],
+        goal: WorkoutGoal,
+        count: int,
+        sets: int,
+        reps: str,
+        rest: int,
+        allowed_techniques: list[str],
+        context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Generate exercises in pairs/groups when only group techniques are allowed."""
+
+        suggestions = []
+        used_ids = set()
+
+        # Check existing exercises to avoid duplicates
+        existing_names = set()
+        if context and context.get("existing_exercises"):
+            existing_names = {name.lower() for name in context["existing_exercises"]}
+
+        # Determine group size based on allowed techniques
+        if "triset" in allowed_techniques:
+            group_size = 3
+            technique = "triset"
+        elif "giantset" in allowed_techniques:
+            group_size = 4
+            technique = "giantset"
+        else:
+            group_size = 2
+            technique = "biset" if "biset" in allowed_techniques else "superset"
+
+        # Get all available exercises
+        available = [
+            ex for ex in exercises
+            if ex["muscle_group"].lower() in [mg.lower() for mg in muscle_groups]
+            and str(ex["id"]) not in used_ids
+            and ex["name"].lower() not in existing_names
+        ]
+
+        # Create groups
+        num_groups = count // group_size
+        exercise_idx = 0
+
+        for group_num in range(num_groups):
+            group_id = f"group-{uuid.uuid4().hex[:8]}"
+
+            for order_in_group in range(group_size):
+                if exercise_idx >= len(available):
+                    break
+
+                ex = available[exercise_idx]
+                exercise_idx += 1
+
+                # Last exercise in group gets rest, others get 0
+                ex_rest = rest if order_in_group == group_size - 1 else 0
+
+                suggestions.append({
+                    "exercise_id": str(ex["id"]),
+                    "name": ex["name"],
+                    "muscle_group": ex["muscle_group"],
+                    "sets": sets,
+                    "reps": reps,
+                    "rest_seconds": ex_rest,
+                    "order": len(suggestions),
+                    "reason": f"{technique.capitalize()} - exercicio {order_in_group + 1} do grupo",
+                    "technique_type": technique,
+                    "exercise_group_id": group_id,
+                    "exercise_group_order": order_in_group,
+                    "execution_instructions": None,
+                    "isometric_seconds": None,
+                })
+                used_ids.add(str(ex["id"]))
+
+        return {
+            "suggestions": suggestions[:count],
+            "message": f"Treino com {technique}s para maior intensidade.",
         }
 
     async def generate_full_plan(

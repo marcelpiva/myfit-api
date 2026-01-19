@@ -640,6 +640,10 @@ class ExerciseSuggestionRequest(BaseModel):
     # Workout context
     context: WorkoutContextInfo | None = Field(default=None, description="Workout/program context")
     allow_advanced_techniques: bool = Field(default=True, description="Allow suggesting advanced techniques")
+    allowed_techniques: list[str] | None = Field(
+        default=None,
+        description="Specific techniques to use. If provided, ONLY these techniques are allowed (e.g., ['biset', 'superset'])"
+    )
 
 
 class SuggestedExercise(BaseModel):

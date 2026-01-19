@@ -241,6 +241,7 @@ async def suggest_exercises(
         exclude_ids=exclude_ids,
         context=context_dict,
         allow_advanced_techniques=request.allow_advanced_techniques,
+        allowed_techniques=request.allowed_techniques,
     )
 
     # Convert to response format
