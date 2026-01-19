@@ -2148,6 +2148,91 @@ async def run_migration_fix_created_by_nullable(
             return {"status": "error", "message": str(e)}
 
 
+@router.post("/migrate/add-workout-exercise-columns")
+async def run_migration_add_workout_exercise_columns(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Add missing advanced technique columns to workout_exercises table."""
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    results = []
+
+    async with db.begin():
+        try:
+            columns_to_add = [
+                ("execution_instructions", "TEXT"),
+                ("group_instructions", "TEXT"),
+                ("isometric_seconds", "INTEGER"),
+                ("exercise_group_id", "VARCHAR(50)"),
+                ("exercise_group_order", "INTEGER DEFAULT 0 NOT NULL"),
+            ]
+
+            for col_name, col_type in columns_to_add:
+                check_col = await db.execute(
+                    text("""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_schema = 'public'
+                        AND table_name = 'workout_exercises'
+                        AND column_name = :col_name
+                    """),
+                    {"col_name": col_name}
+                )
+                if check_col.fetchone() is None:
+                    await db.execute(
+                        text(f"ALTER TABLE workout_exercises ADD COLUMN {col_name} {col_type}")
+                    )
+                    results.append(f"Added column {col_name}")
+                else:
+                    results.append(f"Column {col_name} already exists")
+
+            # Create technique_type enum if it doesn't exist
+            check_enum = await db.execute(
+                text("SELECT 1 FROM pg_type WHERE typname = 'technique_type_enum'")
+            )
+            if check_enum.fetchone() is None:
+                await db.execute(text("""
+                    CREATE TYPE technique_type_enum AS ENUM (
+                        'Normal', 'Bi-Set', 'Tri-Set', 'Giant Set', 'Super-Set',
+                        'Drop Set', 'Rest-Pause', 'Isometric', 'FST-7'
+                    )
+                """))
+                results.append("Created technique_type_enum")
+            else:
+                results.append("technique_type_enum already exists")
+
+            # Add technique_type column if it doesn't exist
+            check_col = await db.execute(
+                text("""
+                    SELECT column_name FROM information_schema.columns
+                    WHERE table_schema = 'public'
+                    AND table_name = 'workout_exercises'
+                    AND column_name = 'technique_type'
+                """)
+            )
+            if check_col.fetchone() is None:
+                await db.execute(
+                    text("ALTER TABLE workout_exercises ADD COLUMN technique_type technique_type_enum DEFAULT 'Normal' NOT NULL")
+                )
+                results.append("Added column technique_type")
+            else:
+                results.append("Column technique_type already exists")
+
+        except Exception as e:
+            return {"status": "error", "message": str(e), "completed": results}
+
+    return {"status": "success", "message": "Migration completed", "results": results}
+
+
 @router.post("/migrate/add-plan-diet-columns")
 async def run_migration_add_plan_diet_columns(
     db: Annotated[AsyncSession, Depends(get_db)],
