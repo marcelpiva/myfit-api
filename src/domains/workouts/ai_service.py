@@ -133,7 +133,7 @@ class AIExerciseService:
                 "biset": '"biset": Bi-set - EXATAMENTE 2 exercicios do MESMO grupo muscular, sem descanso entre eles',
                 "superset": '"superset": Superset - EXATAMENTE 2 exercicios de grupos musculares DIFERENTES (antagonistas), sem descanso entre eles',
                 "triset": '"triset": Tri-set - EXATAMENTE 3 exercicios do mesmo grupo muscular, sem descanso entre eles',
-                "giantset": '"giantset": Giant set - 4 OU MAIS exercicios, sem descanso entre eles',
+                "giantset": '"giantset": Giant set - 4 a 8 exercicios (minimo 4, maximo 8), sem descanso entre eles',
             }
 
             allowed_list = [technique_descriptions.get(t, f'"{t}"') for t in allowed_techniques if t in technique_descriptions]
@@ -168,7 +168,7 @@ REGRAS DE QUANTIDADE POR TECNICA:
 - biset: EXATAMENTE 2 exercicios por grupo (mesmo grupo muscular)
 - superset: EXATAMENTE 2 exercicios por grupo (grupos musculares diferentes/antagonistas)
 - triset: EXATAMENTE 3 exercicios por grupo (mesmo grupo muscular)
-- giantset: MINIMO 4 exercicios por grupo
+- giantset: 4 a 8 exercicios por grupo (MINIMO 4, MAXIMO 8)
 
 REGRAS DE GRUPOS MUSCULARES:
 - BI-SET: Os 2 exercicios DEVEM ser do MESMO grupo muscular (ex: 2 exercicios de peito)
@@ -206,7 +206,7 @@ REGRAS DE QUANTIDADE POR TECNICA:
 - biset: EXATAMENTE 2 exercicios do MESMO grupo muscular
 - superset: EXATAMENTE 2 exercicios de grupos DIFERENTES (antagonistas)
 - triset: EXATAMENTE 3 exercicios do mesmo grupo muscular
-- giantset: MINIMO 4 exercicios
+- giantset: 4 a 8 exercicios (MINIMO 4, MAXIMO 8)
 
 REGRAS DE ESTRUTURA PARA GRUPOS:
 1. Gere um UUID unico para cada grupo (ex: "group-" + 8 caracteres)
@@ -390,8 +390,8 @@ Responda APENAS com um JSON valido no formato:
         Rules:
         - Bi-set: exactly 2 exercises of the SAME muscle group
         - Superset: exactly 2 exercises of DIFFERENT muscle groups (antagonist)
-        - Tri-set: exactly 3 exercises (same muscle group area)
-        - Giant set: 4+ exercises
+        - Tri-set: exactly 3 exercises of the SAME muscle group
+        - Giant set: 4-8 exercises (min 4, max 8)
         """
 
         # Required group sizes for each technique
@@ -399,8 +399,11 @@ Responda APENAS com um JSON valido no formato:
             "biset": 2,      # EXACTLY 2 exercises, SAME muscle group
             "superset": 2,   # EXACTLY 2 exercises, DIFFERENT muscle groups (antagonist)
             "triset": 3,     # EXACTLY 3 exercises, SAME muscle group
-            "giantset": 4,   # MINIMUM 4 exercises (no max), any muscle groups
+            "giantset": 4,   # 4-8 exercises, any muscle groups
         }
+        # Giant set limits
+        giantset_min = 4
+        giantset_max = 8
 
         # Group exercises by group_id
         groups: dict[str, list[dict[str, Any]]] = {}
@@ -436,13 +439,54 @@ Responda APENAS com um JSON valido no formato:
             current_size = len(group_exercises)
 
             if technique == "giantset":
-                # Giant set needs at least 4
-                if current_size >= 4:
-                    # Valid giant set
+                # Giant set: 4-8 exercises
+                if giantset_min <= current_size <= giantset_max:
+                    # Valid giant set (4-8 exercises)
+                    for i, ex in enumerate(group_exercises):
+                        ex["exercise_group_order"] = i
+                        ex["rest_seconds"] = 60 if i == current_size - 1 else 0
                     fixed_grouped.extend(group_exercises)
-                elif current_size >= 2 and available_unused:
-                    # Try to complete to 4
-                    needed = 4 - current_size
+
+                elif current_size > giantset_max:
+                    # Too many exercises - split into multiple giant sets of 4-8
+                    idx = 0
+                    while idx < current_size:
+                        # Determine size of this group (prefer 4-6)
+                        remaining = current_size - idx
+                        if remaining >= giantset_min:
+                            # Take up to giantset_max, but leave at least giantset_min for next group if needed
+                            if remaining > giantset_max and remaining - giantset_max >= giantset_min:
+                                take = giantset_max
+                            elif remaining <= giantset_max:
+                                take = remaining
+                            else:
+                                # Split evenly if we'd leave orphans
+                                take = remaining // 2 if remaining // 2 >= giantset_min else giantset_min
+
+                            new_group_id = f"group-{uuid.uuid4().hex[:8]}"
+                            for order in range(take):
+                                ex = group_exercises[idx]
+                                ex["exercise_group_id"] = new_group_id
+                                ex["exercise_group_order"] = order
+                                ex["rest_seconds"] = 60 if order == take - 1 else 0
+                                fixed_grouped.append(ex)
+                                idx += 1
+                        else:
+                            # Remaining exercises can't form a giant set
+                            for ex in group_exercises[idx:]:
+                                if allowed_techniques and "normal" not in allowed_techniques:
+                                    fixed_grouped.append(ex)
+                                else:
+                                    ex["technique_type"] = "normal"
+                                    ex["exercise_group_id"] = None
+                                    ex["exercise_group_order"] = 0
+                                    ex["rest_seconds"] = 60
+                                    ungrouped.append(ex)
+                            break
+
+                elif current_size < giantset_min and available_unused:
+                    # Try to complete to minimum 4
+                    needed = giantset_min - current_size
                     for _ in range(needed):
                         if available_unused:
                             new_ex = available_unused.pop(0)
@@ -468,13 +512,12 @@ Responda APENAS com um JSON valido no formato:
                         ex["exercise_group_order"] = i
                         ex["rest_seconds"] = 60 if i == len(group_exercises) - 1 else 0
 
-                    if len(group_exercises) >= 4:
+                    if len(group_exercises) >= giantset_min:
                         fixed_grouped.extend(group_exercises)
                     else:
                         # Convert to normal if can't complete
                         for ex in group_exercises:
                             if allowed_techniques and "normal" not in allowed_techniques:
-                                # Keep as incomplete group (best effort)
                                 fixed_grouped.append(ex)
                             else:
                                 ex["technique_type"] = "normal"
@@ -483,7 +526,7 @@ Responda APENAS com um JSON valido no formato:
                                 ex["rest_seconds"] = 60
                                 ungrouped.append(ex)
                 else:
-                    # Convert to normal
+                    # Not enough exercises and can't complete
                     for ex in group_exercises:
                         if allowed_techniques and "normal" not in allowed_techniques:
                             fixed_grouped.append(ex)
