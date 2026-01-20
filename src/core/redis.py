@@ -142,3 +142,97 @@ async def cache_delete(key: str) -> None:
         await client.delete(key)
     else:
         _memory_store.pop(key, None)
+
+
+class RateLimiter:
+    """Rate limiter using Redis or in-memory fallback.
+
+    Uses a sliding window algorithm to limit requests per time window.
+    """
+
+    RATE_LIMIT_PREFIX = "ratelimit:"
+
+    @classmethod
+    async def check_rate_limit(
+        cls,
+        identifier: str,
+        action: str,
+        max_requests: int,
+        window_seconds: int = 3600,
+    ) -> tuple[bool, int]:
+        """Check if an action is within rate limits.
+
+        Args:
+            identifier: Unique identifier (e.g., user_id)
+            action: Action being rate limited (e.g., "assignment")
+            max_requests: Maximum requests allowed in the window
+            window_seconds: Time window in seconds (default: 1 hour)
+
+        Returns:
+            Tuple of (is_allowed, current_count)
+        """
+        key = f"{cls.RATE_LIMIT_PREFIX}{action}:{identifier}"
+        client = await get_redis()
+
+        if client:
+            # Use Redis INCR with EXPIRE for atomic increment
+            current = await client.incr(key)
+            if current == 1:
+                # First request in window, set expiration
+                await client.expire(key, window_seconds)
+
+            return current <= max_requests, current
+        else:
+            import time
+            now = time.time()
+
+            if key in _memory_store:
+                data, expiry = _memory_store[key]
+                if expiry and now < expiry:
+                    # Increment counter
+                    current = int(data) + 1
+                    _memory_store[key] = (str(current), expiry)
+                    return current <= max_requests, current
+                else:
+                    # Window expired, reset
+                    del _memory_store[key]
+
+            # First request in window
+            _memory_store[key] = ("1", now + window_seconds)
+            return True, 1
+
+    @classmethod
+    async def get_remaining(
+        cls,
+        identifier: str,
+        action: str,
+        max_requests: int,
+    ) -> int:
+        """Get remaining requests in the current window.
+
+        Args:
+            identifier: Unique identifier (e.g., user_id)
+            action: Action being rate limited
+            max_requests: Maximum requests allowed
+
+        Returns:
+            Number of remaining requests
+        """
+        key = f"{cls.RATE_LIMIT_PREFIX}{action}:{identifier}"
+        client = await get_redis()
+
+        if client:
+            current = await client.get(key)
+            if current is None:
+                return max_requests
+            return max(0, max_requests - int(current))
+        else:
+            import time
+            now = time.time()
+
+            if key in _memory_store:
+                data, expiry = _memory_store[key]
+                if expiry and now < expiry:
+                    return max(0, max_requests - int(data))
+
+            return max_requests

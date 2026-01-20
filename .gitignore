@@ -13,3 +13,4 @@ venv/
 .DS_Store
 myfit.db
 *.db
+.env

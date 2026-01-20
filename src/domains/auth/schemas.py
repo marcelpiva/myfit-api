@@ -46,6 +46,10 @@ class UserResponse(BaseModel):
     name: str
     phone: str | None = None
     avatar_url: str | None = None
+    birth_date: str | None = None
+    gender: str | None = None
+    height_cm: float | None = None
+    bio: str | None = None
     is_active: bool
     is_verified: bool
 

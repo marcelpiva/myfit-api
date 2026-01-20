@@ -72,6 +72,7 @@ python-jose==3.5.0
 python-multipart==0.0.21
 PyYAML==6.0.3
 redis==7.1.0
+resend>=2.0.0
 rsa==4.9.1
 ruff==0.14.13
 s3transfer==0.16.0

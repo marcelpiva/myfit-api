@@ -114,6 +114,32 @@ from src.domains.trainers.models import (
     StudentNote,
 )
 
+# Chat domain
+from src.domains.chat.models import (
+    Conversation,
+    ConversationParticipant,
+    ConversationType,
+    Message,
+    MessageType,
+)
+
+# Notifications domain
+from src.domains.notifications.models import (
+    Notification,
+    NotificationPriority,
+    NotificationType,
+)
+
+# Billing domain
+from src.domains.billing.models import (
+    Payment,
+    PaymentMethod,
+    PaymentPlan,
+    PaymentStatus,
+    PaymentType,
+    RecurrenceType,
+)
+
 __all__ = [
     # Users
     "User",
@@ -195,4 +221,21 @@ __all__ = [
     "AppointmentType",
     # Trainers
     "StudentNote",
+    # Chat
+    "Conversation",
+    "ConversationParticipant",
+    "ConversationType",
+    "Message",
+    "MessageType",
+    # Notifications
+    "Notification",
+    "NotificationPriority",
+    "NotificationType",
+    # Billing
+    "Payment",
+    "PaymentMethod",
+    "PaymentPlan",
+    "PaymentStatus",
+    "PaymentType",
+    "RecurrenceType",
 ]

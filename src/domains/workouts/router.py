@@ -19,6 +19,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
+from src.core.redis import RateLimiter
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.service import UserService
 from src.domains.workouts.models import Difficulty, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
@@ -364,6 +365,21 @@ async def create_assignment(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> AssignmentResponse:
     """Assign a workout to a student."""
+    from src.domains.organizations.models import OrganizationMembership
+
+    # Rate limiting: max 50 assignments per hour per trainer
+    is_allowed, current_count = await RateLimiter.check_rate_limit(
+        identifier=str(current_user.id),
+        action="workout_assignment",
+        max_requests=50,
+        window_seconds=3600,
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Limite de atribuições excedido. Tente novamente mais tarde. ({current_count}/50 por hora)",
+        )
+
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
@@ -382,6 +398,41 @@ async def create_assignment(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Student not found",
         )
+
+    # SECURITY: Validate trainer and student share an organization
+    if request.organization_id:
+        from sqlalchemy import and_, select
+
+        # Check if both trainer and student are members of the specified organization
+        trainer_membership = await db.execute(
+            select(OrganizationMembership).where(
+                and_(
+                    OrganizationMembership.user_id == current_user.id,
+                    OrganizationMembership.organization_id == request.organization_id,
+                    OrganizationMembership.is_active == True,
+                )
+            )
+        )
+        if not trainer_membership.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Você não é membro desta organização",
+            )
+
+        student_membership = await db.execute(
+            select(OrganizationMembership).where(
+                and_(
+                    OrganizationMembership.user_id == request.student_id,
+                    OrganizationMembership.organization_id == request.organization_id,
+                    OrganizationMembership.is_active == True,
+                )
+            )
+        )
+        if not student_membership.scalar_one_or_none():
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="O aluno não é membro desta organização",
+            )
 
     assignment = await workout_service.create_assignment(
         workout_id=request.workout_id,
@@ -506,7 +557,8 @@ async def get_session(
             detail="Session not found",
         )
 
-    if session.user_id != current_user.id:
+    # Allow both session owner (student) and trainer to access
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
@@ -1252,6 +1304,19 @@ async def create_plan_assignment(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlanAssignmentResponse:
     """Assign a plan to a student."""
+    # Rate limiting: max 20 plan assignments per hour per trainer
+    is_allowed, current_count = await RateLimiter.check_rate_limit(
+        identifier=str(current_user.id),
+        action="plan_assignment",
+        max_requests=20,
+        window_seconds=3600,
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Limite de atribuições de planos excedido. Tente novamente mais tarde. ({current_count}/20 por hora)",
+        )
+
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
@@ -1658,9 +1723,31 @@ async def remove_exercise(
 async def list_active_sessions(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    organization_id: Annotated[UUID | None, Query()] = None,
+    organization_id: Annotated[UUID, Query()],  # SECURITY: Now required to prevent cross-org access
 ) -> list[ActiveSessionResponse]:
-    """List active sessions for students (trainer view - 'Students Now')."""
+    """List active sessions for students (trainer view - 'Students Now').
+
+    Organization ID is required to ensure trainers only see sessions from their organization.
+    """
+    from sqlalchemy import and_, select
+    from src.domains.organizations.models import OrganizationMembership
+
+    # SECURITY: Verify trainer is a member of the specified organization
+    trainer_membership = await db.execute(
+        select(OrganizationMembership).where(
+            and_(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.organization_id == organization_id,
+                OrganizationMembership.is_active == True,
+            )
+        )
+    )
+    if not trainer_membership.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não é membro desta organização",
+        )
+
     workout_service = WorkoutService(db)
     sessions = await workout_service.list_active_sessions(
         trainer_id=current_user.id,
@@ -1982,806 +2069,3 @@ async def stream_session_events(
             "X-Accel-Buffering": "no",
         },
     )
-
-
-# ==================== Migration Endpoint ====================
-
-@router.post("/migrate/rename-program-to-plan")
-async def run_migration_rename_program_to_plan(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Run database migration to rename program tables to plan.
-
-    Requires a secret key for security.
-    """
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    results = []
-
-    async with db.begin():
-        # Check if old tables exist
-        check_old = await db.execute(
-            text("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public'
-                AND table_name = 'workout_programs'
-            """)
-        )
-        has_old = check_old.fetchone() is not None
-
-        check_new = await db.execute(
-            text("""
-                SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public'
-                AND table_name = 'training_plans'
-            """)
-        )
-        has_new = check_new.fetchone() is not None
-
-        if has_new and not has_old:
-            return {"status": "already_migrated", "message": "Migration already completed"}
-
-        if not has_old and not has_new:
-            return {"status": "fresh_install", "message": "No tables to migrate"}
-
-        # Both old and new tables exist - drop empty new tables and rename old ones
-        try:
-            if has_new and has_old:
-                # Check if new tables are empty (SQLAlchemy created them)
-                count_new = await db.execute(text("SELECT COUNT(*) FROM training_plans"))
-                new_count = count_new.scalar() or 0
-
-                count_old = await db.execute(text("SELECT COUNT(*) FROM workout_programs"))
-                old_count = count_old.scalar() or 0
-
-                results.append(f"Old workout_programs has {old_count} rows, new training_plans has {new_count} rows")
-
-                if new_count == 0 and old_count > 0:
-                    # Drop empty new tables and rename old ones
-                    # First drop tables that depend on training_plans
-                    await db.execute(text("DROP TABLE IF EXISTS plan_workouts CASCADE"))
-                    results.append("Dropped empty plan_workouts")
-
-                    await db.execute(text("DROP TABLE IF EXISTS plan_assignments CASCADE"))
-                    results.append("Dropped empty plan_assignments")
-
-                    await db.execute(text("DROP TABLE IF EXISTS training_plans CASCADE"))
-                    results.append("Dropped empty training_plans")
-
-            # 1. Rename workout_programs -> training_plans
-            await db.execute(text("ALTER TABLE workout_programs RENAME TO training_plans"))
-            results.append("Renamed workout_programs -> training_plans")
-
-            # 2. Rename program_workouts -> plan_workouts
-            await db.execute(text("ALTER TABLE program_workouts RENAME TO plan_workouts"))
-            results.append("Renamed program_workouts -> plan_workouts")
-
-            # 3. Rename program_id column in plan_workouts
-            await db.execute(text("ALTER TABLE plan_workouts RENAME COLUMN program_id TO plan_id"))
-            results.append("Renamed plan_workouts.program_id -> plan_id")
-
-            # 4. Rename program_assignments -> plan_assignments
-            await db.execute(text("ALTER TABLE program_assignments RENAME TO plan_assignments"))
-            results.append("Renamed program_assignments -> plan_assignments")
-
-            # 5. Rename program_id column in plan_assignments
-            await db.execute(text("ALTER TABLE plan_assignments RENAME COLUMN program_id TO plan_id"))
-            results.append("Renamed plan_assignments.program_id -> plan_id")
-
-        except Exception as e:
-            return {"status": "error", "message": str(e), "completed": results}
-
-    return {"status": "success", "message": "Migration completed", "results": results}
-
-
-@router.get("/debug/table-columns")
-async def debug_table_columns(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Debug secret key"),
-    table_name: str = Query(..., description="Table name"),
-) -> dict:
-    """Debug endpoint to check table columns."""
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid secret",
-        )
-
-    from sqlalchemy import text
-
-    result = await db.execute(text("""
-        SELECT column_name, data_type, is_nullable
-        FROM information_schema.columns
-        WHERE table_name = :table_name
-        ORDER BY ordinal_position
-    """), {"table_name": table_name})
-    columns = [{"name": row[0], "type": row[1], "nullable": row[2]} for row in result.fetchall()]
-
-    return {"table": table_name, "columns": columns}
-
-
-@router.get("/debug/test-list-plans")
-async def debug_test_list_plans(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Debug secret key"),
-) -> dict:
-    """Debug endpoint to test list_plans query."""
-    import os
-    import traceback
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid secret",
-        )
-
-    from sqlalchemy import text
-
-    try:
-        # Try a simple query first
-        result = await db.execute(text("SELECT COUNT(*) FROM training_plans"))
-        count = result.scalar()
-
-        # Try to get one record
-        result2 = await db.execute(text("SELECT id, name, created_by_id FROM training_plans LIMIT 1"))
-        row = result2.fetchone()
-
-        return {
-            "count": count,
-            "sample_row": {"id": str(row[0]), "name": row[1], "created_by_id": str(row[2]) if row[2] else None} if row else None
-        }
-    except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
-
-
-@router.get("/debug/test-orm-plan")
-async def debug_test_orm_plan(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Debug secret key"),
-) -> dict:
-    """Debug endpoint to test ORM query for training plans."""
-    import os
-    import traceback
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid secret",
-        )
-
-    try:
-        from sqlalchemy import select
-        from sqlalchemy.orm import selectinload
-        from src.domains.workouts.models import TrainingPlan
-
-        # Test ORM query
-        query = select(TrainingPlan).options(selectinload(TrainingPlan.plan_workouts)).limit(1)
-        result = await db.execute(query)
-        plan = result.scalars().first()
-
-        if plan:
-            return {
-                "id": str(plan.id),
-                "name": plan.name,
-                "goal": plan.goal.value if plan.goal else None,
-                "difficulty": plan.difficulty.value if plan.difficulty else None,
-                "plan_workouts_count": len(plan.plan_workouts) if plan.plan_workouts else 0,
-            }
-        return {"message": "No plan found"}
-    except Exception as e:
-        return {"error": str(e), "traceback": traceback.format_exc()}
-
-
-@router.post("/migrate/add-source-template-id")
-async def run_migration_add_source_template_id(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Add missing source_template_id column to training_plans table."""
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    async with db.begin():
-        check_col = await db.execute(
-            text("""
-                SELECT column_name FROM information_schema.columns
-                WHERE table_schema = 'public'
-                AND table_name = 'training_plans'
-                AND column_name = 'source_template_id'
-            """)
-        )
-        if check_col.fetchone() is None:
-            await db.execute(text("ALTER TABLE training_plans ADD COLUMN source_template_id UUID"))
-            return {"status": "success", "message": "Added source_template_id column"}
-        else:
-            return {"status": "already_exists", "message": "source_template_id column already exists"}
-
-
-@router.post("/migrate/fix-created-by-nullable")
-async def run_migration_fix_created_by_nullable(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Fix created_by_id column to allow NULL for system templates."""
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    async with db.begin():
-        try:
-            await db.execute(text("ALTER TABLE training_plans ALTER COLUMN created_by_id DROP NOT NULL"))
-            return {"status": "success", "message": "Made created_by_id nullable"}
-        except Exception as e:
-            return {"status": "error", "message": str(e)}
-
-
-@router.post("/migrate/add-workout-exercise-columns")
-async def run_migration_add_workout_exercise_columns(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Add missing advanced technique columns to workout_exercises table."""
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    results = []
-
-    async with db.begin():
-        try:
-            columns_to_add = [
-                ("execution_instructions", "TEXT"),
-                ("group_instructions", "TEXT"),
-                ("isometric_seconds", "INTEGER"),
-                ("exercise_group_id", "VARCHAR(50)"),
-                ("exercise_group_order", "INTEGER DEFAULT 0 NOT NULL"),
-            ]
-
-            for col_name, col_type in columns_to_add:
-                check_col = await db.execute(
-                    text("""
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_schema = 'public'
-                        AND table_name = 'workout_exercises'
-                        AND column_name = :col_name
-                    """),
-                    {"col_name": col_name}
-                )
-                if check_col.fetchone() is None:
-                    await db.execute(
-                        text(f"ALTER TABLE workout_exercises ADD COLUMN {col_name} {col_type}")
-                    )
-                    results.append(f"Added column {col_name}")
-                else:
-                    results.append(f"Column {col_name} already exists")
-
-            # Create technique_type enum if it doesn't exist
-            check_enum = await db.execute(
-                text("SELECT 1 FROM pg_type WHERE typname = 'technique_type_enum'")
-            )
-            if check_enum.fetchone() is None:
-                await db.execute(text("""
-                    CREATE TYPE technique_type_enum AS ENUM (
-                        'Normal', 'Bi-Set', 'Tri-Set', 'Giant Set', 'Super-Set',
-                        'Drop Set', 'Rest-Pause', 'Isometric', 'FST-7'
-                    )
-                """))
-                results.append("Created technique_type_enum")
-            else:
-                results.append("technique_type_enum already exists")
-
-            # Get enum values to find the correct default
-            enum_values = await db.execute(
-                text("SELECT enumlabel FROM pg_enum WHERE enumtypid = 'technique_type_enum'::regtype ORDER BY enumsortorder")
-            )
-            enum_list = [row[0] for row in enum_values.fetchall()]
-            results.append(f"Enum values: {enum_list}")
-
-            # Add technique_type column if it doesn't exist
-            check_col = await db.execute(
-                text("""
-                    SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = 'public'
-                    AND table_name = 'workout_exercises'
-                    AND column_name = 'technique_type'
-                """)
-            )
-            if check_col.fetchone() is None:
-                # Use the first enum value as default
-                default_value = enum_list[0] if enum_list else "normal"
-                await db.execute(
-                    text(f"ALTER TABLE workout_exercises ADD COLUMN technique_type technique_type_enum DEFAULT '{default_value}' NOT NULL")
-                )
-                results.append(f"Added column technique_type with default '{default_value}'")
-            else:
-                results.append("Column technique_type already exists")
-
-        except Exception as e:
-            return {"status": "error", "message": str(e), "completed": results}
-
-    return {"status": "success", "message": "Migration completed", "results": results}
-
-
-@router.post("/migrate/add-plan-diet-columns")
-async def run_migration_add_plan_diet_columns(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Add missing diet columns to training_plans table.
-
-    Requires a secret key for security.
-    """
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    results = []
-
-    async with db.begin():
-        try:
-            # Check which columns are missing and add them
-            columns_to_add = [
-                ("include_diet", "BOOLEAN DEFAULT FALSE NOT NULL"),
-                ("diet_type", "VARCHAR(50)"),
-                ("daily_calories", "INTEGER"),
-                ("protein_grams", "INTEGER"),
-                ("carbs_grams", "INTEGER"),
-                ("fat_grams", "INTEGER"),
-                ("meals_per_day", "INTEGER"),
-                ("diet_notes", "TEXT"),
-            ]
-
-            for col_name, col_type in columns_to_add:
-                # Check if column exists
-                check_col = await db.execute(
-                    text("""
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_schema = 'public'
-                        AND table_name = 'training_plans'
-                        AND column_name = :col_name
-                    """),
-                    {"col_name": col_name}
-                )
-                if check_col.fetchone() is None:
-                    await db.execute(
-                        text(f"ALTER TABLE training_plans ADD COLUMN {col_name} {col_type}")
-                    )
-                    results.append(f"Added column {col_name}")
-                else:
-                    results.append(f"Column {col_name} already exists")
-
-        except Exception as e:
-            return {"status": "error", "message": str(e), "completed": results}
-
-    return {"status": "success", "message": "Migration completed", "results": results}
-
-
-# Prescription Notes endpoints
-
-@router.post("/notes", response_model=PrescriptionNoteResponse, status_code=status.HTTP_201_CREATED)
-async def create_prescription_note(
-    request: PrescriptionNoteCreate,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PrescriptionNoteResponse:
-    """Create a new prescription note.
-
-    Notes can be attached to:
-    - plan: Training plan
-    - workout: Specific workout
-    - exercise: Workout exercise configuration
-    - session: Completed session
-
-    Trainers and students can both create notes.
-    """
-    from src.domains.users.models import UserRole
-
-    # Determine author role based on user's primary role
-    user_service = UserService(db)
-    user = await user_service.get_user_by_id(current_user.id)
-
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found",
-        )
-
-    # Determine role - if user has TRAINER role, they're a trainer
-    author_role = NoteAuthorRole.TRAINER if user.role == UserRole.TRAINER else NoteAuthorRole.STUDENT
-
-    workout_service = WorkoutService(db)
-    note = await workout_service.create_prescription_note(
-        context_type=request.context_type,
-        context_id=request.context_id,
-        author_id=current_user.id,
-        author_role=author_role,
-        content=request.content,
-        is_pinned=request.is_pinned,
-        organization_id=request.organization_id,
-    )
-
-    return PrescriptionNoteResponse(
-        id=note.id,
-        context_type=note.context_type,
-        context_id=note.context_id,
-        author_id=note.author_id,
-        author_role=note.author_role,
-        author_name=user.name,
-        content=note.content,
-        is_pinned=note.is_pinned,
-        read_at=note.read_at,
-        read_by_id=note.read_by_id,
-        organization_id=note.organization_id,
-        created_at=note.created_at,
-        updated_at=note.updated_at,
-    )
-
-
-@router.get("/notes", response_model=PrescriptionNoteListResponse)
-async def list_prescription_notes(
-    context_type: Annotated[NoteContextType, Query()],
-    context_id: Annotated[UUID, Query()],
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    organization_id: Annotated[UUID | None, Query()] = None,
-) -> PrescriptionNoteListResponse:
-    """List prescription notes for a specific context.
-
-    Returns notes attached to the specified plan, workout, exercise, or session.
-    """
-    from src.domains.users.models import UserRole
-
-    workout_service = WorkoutService(db)
-    notes = await workout_service.list_prescription_notes(
-        context_type=context_type,
-        context_id=context_id,
-        organization_id=organization_id,
-    )
-
-    # Get author names
-    user_service = UserService(db)
-    author_ids = {note.author_id for note in notes}
-    authors = {}
-    for author_id in author_ids:
-        user = await user_service.get_user_by_id(author_id)
-        if user:
-            authors[author_id] = user.name
-
-    # Determine current user's role for unread count
-    user = await user_service.get_user_by_id(current_user.id)
-    user_role = NoteAuthorRole.TRAINER if user and user.role == UserRole.TRAINER else NoteAuthorRole.STUDENT
-
-    unread_count = await workout_service.count_unread_notes(
-        context_type=context_type,
-        context_id=context_id,
-        for_role=user_role,
-    )
-
-    return PrescriptionNoteListResponse(
-        notes=[
-            PrescriptionNoteResponse(
-                id=note.id,
-                context_type=note.context_type,
-                context_id=note.context_id,
-                author_id=note.author_id,
-                author_role=note.author_role,
-                author_name=authors.get(note.author_id),
-                content=note.content,
-                is_pinned=note.is_pinned,
-                read_at=note.read_at,
-                read_by_id=note.read_by_id,
-                organization_id=note.organization_id,
-                created_at=note.created_at,
-                updated_at=note.updated_at,
-            )
-            for note in notes
-        ],
-        total=len(notes),
-        unread_count=unread_count,
-    )
-
-
-@router.get("/notes/{note_id}", response_model=PrescriptionNoteResponse)
-async def get_prescription_note(
-    note_id: UUID,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PrescriptionNoteResponse:
-    """Get a specific prescription note by ID."""
-    workout_service = WorkoutService(db)
-    note = await workout_service.get_prescription_note_by_id(note_id)
-
-    if not note:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Note not found",
-        )
-
-    author_name = None
-    if note.author:
-        author_name = note.author.name
-
-    return PrescriptionNoteResponse(
-        id=note.id,
-        context_type=note.context_type,
-        context_id=note.context_id,
-        author_id=note.author_id,
-        author_role=note.author_role,
-        author_name=author_name,
-        content=note.content,
-        is_pinned=note.is_pinned,
-        read_at=note.read_at,
-        read_by_id=note.read_by_id,
-        organization_id=note.organization_id,
-        created_at=note.created_at,
-        updated_at=note.updated_at,
-    )
-
-
-@router.put("/notes/{note_id}", response_model=PrescriptionNoteResponse)
-async def update_prescription_note(
-    note_id: UUID,
-    request: PrescriptionNoteUpdate,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PrescriptionNoteResponse:
-    """Update a prescription note.
-
-    Only the author can update their own notes.
-    """
-    workout_service = WorkoutService(db)
-    note = await workout_service.get_prescription_note_by_id(note_id)
-
-    if not note:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Note not found",
-        )
-
-    # Only author can update
-    if note.author_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the author can update this note",
-        )
-
-    note = await workout_service.update_prescription_note(
-        note=note,
-        content=request.content,
-        is_pinned=request.is_pinned,
-    )
-
-    author_name = None
-    if note.author:
-        author_name = note.author.name
-
-    return PrescriptionNoteResponse(
-        id=note.id,
-        context_type=note.context_type,
-        context_id=note.context_id,
-        author_id=note.author_id,
-        author_role=note.author_role,
-        author_name=author_name,
-        content=note.content,
-        is_pinned=note.is_pinned,
-        read_at=note.read_at,
-        read_by_id=note.read_by_id,
-        organization_id=note.organization_id,
-        created_at=note.created_at,
-        updated_at=note.updated_at,
-    )
-
-
-@router.post("/notes/{note_id}/read", response_model=PrescriptionNoteResponse)
-async def mark_note_as_read(
-    note_id: UUID,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PrescriptionNoteResponse:
-    """Mark a prescription note as read by the current user."""
-    workout_service = WorkoutService(db)
-    note = await workout_service.get_prescription_note_by_id(note_id)
-
-    if not note:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Note not found",
-        )
-
-    note = await workout_service.mark_note_as_read(
-        note=note,
-        user_id=current_user.id,
-    )
-
-    author_name = None
-    if note.author:
-        author_name = note.author.name
-
-    return PrescriptionNoteResponse(
-        id=note.id,
-        context_type=note.context_type,
-        context_id=note.context_id,
-        author_id=note.author_id,
-        author_role=note.author_role,
-        author_name=author_name,
-        content=note.content,
-        is_pinned=note.is_pinned,
-        read_at=note.read_at,
-        read_by_id=note.read_by_id,
-        organization_id=note.organization_id,
-        created_at=note.created_at,
-        updated_at=note.updated_at,
-    )
-
-
-@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_prescription_note(
-    note_id: UUID,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete a prescription note.
-
-    Only the author can delete their own notes.
-    """
-    workout_service = WorkoutService(db)
-    note = await workout_service.get_prescription_note_by_id(note_id)
-
-    if not note:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Note not found",
-        )
-
-    # Only author can delete
-    if note.author_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the author can delete this note",
-        )
-
-    await workout_service.delete_prescription_note(note)
-
-
-@router.post("/migrate/add-prescription-notes-table")
-async def run_migration_add_prescription_notes(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    secret: str = Query(..., description="Migration secret key"),
-) -> dict:
-    """Create the prescription_notes table.
-
-    Requires a secret key for security.
-    """
-    import os
-    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
-
-    if secret != expected_secret:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Invalid migration secret",
-        )
-
-    from sqlalchemy import text
-
-    results = []
-
-    async with db.begin():
-        try:
-            # Check if table exists
-            check_table = await db.execute(
-                text("""
-                    SELECT table_name FROM information_schema.tables
-                    WHERE table_schema = 'public'
-                    AND table_name = 'prescription_notes'
-                """)
-            )
-            if check_table.fetchone() is not None:
-                results.append("Table prescription_notes already exists")
-                return {"status": "success", "message": "Table already exists", "results": results}
-
-            # Create enum types first
-            await db.execute(text("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'note_context_type_enum') THEN
-                        CREATE TYPE note_context_type_enum AS ENUM ('plan', 'workout', 'exercise', 'session');
-                    END IF;
-                END
-                $$;
-            """))
-            results.append("Created enum note_context_type_enum")
-
-            await db.execute(text("""
-                DO $$
-                BEGIN
-                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'note_author_role_enum') THEN
-                        CREATE TYPE note_author_role_enum AS ENUM ('trainer', 'student');
-                    END IF;
-                END
-                $$;
-            """))
-            results.append("Created enum note_author_role_enum")
-
-            # Create the table
-            await db.execute(text("""
-                CREATE TABLE prescription_notes (
-                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-                    context_type note_context_type_enum NOT NULL,
-                    context_id UUID NOT NULL,
-                    author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-                    author_role note_author_role_enum NOT NULL,
-                    content TEXT NOT NULL,
-                    is_pinned BOOLEAN DEFAULT FALSE NOT NULL,
-                    read_at TIMESTAMPTZ,
-                    read_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
-                    organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
-                    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
-                    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
-                );
-            """))
-            results.append("Created table prescription_notes")
-
-            # Create indexes
-            await db.execute(text("""
-                CREATE INDEX idx_prescription_notes_context ON prescription_notes(context_type, context_id);
-            """))
-            results.append("Created index idx_prescription_notes_context")
-
-            await db.execute(text("""
-                CREATE INDEX idx_prescription_notes_author ON prescription_notes(author_id);
-            """))
-            results.append("Created index idx_prescription_notes_author")
-
-            await db.execute(text("""
-                CREATE INDEX idx_prescription_notes_org ON prescription_notes(organization_id);
-            """))
-            results.append("Created index idx_prescription_notes_org")
-
-        except Exception as e:
-            return {"status": "error", "message": str(e), "completed": results}
-
-    return {"status": "success", "message": "Migration completed", "results": results}

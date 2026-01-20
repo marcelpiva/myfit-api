@@ -1665,12 +1665,67 @@ class WorkoutService:
     ) -> list[PrescriptionNote]:
         """List notes relevant to a student (notes from trainers on their assignments).
 
-        For now, this returns notes where the student needs to see them,
-        which can be expanded later to include assignment-based filtering.
+        SECURITY FIX: VULN-6 - Now properly filters notes based on student access.
+        Only returns notes on contexts the student has access to:
+        - SESSION: Sessions where student is the user_id
+        - PLAN: Plans assigned to the student via WorkoutAssignment
+        - WORKOUT: Workouts assigned to the student
+        - EXERCISE: Workout exercises in workouts assigned to the student
         """
+        # Build subqueries to find context_ids the student has access to
+        # For SESSION context: sessions where user_id == student_id
+        session_ids_subquery = (
+            select(WorkoutSession.id)
+            .where(WorkoutSession.user_id == student_id)
+        ).scalar_subquery()
+
+        # For WORKOUT context: workouts assigned to the student
+        workout_assignment_ids_subquery = (
+            select(WorkoutAssignment.workout_id)
+            .where(WorkoutAssignment.student_id == student_id)
+        ).scalar_subquery()
+
+        # For PLAN context: plans with assignments to the student
+        plan_ids_subquery = (
+            select(TrainingPlan.id)
+            .join(WorkoutAssignment, WorkoutAssignment.plan_id == TrainingPlan.id)
+            .where(WorkoutAssignment.student_id == student_id)
+        ).scalar_subquery()
+
+        # For EXERCISE context: workout_exercises in workouts assigned to the student
+        exercise_ids_subquery = (
+            select(WorkoutExercise.id)
+            .join(Workout, WorkoutExercise.workout_id == Workout.id)
+            .join(WorkoutAssignment, WorkoutAssignment.workout_id == Workout.id)
+            .where(WorkoutAssignment.student_id == student_id)
+        ).scalar_subquery()
+
+        # Build the main query with OR conditions for each context type
+        access_conditions = or_(
+            and_(
+                PrescriptionNote.context_type == NoteContextType.SESSION,
+                PrescriptionNote.context_id.in_(session_ids_subquery),
+            ),
+            and_(
+                PrescriptionNote.context_type == NoteContextType.WORKOUT,
+                PrescriptionNote.context_id.in_(workout_assignment_ids_subquery),
+            ),
+            and_(
+                PrescriptionNote.context_type == NoteContextType.PLAN,
+                PrescriptionNote.context_id.in_(plan_ids_subquery),
+            ),
+            and_(
+                PrescriptionNote.context_type == NoteContextType.EXERCISE,
+                PrescriptionNote.context_id.in_(exercise_ids_subquery),
+            ),
+        )
+
         query = (
             select(PrescriptionNote)
-            .where(PrescriptionNote.author_role == NoteAuthorRole.TRAINER)
+            .where(
+                PrescriptionNote.author_role == NoteAuthorRole.TRAINER,
+                access_conditions,
+            )
             .options(selectinload(PrescriptionNote.author))
             .order_by(PrescriptionNote.is_pinned.desc(), PrescriptionNote.created_at.desc())
             .limit(limit)
@@ -1750,3 +1805,73 @@ class WorkoutService:
 
         result = await self.db.execute(query)
         return len(result.scalars().all())
+
+    async def validate_context_access(
+        self,
+        context_type: NoteContextType,
+        context_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> bool:
+        """Validate if a user has access to a given context.
+
+        Returns True if user can access the context, False otherwise.
+
+        Access rules:
+        - PLAN: User is the creator OR has an active assignment
+        - WORKOUT: User is the creator OR has an active assignment
+        - SESSION: User is the session owner OR the trainer
+        - EXERCISE: Always accessible (exercises are reference data)
+        """
+        if context_type == NoteContextType.EXERCISE:
+            # Exercises are reference data, always accessible
+            return True
+
+        if context_type == NoteContextType.PLAN:
+            # Check if user created the plan
+            plan = await self.get_plan_by_id(context_id)
+            if plan and plan.created_by_id == user_id:
+                return True
+
+            # Check if user has an assignment to this plan
+            query = select(PlanAssignment).where(
+                and_(
+                    PlanAssignment.plan_id == context_id,
+                    or_(
+                        PlanAssignment.student_id == user_id,
+                        PlanAssignment.trainer_id == user_id,
+                    ),
+                    PlanAssignment.is_active == True,
+                )
+            )
+            result = await self.db.execute(query)
+            assignment = result.scalar_one_or_none()
+            return assignment is not None
+
+        if context_type == NoteContextType.WORKOUT:
+            # Check if user created the workout
+            workout = await self.get_workout_by_id(context_id)
+            if workout and workout.created_by_id == user_id:
+                return True
+
+            # Check if user has an assignment to this workout
+            query = select(WorkoutAssignment).where(
+                and_(
+                    WorkoutAssignment.workout_id == context_id,
+                    or_(
+                        WorkoutAssignment.student_id == user_id,
+                        WorkoutAssignment.trainer_id == user_id,
+                    ),
+                )
+            )
+            result = await self.db.execute(query)
+            assignment = result.scalar_one_or_none()
+            return assignment is not None
+
+        if context_type == NoteContextType.SESSION:
+            # Check if user is session owner or trainer
+            session = await self.get_session_by_id(context_id)
+            if session:
+                return session.user_id == user_id or session.trainer_id == user_id
+            return False
+
+        return False

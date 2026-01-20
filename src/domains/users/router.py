@@ -2,6 +2,7 @@
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -19,6 +20,8 @@ from src.domains.users.schemas import (
 from src.domains.users.service import UserService
 from src.domains.organizations.service import OrganizationService
 from src.domains.organizations.schemas import UserMembershipResponse, OrganizationInMembership, InviteResponse
+from src.domains.trainers.models import StudentNote
+from src.domains.trainers.schemas import ProgressNoteResponse
 
 router = APIRouter()
 
@@ -237,4 +240,38 @@ async def get_my_pending_invites(
         )
         for invite in invites
         if not invite.is_expired and not invite.is_accepted
+    ]
+
+
+@router.get("/me/trainer-notes", response_model=list[ProgressNoteResponse])
+async def get_my_trainer_notes(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[ProgressNoteResponse]:
+    """Get notes written by trainers about the current user (student view).
+
+    SECURITY FIX: VULN-5 - Students can now see notes written about them.
+    This endpoint returns StudentNotes where the current user is the student.
+    """
+    result = await db.execute(
+        select(StudentNote)
+        .where(StudentNote.student_id == current_user.id)
+        .order_by(StudentNote.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    notes = result.scalars().all()
+
+    return [
+        ProgressNoteResponse(
+            id=note.id,
+            student_id=note.student_id,
+            trainer_id=note.trainer_id,
+            content=note.content,
+            category=note.category,
+            created_at=note.created_at,
+        )
+        for note in notes
     ]

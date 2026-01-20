@@ -5,6 +5,67 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-01-20
+
+### Added
+- **Chat Domain** - Real-time messaging system
+  - `Conversation`, `ConversationParticipant`, `Message` models
+  - `GET /chat/conversations` - List user conversations
+  - `GET /chat/conversations/{id}/messages` - Get conversation messages
+  - `POST /chat/conversations/{id}/messages` - Send message
+  - `POST /chat/conversations` - Create/get direct conversation
+  - `POST /chat/conversations/{id}/read` - Mark messages as read
+
+- **Notifications Domain** - User notification system
+  - `Notification` model with 25+ notification types
+  - `GET /notifications` - List user notifications
+  - `GET /notifications/unread-count` - Get unread count
+  - `POST /notifications/{id}/read` - Mark as read
+  - `POST /notifications/read-all` - Mark all as read
+  - `DELETE /notifications/{id}` - Delete notification
+
+- **Billing Domain** - Payment management for trainers
+  - `Payment`, `PaymentPlan` models
+  - `GET /billing/payments` - List payments (as payer or payee)
+  - `GET /billing/payments/{id}` - Get payment details
+  - `POST /billing/payments` - Create payment
+  - `POST /billing/payments/{id}/mark-paid` - Mark as paid
+  - `POST /billing/payments/{id}/reminder` - Send payment reminder
+  - `GET /billing/summary` - Get billing summary
+  - `GET /billing/revenue/current-month` - Monthly revenue for trainers
+  - `GET /billing/revenue/month/{year}/{month}` - Specific month revenue
+  - `GET /billing/revenue/history` - Revenue history (12 months)
+  - `GET /billing/plans` - List payment plans
+  - `POST /billing/plans` - Create payment plan
+
+- **Email Service** - Resend integration
+  - Welcome email for new users
+  - Organization invite email
+  - Workout reminder email
+  - Payment reminder email
+
+- **Rate Limiting** - Redis-based rate limiting
+  - 50 workout assignments per hour per trainer
+  - 20 plan assignments per hour per trainer
+
+- **Student Trainer Notes Endpoint**
+  - `GET /users/me/trainer-notes` - Students can read notes written about them
+
+### Security Fixes
+- **VULN-1**: Trainer can now GET sessions they joined (was blocked before)
+- **VULN-2**: Prescription notes now validate user has access to context (plan/workout/session)
+- **VULN-3**: Workout assignments now validate trainer and student share organization
+- **VULN-4**: `organization_id` is now required for listing active sessions
+- **VULN-5**: Students can now read trainer notes about them
+- **VULN-6**: `list_notes_for_student` now properly filters by student_id
+
+### Removed
+- Debug/migration endpoints from workouts router (809 lines removed)
+
+### Changed
+- User model now includes `birth_date`, `gender`, `height_cm`, `bio` fields
+- Streak calculation now uses GamificationService for accuracy
+
 ## [0.3.0] - 2026-01-20
 
 ### Added

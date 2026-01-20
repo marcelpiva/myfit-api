@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     STRIPE_SECRET_KEY: str = ""
     STRIPE_WEBHOOK_SECRET: str = ""
 
+    # Email (Resend)
+    RESEND_API_KEY: str = ""
+    EMAIL_FROM: str = "MyFit <noreply@myfit.app>"
+
+    @property
+    def email_enabled(self) -> bool:
+        """Check if email is configured."""
+        return bool(self.RESEND_API_KEY)
+
     @property
     def is_production(self) -> bool:
         return self.APP_ENV == "production"

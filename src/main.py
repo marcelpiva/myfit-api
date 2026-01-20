@@ -7,9 +7,12 @@ from scalar_fastapi import get_scalar_api_reference
 
 from src.config.settings import settings
 from src.domains.auth.router import router as auth_router
+from src.domains.billing.router import router as billing_router
+from src.domains.chat.router import router as chat_router
 from src.domains.checkin.router import router as checkin_router
 from src.domains.gamification.router import router as gamification_router
 from src.domains.marketplace.router import router as marketplace_router
+from src.domains.notifications.router import router as notifications_router
 from src.domains.nutrition.router import router as nutrition_router
 from src.domains.organizations.router import router as organizations_router
 from src.domains.progress.router import router as progress_router
@@ -67,6 +70,9 @@ def create_app() -> FastAPI:
     app.include_router(marketplace_router, prefix=f"{settings.API_V1_PREFIX}/marketplace", tags=["Marketplace"])
     app.include_router(trainers_router, prefix=f"{settings.API_V1_PREFIX}/trainers", tags=["Trainers"])
     app.include_router(schedule_router, prefix=f"{settings.API_V1_PREFIX}", tags=["Schedule"])
+    app.include_router(billing_router, prefix=f"{settings.API_V1_PREFIX}/billing", tags=["Billing"])
+    app.include_router(chat_router, prefix=f"{settings.API_V1_PREFIX}/chat", tags=["Chat"])
+    app.include_router(notifications_router, prefix=f"{settings.API_V1_PREFIX}/notifications", tags=["Notifications"])
 
     # Health check endpoint
     @app.get("/health")

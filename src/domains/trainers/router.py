@@ -1,15 +1,19 @@
 """Trainer router - provides trainer-centric API for managing students."""
+import logging
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
+from src.core.email import send_invite_email as send_invite_email_task, send_welcome_email
 from src.domains.auth.dependencies import CurrentUser
+
+logger = logging.getLogger(__name__)
 from src.domains.organizations.models import OrganizationMembership, UserRole
 from src.domains.organizations.service import OrganizationService
 from src.domains.trainers.models import StudentNote
@@ -23,6 +27,7 @@ from src.domains.trainers.schemas import (
     StudentResponse,
     StudentStatsResponse,
 )
+from src.domains.gamification.service import GamificationService
 from src.domains.users.models import User
 from src.domains.users.service import UserService
 from src.domains.workouts.models import WorkoutSession
@@ -240,13 +245,18 @@ async def get_student_stats(
         .where(WorkoutSession.user_id == member.user_id)
     )
 
+    # Get streak from gamification service
+    gamification_service = GamificationService(db)
+    user_points = await gamification_service.get_user_points(member.user_id)
+    streak_days = user_points.current_streak if user_points else 0
+
     return StudentStatsResponse(
         total_workouts=total_workouts,
         workouts_this_week=workouts_this_week,
         workouts_this_month=workouts_this_month,
         average_duration_minutes=int(avg_duration),
         total_exercises=0,  # Would require joining with workout exercises
-        streak_days=0,  # Would require more complex calculation
+        streak_days=streak_days,
         last_workout_at=last_workout,
     )
 
@@ -319,11 +329,22 @@ async def get_student_progress(
     )
     notes = notes_result.scalars().all()
 
+    # Get streak from gamification service
+    gamification_service = GamificationService(db)
+    user_points = await gamification_service.get_user_points(member.user_id)
+    streak_days = user_points.current_streak if user_points else 0
+
+    # Get total sessions
+    total_sessions = await db.scalar(
+        select(func.count(WorkoutSession.id))
+        .where(WorkoutSession.user_id == member.user_id)
+    ) or 0
+
     return {
         "user_id": str(member.user_id),
-        "total_sessions": 0,
+        "total_sessions": total_sessions,
         "total_volume": 0,
-        "streak_days": 0,
+        "streak_days": streak_days,
         "achievements": [],
         "notes": [
             {
@@ -475,6 +496,7 @@ async def register_student(
     request: StudentRegisterRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ) -> StudentResponse:
     """Register a new student (creates user account and adds to trainer's organization)."""
     org_id = await _get_trainer_organization(current_user, db)
@@ -532,7 +554,15 @@ async def register_student(
         invited_by_id=current_user.id,
     )
 
-    # TODO: Send welcome email with temp password
+    # Send welcome email with temp password in background
+    background_tasks.add_task(
+        send_welcome_email,
+        to_email=new_user.email,
+        name=new_user.name,
+        temp_password=temp_password,
+        trainer_name=current_user.name,
+    )
+    logger.info(f"Welcome email queued for {new_user.email}")
 
     return StudentResponse(
         id=membership.id,
@@ -598,14 +628,19 @@ async def regenerate_invite_code(
 
 
 @router.post("/my-invite-code/send", status_code=status.HTTP_200_OK)
-async def send_invite_email(
+async def send_invite_email_endpoint(
     request: SendInviteRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    background_tasks: BackgroundTasks,
 ) -> dict:
     """Send invite email to a potential student."""
     org_id = await _get_trainer_organization(current_user, db)
     org_service = OrganizationService(db)
+
+    # Get organization name
+    org = await org_service.get_organization_by_id(org_id)
+    org_name = org.name if org else "MyFit"
 
     # Create an invitation
     invite = await org_service.create_invite(
@@ -615,7 +650,15 @@ async def send_invite_email(
         invited_by_id=current_user.id,
     )
 
-    # TODO: Send actual email
+    # Send invite email in background
+    background_tasks.add_task(
+        send_invite_email_task,
+        to_email=request.email,
+        trainer_name=current_user.name,
+        org_name=org_name,
+        invite_token=invite.token,
+    )
+    logger.info(f"Invite email queued for {request.email}")
 
     return {
         "message": f"Convite enviado para {request.email}",
