@@ -1191,16 +1191,31 @@ async def list_plan_assignments(
     db: Annotated[AsyncSession, Depends(get_db)],
     as_trainer: Annotated[bool, Query()] = False,
     active_only: Annotated[bool, Query()] = True,
+    student_id: Annotated[UUID | None, Query()] = None,
 ) -> list[PlanAssignmentResponse]:
-    """List plan assignments (as student or trainer)."""
+    """List plan assignments (as student or trainer).
+
+    If as_trainer=True and student_id is provided, returns assignments for that specific student.
+    If as_trainer=True and student_id is None, returns all assignments where current user is trainer.
+    If as_trainer=False, returns assignments for current user as student.
+    """
     workout_service = WorkoutService(db)
     user_service = UserService(db)
 
     if as_trainer:
-        assignments = await workout_service.list_trainer_plan_assignments(
-            trainer_id=current_user.id,
-            active_only=active_only,
-        )
+        if student_id:
+            # Filter by specific student
+            assignments = await workout_service.list_trainer_plan_assignments(
+                trainer_id=current_user.id,
+                student_id=student_id,
+                active_only=active_only,
+            )
+        else:
+            # All trainer's assignments
+            assignments = await workout_service.list_trainer_plan_assignments(
+                trainer_id=current_user.id,
+                active_only=active_only,
+            )
     else:
         assignments = await workout_service.list_student_plan_assignments(
             student_id=current_user.id,

@@ -58,3 +58,19 @@ class InviteCodeResponse(BaseModel):
 class SendInviteRequest(BaseModel):
     """Request schema for sending invite email."""
     email: EmailStr
+
+
+class ProgressNoteRequest(BaseModel):
+    """Request schema for adding a progress note."""
+    content: str
+    category: Optional[str] = None  # e.g., "progress", "feedback", "observation"
+
+
+class ProgressNoteResponse(BaseModel):
+    """Response schema for progress note."""
+    id: UUID
+    student_id: UUID
+    trainer_id: UUID
+    content: str
+    category: Optional[str] = None
+    created_at: datetime

@@ -13,6 +13,7 @@ from src.domains.marketplace.router import router as marketplace_router
 from src.domains.nutrition.router import router as nutrition_router
 from src.domains.organizations.router import router as organizations_router
 from src.domains.progress.router import router as progress_router
+from src.domains.schedule.router import router as schedule_router
 from src.domains.trainers.router import router as trainers_router
 from src.domains.users.router import router as users_router
 from src.domains.workouts.router import router as workouts_router
@@ -65,6 +66,7 @@ def create_app() -> FastAPI:
     app.include_router(gamification_router, prefix=f"{settings.API_V1_PREFIX}/gamification", tags=["Gamification"])
     app.include_router(marketplace_router, prefix=f"{settings.API_V1_PREFIX}/marketplace", tags=["Marketplace"])
     app.include_router(trainers_router, prefix=f"{settings.API_V1_PREFIX}/trainers", tags=["Trainers"])
+    app.include_router(schedule_router, prefix=f"{settings.API_V1_PREFIX}", tags=["Schedule"])
 
     # Health check endpoint
     @app.get("/health")

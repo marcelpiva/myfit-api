@@ -12,9 +12,12 @@ from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.organizations.models import OrganizationMembership, UserRole
 from src.domains.organizations.service import OrganizationService
+from src.domains.trainers.models import StudentNote
 from src.domains.trainers.schemas import (
     AddStudentRequest,
     InviteCodeResponse,
+    ProgressNoteRequest,
+    ProgressNoteResponse,
     SendInviteRequest,
     StudentRegisterRequest,
     StudentResponse,
@@ -304,15 +307,118 @@ async def get_student_progress(
             detail="Aluno não encontrado",
         )
 
-    # For now, return basic progress data
-    # This could be expanded to include body measurements, PRs, etc.
+    # Get recent notes for this student
+    notes_result = await db.execute(
+        select(StudentNote)
+        .where(
+            StudentNote.student_id == member.user_id,
+            StudentNote.trainer_id == current_user.id,
+        )
+        .order_by(StudentNote.created_at.desc())
+        .limit(20)
+    )
+    notes = notes_result.scalars().all()
+
     return {
         "user_id": str(member.user_id),
         "total_sessions": 0,
         "total_volume": 0,
         "streak_days": 0,
         "achievements": [],
+        "notes": [
+            {
+                "id": str(n.id),
+                "content": n.content,
+                "category": n.category,
+                "created_at": n.created_at.isoformat() if n.created_at else None,
+            }
+            for n in notes
+        ],
     }
+
+
+@router.post("/students/{student_id}/progress/notes", response_model=ProgressNoteResponse, status_code=status.HTTP_201_CREATED)
+async def add_progress_note(
+    student_id: UUID,
+    request: ProgressNoteRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ProgressNoteResponse:
+    """Add a progress note for a student."""
+    org_id = await _get_trainer_organization(current_user, db)
+
+    # Find member by ID
+    member = await db.get(OrganizationMembership, student_id)
+    if not member or member.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aluno não encontrado",
+        )
+
+    # Create the note
+    note = StudentNote(
+        student_id=member.user_id,
+        trainer_id=current_user.id,
+        organization_id=org_id,
+        content=request.content,
+        category=request.category,
+    )
+
+    db.add(note)
+    await db.commit()
+    await db.refresh(note)
+
+    return ProgressNoteResponse(
+        id=note.id,
+        student_id=note.student_id,
+        trainer_id=note.trainer_id,
+        content=note.content,
+        category=note.category,
+        created_at=note.created_at,
+    )
+
+
+@router.get("/students/{student_id}/progress/notes", response_model=list[ProgressNoteResponse])
+async def list_progress_notes(
+    student_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+) -> list[ProgressNoteResponse]:
+    """List progress notes for a student."""
+    org_id = await _get_trainer_organization(current_user, db)
+
+    # Find member by ID
+    member = await db.get(OrganizationMembership, student_id)
+    if not member or member.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aluno não encontrado",
+        )
+
+    # Get notes
+    result = await db.execute(
+        select(StudentNote)
+        .where(
+            StudentNote.student_id == member.user_id,
+            StudentNote.trainer_id == current_user.id,
+        )
+        .order_by(StudentNote.created_at.desc())
+        .limit(limit)
+    )
+    notes = result.scalars().all()
+
+    return [
+        ProgressNoteResponse(
+            id=n.id,
+            student_id=n.student_id,
+            trainer_id=n.trainer_id,
+            content=n.content,
+            category=n.category,
+            created_at=n.created_at,
+        )
+        for n in notes
+    ]
 
 
 @router.post("/students", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)

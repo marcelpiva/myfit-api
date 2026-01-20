@@ -102,6 +102,18 @@ from src.domains.marketplace.models import (
     TemplateType,
 )
 
+# Schedule domain
+from src.domains.schedule.models import (
+    Appointment,
+    AppointmentStatus,
+    AppointmentType,
+)
+
+# Trainers domain
+from src.domains.trainers.models import (
+    StudentNote,
+)
+
 __all__ = [
     # Users
     "User",
@@ -177,4 +189,10 @@ __all__ = [
     "PayoutStatus",
     "PaymentProvider",
     "PayoutMethod",
+    # Schedule
+    "Appointment",
+    "AppointmentStatus",
+    "AppointmentType",
+    # Trainers
+    "StudentNote",
 ]

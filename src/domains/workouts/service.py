@@ -1336,11 +1336,21 @@ class WorkoutService:
         self,
         trainer_id: uuid.UUID,
         active_only: bool = True,
+        student_id: uuid.UUID | None = None,
     ) -> list[PlanAssignment]:
-        """List plan assignments created by a trainer."""
+        """List plan assignments created by a trainer.
+
+        Args:
+            trainer_id: The trainer's user ID
+            active_only: If True, only return active assignments
+            student_id: If provided, filter by specific student
+        """
         query = select(PlanAssignment).where(
             PlanAssignment.trainer_id == trainer_id
         ).options(selectinload(PlanAssignment.plan))
+
+        if student_id:
+            query = query.where(PlanAssignment.student_id == student_id)
 
         if active_only:
             query = query.where(PlanAssignment.is_active == True)
