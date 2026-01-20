@@ -186,23 +186,44 @@ async def get_video_for_exercise(
     return None
 
 
-async def add_videos_to_exercises(session: AsyncSession) -> int:
-    """Add Pexels video URLs to exercises."""
+async def add_videos_to_exercises(session: AsyncSession, replace_all: bool = False) -> int:
+    """Add Pexels video URLs to exercises.
 
-    # Get all exercises without videos
-    result = await session.execute(
-        select(Exercise).where(
-            Exercise.is_custom == False,
-            Exercise.video_url.is_(None)
+    Args:
+        session: Database session
+        replace_all: If True, replaces all videos including YouTube URLs.
+                    If False, only adds videos to exercises without any video.
+    """
+    from sqlalchemy import or_
+
+    if replace_all:
+        # Get all non-custom exercises (replace YouTube and missing videos)
+        result = await session.execute(
+            select(Exercise).where(
+                Exercise.is_custom == False,
+                or_(
+                    Exercise.video_url.is_(None),
+                    Exercise.video_url.like('%youtube.com%'),
+                    Exercise.video_url.like('%youtu.be%'),
+                )
+            )
         )
-    )
+    else:
+        # Get only exercises without videos
+        result = await session.execute(
+            select(Exercise).where(
+                Exercise.is_custom == False,
+                Exercise.video_url.is_(None)
+            )
+        )
+
     exercises = result.scalars().all()
 
     if not exercises:
-        print("All exercises already have videos.")
+        print("All exercises already have Pexels videos.")
         return 0
 
-    print(f"Found {len(exercises)} exercises without videos")
+    print(f"Found {len(exercises)} exercises to update")
 
     video_cache: dict[str, str] = {}
     updated = 0
@@ -234,6 +255,16 @@ async def add_videos_to_exercises(session: AsyncSession) -> int:
 
 async def main():
     """Main function."""
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Add Pexels videos to exercises")
+    parser.add_argument(
+        "--replace-all",
+        action="store_true",
+        help="Replace all videos including YouTube URLs with Pexels videos"
+    )
+    args = parser.parse_args()
+
     if not PEXELS_API_KEY:
         print("=" * 60)
         print("ERROR: PEXELS_API_KEY not set")
@@ -241,14 +272,19 @@ async def main():
         print("\nGet your free API key at: https://www.pexels.com/api/")
         print("\nThen run:")
         print('  PEXELS_API_KEY="your-key" python -m src.scripts.add_pexels_videos')
+        print('  PEXELS_API_KEY="your-key" python -m src.scripts.add_pexels_videos --replace-all')
         return
 
     print("=" * 60)
     print("Pexels Video Script")
+    if args.replace_all:
+        print("Mode: Replace ALL videos (including YouTube)")
+    else:
+        print("Mode: Add videos to exercises without videos only")
     print("=" * 60)
 
     async with AsyncSessionLocal() as session:
-        count = await add_videos_to_exercises(session)
+        count = await add_videos_to_exercises(session, replace_all=args.replace_all)
 
     print("=" * 60)
     print(f"Updated {count} exercises with videos!")
