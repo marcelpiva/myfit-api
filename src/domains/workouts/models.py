@@ -68,8 +68,14 @@ class MuscleGroup(str, enum.Enum):
     HAMSTRINGS = "hamstrings"
     GLUTES = "glutes"
     CALVES = "calves"
+    LEGS = "legs"  # Generic legs - includes quadriceps, hamstrings, calves
     FULL_BODY = "full_body"
     CARDIO = "cardio"
+
+    @classmethod
+    def get_leg_groups(cls) -> list["MuscleGroup"]:
+        """Return all muscle groups that are part of legs."""
+        return [cls.QUADRICEPS, cls.HAMSTRINGS, cls.CALVES, cls.LEGS]
 
 
 class TechniqueType(str, enum.Enum):

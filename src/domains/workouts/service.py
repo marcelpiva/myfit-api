@@ -112,7 +112,12 @@ class WorkoutService:
             query = query.where(Exercise.is_public == True)
 
         if muscle_group:
-            query = query.where(Exercise.muscle_group == muscle_group)
+            # Handle "legs" as a composite group that includes quadriceps, hamstrings, calves
+            if muscle_group == MuscleGroup.LEGS:
+                leg_groups = MuscleGroup.get_leg_groups()
+                query = query.where(Exercise.muscle_group.in_(leg_groups))
+            else:
+                query = query.where(Exercise.muscle_group == muscle_group)
 
         if search:
             query = query.where(Exercise.name.ilike(f"%{search}%"))

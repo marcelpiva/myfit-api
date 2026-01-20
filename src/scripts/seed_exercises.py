@@ -93,6 +93,12 @@ MUSCLE_GROUP_IMAGES = {
         "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Full body
         "https://images.unsplash.com/photo-1571019613454-1cb2f99b2d8b?w=800&q=80",  # Workout
     ],
+    MuscleGroup.LEGS: [
+        "https://images.unsplash.com/photo-1574680096145-d05b474e2155?w=800&q=80",  # Squats
+        "https://images.unsplash.com/photo-1434608519344-49d77a699e1d?w=800&q=80",  # Leg workout
+        "https://images.unsplash.com/photo-1517963879433-6ad2b056d712?w=800&q=80",  # Leg exercises
+        "https://images.unsplash.com/photo-1596357395217-80de13130e92?w=800&q=80",  # Legs
+    ],
 }
 
 
@@ -1034,6 +1040,99 @@ EXERCISES = [
         "equipment": ["bodyweight"],
         "description": "Sequência de exercícios cardiovasculares sem descanso",
         "instructions": "Execute uma série de exercícios (polichinelos, skipping, burpees) em sequência.",
+    },
+
+    # ==================== EXERCÍCIOS DE PERNAS (LEGS - GENÉRICO) ====================
+
+    {
+        "name": "Agachamento com Peso Corporal",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes", "abs"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento básico sem peso adicional",
+        "instructions": "Pés na largura dos ombros, desça até as coxas ficarem paralelas ao chão.",
+        "video_url": "https://www.youtube.com/watch?v=aclHkVaku9U",
+    },
+    {
+        "name": "Avanço Estático",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Avanço mantendo a posição sem caminhar",
+        "instructions": "Dê um passo à frente e desça até o joelho quase tocar o chão.",
+        "video_url": "https://www.youtube.com/watch?v=QOVaHwm-Q6U",
+    },
+    {
+        "name": "Agachamento com Salto",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes", "calves"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento pliométrico para explosão",
+        "instructions": "Faça um agachamento e salte explosivamente, aterrisse suavemente.",
+        "video_url": "https://www.youtube.com/watch?v=Azl5tkCzDcc",
+    },
+    {
+        "name": "Pistol Squat (Agachamento Unilateral)",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes", "abs"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento avançado em uma perna só",
+        "instructions": "Agache em uma perna mantendo a outra estendida à frente.",
+        "video_url": "https://www.youtube.com/watch?v=qDcniqddTeE",
+    },
+    {
+        "name": "Step Up Alto",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes", "calves"],
+        "equipment": ["box", "bench"],
+        "description": "Subida em banco alto para força de pernas",
+        "instructions": "Suba no banco alto usando a força de uma perna, alterne.",
+        "video_url": "https://www.youtube.com/watch?v=dQqApCGd5Ss",
+    },
+    {
+        "name": "Wall Sit (Cadeirinha)",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Isométrico de pernas contra a parede",
+        "instructions": "Apoie as costas na parede e desça até 90 graus, mantenha.",
+        "video_url": "https://www.youtube.com/watch?v=y-wV4Venusw",
+    },
+    {
+        "name": "Sissy Squat",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["abs"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento com inclinação posterior para quadríceps",
+        "instructions": "Incline o corpo para trás enquanto flexiona os joelhos.",
+        "video_url": "https://www.youtube.com/watch?v=93vdFqwUdug",
+    },
+    {
+        "name": "Nordic Curl",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight"],
+        "description": "Flexão nórdica para posterior de coxa",
+        "instructions": "Ajoelhado, desça o corpo controladamente usando os isquiotibiais.",
+        "video_url": "https://www.youtube.com/watch?v=d8AAPcYxKe8",
+    },
+    {
+        "name": "Reverse Lunge (Avanço Reverso)",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes"],
+        "equipment": ["bodyweight", "dumbbell"],
+        "description": "Avanço dando passo para trás",
+        "instructions": "Dê um passo para trás e desça até o joelho quase tocar o chão.",
+        "video_url": "https://www.youtube.com/watch?v=xrPteyQLGAo",
+    },
+    {
+        "name": "Cossack Squat",
+        "muscle_group": MuscleGroup.LEGS,
+        "secondary_muscles": ["glutes", "adductors"],
+        "equipment": ["bodyweight"],
+        "description": "Agachamento lateral para mobilidade e força",
+        "instructions": "Agache lateralmente em uma perna mantendo a outra estendida.",
+        "video_url": "https://www.youtube.com/watch?v=tpczTeSkHz0",
     },
 ]
 
