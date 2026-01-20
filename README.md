@@ -1,6 +1,6 @@
 # MyFit API
 
-[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](./CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 
 FastAPI backend for the MyFit white-label fitness platform.
@@ -84,6 +84,8 @@ src/
 │   ├── workouts/     # Workout plans
 │   ├── nutrition/    # Diet plans
 │   ├── progress/     # Progress tracking
+│   ├── schedule/     # Trainer-student appointments
+│   ├── trainers/     # Trainer management & student notes
 │   ├── chat/         # Real-time chat
 │   ├── payments/     # Payment processing
 │   └── ...
