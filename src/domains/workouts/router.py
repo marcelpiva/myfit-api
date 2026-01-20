@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.service import UserService
-from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 from src.domains.workouts.schemas import (
     ActiveSessionResponse,
     AIGeneratePlanRequest,
@@ -56,6 +56,10 @@ from src.domains.workouts.schemas import (
     SuggestedExercise,
     TrainerAdjustmentCreate,
     TrainerAdjustmentResponse,
+    PrescriptionNoteCreate,
+    PrescriptionNoteListResponse,
+    PrescriptionNoteResponse,
+    PrescriptionNoteUpdate,
     WorkoutCreate,
     WorkoutExerciseInput,
     WorkoutExerciseResponse,
@@ -2374,6 +2378,393 @@ async def run_migration_add_plan_diet_columns(
                     results.append(f"Added column {col_name}")
                 else:
                     results.append(f"Column {col_name} already exists")
+
+        except Exception as e:
+            return {"status": "error", "message": str(e), "completed": results}
+
+    return {"status": "success", "message": "Migration completed", "results": results}
+
+
+# Prescription Notes endpoints
+
+@router.post("/notes", response_model=PrescriptionNoteResponse, status_code=status.HTTP_201_CREATED)
+async def create_prescription_note(
+    request: PrescriptionNoteCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Create a new prescription note.
+
+    Notes can be attached to:
+    - plan: Training plan
+    - workout: Specific workout
+    - exercise: Workout exercise configuration
+    - session: Completed session
+
+    Trainers and students can both create notes.
+    """
+    from src.domains.users.models import UserRole
+
+    # Determine author role based on user's primary role
+    user_service = UserService(db)
+    user = await user_service.get_user_by_id(current_user.id)
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found",
+        )
+
+    # Determine role - if user has TRAINER role, they're a trainer
+    author_role = NoteAuthorRole.TRAINER if user.role == UserRole.TRAINER else NoteAuthorRole.STUDENT
+
+    workout_service = WorkoutService(db)
+    note = await workout_service.create_prescription_note(
+        context_type=request.context_type,
+        context_id=request.context_id,
+        author_id=current_user.id,
+        author_role=author_role,
+        content=request.content,
+        is_pinned=request.is_pinned,
+        organization_id=request.organization_id,
+    )
+
+    return PrescriptionNoteResponse(
+        id=note.id,
+        context_type=note.context_type,
+        context_id=note.context_id,
+        author_id=note.author_id,
+        author_role=note.author_role,
+        author_name=user.name,
+        content=note.content,
+        is_pinned=note.is_pinned,
+        read_at=note.read_at,
+        read_by_id=note.read_by_id,
+        organization_id=note.organization_id,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@router.get("/notes", response_model=PrescriptionNoteListResponse)
+async def list_prescription_notes(
+    context_type: Annotated[NoteContextType, Query()],
+    context_id: Annotated[UUID, Query()],
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: Annotated[UUID | None, Query()] = None,
+) -> PrescriptionNoteListResponse:
+    """List prescription notes for a specific context.
+
+    Returns notes attached to the specified plan, workout, exercise, or session.
+    """
+    from src.domains.users.models import UserRole
+
+    workout_service = WorkoutService(db)
+    notes = await workout_service.list_prescription_notes(
+        context_type=context_type,
+        context_id=context_id,
+        organization_id=organization_id,
+    )
+
+    # Get author names
+    user_service = UserService(db)
+    author_ids = {note.author_id for note in notes}
+    authors = {}
+    for author_id in author_ids:
+        user = await user_service.get_user_by_id(author_id)
+        if user:
+            authors[author_id] = user.name
+
+    # Determine current user's role for unread count
+    user = await user_service.get_user_by_id(current_user.id)
+    user_role = NoteAuthorRole.TRAINER if user and user.role == UserRole.TRAINER else NoteAuthorRole.STUDENT
+
+    unread_count = await workout_service.count_unread_notes(
+        context_type=context_type,
+        context_id=context_id,
+        for_role=user_role,
+    )
+
+    return PrescriptionNoteListResponse(
+        notes=[
+            PrescriptionNoteResponse(
+                id=note.id,
+                context_type=note.context_type,
+                context_id=note.context_id,
+                author_id=note.author_id,
+                author_role=note.author_role,
+                author_name=authors.get(note.author_id),
+                content=note.content,
+                is_pinned=note.is_pinned,
+                read_at=note.read_at,
+                read_by_id=note.read_by_id,
+                organization_id=note.organization_id,
+                created_at=note.created_at,
+                updated_at=note.updated_at,
+            )
+            for note in notes
+        ],
+        total=len(notes),
+        unread_count=unread_count,
+    )
+
+
+@router.get("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+async def get_prescription_note(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Get a specific prescription note by ID."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    author_name = None
+    if note.author:
+        author_name = note.author.name
+
+    return PrescriptionNoteResponse(
+        id=note.id,
+        context_type=note.context_type,
+        context_id=note.context_id,
+        author_id=note.author_id,
+        author_role=note.author_role,
+        author_name=author_name,
+        content=note.content,
+        is_pinned=note.is_pinned,
+        read_at=note.read_at,
+        read_by_id=note.read_by_id,
+        organization_id=note.organization_id,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@router.put("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+async def update_prescription_note(
+    note_id: UUID,
+    request: PrescriptionNoteUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Update a prescription note.
+
+    Only the author can update their own notes.
+    """
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    # Only author can update
+    if note.author_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the author can update this note",
+        )
+
+    note = await workout_service.update_prescription_note(
+        note=note,
+        content=request.content,
+        is_pinned=request.is_pinned,
+    )
+
+    author_name = None
+    if note.author:
+        author_name = note.author.name
+
+    return PrescriptionNoteResponse(
+        id=note.id,
+        context_type=note.context_type,
+        context_id=note.context_id,
+        author_id=note.author_id,
+        author_role=note.author_role,
+        author_name=author_name,
+        content=note.content,
+        is_pinned=note.is_pinned,
+        read_at=note.read_at,
+        read_by_id=note.read_by_id,
+        organization_id=note.organization_id,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@router.post("/notes/{note_id}/read", response_model=PrescriptionNoteResponse)
+async def mark_note_as_read(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Mark a prescription note as read by the current user."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    note = await workout_service.mark_note_as_read(
+        note=note,
+        user_id=current_user.id,
+    )
+
+    author_name = None
+    if note.author:
+        author_name = note.author.name
+
+    return PrescriptionNoteResponse(
+        id=note.id,
+        context_type=note.context_type,
+        context_id=note.context_id,
+        author_id=note.author_id,
+        author_role=note.author_role,
+        author_name=author_name,
+        content=note.content,
+        is_pinned=note.is_pinned,
+        read_at=note.read_at,
+        read_by_id=note.read_by_id,
+        organization_id=note.organization_id,
+        created_at=note.created_at,
+        updated_at=note.updated_at,
+    )
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prescription_note(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete a prescription note.
+
+    Only the author can delete their own notes.
+    """
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Note not found",
+        )
+
+    # Only author can delete
+    if note.author_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the author can delete this note",
+        )
+
+    await workout_service.delete_prescription_note(note)
+
+
+@router.post("/migrate/add-prescription-notes-table")
+async def run_migration_add_prescription_notes(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    secret: str = Query(..., description="Migration secret key"),
+) -> dict:
+    """Create the prescription_notes table.
+
+    Requires a secret key for security.
+    """
+    import os
+    expected_secret = os.environ.get("MIGRATION_SECRET", "myfit-migrate-2026")
+
+    if secret != expected_secret:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Invalid migration secret",
+        )
+
+    from sqlalchemy import text
+
+    results = []
+
+    async with db.begin():
+        try:
+            # Check if table exists
+            check_table = await db.execute(
+                text("""
+                    SELECT table_name FROM information_schema.tables
+                    WHERE table_schema = 'public'
+                    AND table_name = 'prescription_notes'
+                """)
+            )
+            if check_table.fetchone() is not None:
+                results.append("Table prescription_notes already exists")
+                return {"status": "success", "message": "Table already exists", "results": results}
+
+            # Create enum types first
+            await db.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'note_context_type_enum') THEN
+                        CREATE TYPE note_context_type_enum AS ENUM ('plan', 'workout', 'exercise', 'session');
+                    END IF;
+                END
+                $$;
+            """))
+            results.append("Created enum note_context_type_enum")
+
+            await db.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'note_author_role_enum') THEN
+                        CREATE TYPE note_author_role_enum AS ENUM ('trainer', 'student');
+                    END IF;
+                END
+                $$;
+            """))
+            results.append("Created enum note_author_role_enum")
+
+            # Create the table
+            await db.execute(text("""
+                CREATE TABLE prescription_notes (
+                    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+                    context_type note_context_type_enum NOT NULL,
+                    context_id UUID NOT NULL,
+                    author_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    author_role note_author_role_enum NOT NULL,
+                    content TEXT NOT NULL,
+                    is_pinned BOOLEAN DEFAULT FALSE NOT NULL,
+                    read_at TIMESTAMPTZ,
+                    read_by_id UUID REFERENCES users(id) ON DELETE SET NULL,
+                    organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+                    created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+                    updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
+                );
+            """))
+            results.append("Created table prescription_notes")
+
+            # Create indexes
+            await db.execute(text("""
+                CREATE INDEX idx_prescription_notes_context ON prescription_notes(context_type, context_id);
+            """))
+            results.append("Created index idx_prescription_notes_context")
+
+            await db.execute(text("""
+                CREATE INDEX idx_prescription_notes_author ON prescription_notes(author_id);
+            """))
+            results.append("Created index idx_prescription_notes_author")
+
+            await db.execute(text("""
+                CREATE INDEX idx_prescription_notes_org ON prescription_notes(organization_id);
+            """))
+            results.append("Created index idx_prescription_notes_org")
 
         except Exception as e:
             return {"status": "error", "message": str(e), "completed": results}

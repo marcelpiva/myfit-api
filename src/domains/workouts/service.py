@@ -12,8 +12,11 @@ from src.domains.workouts.models import (
     Exercise,
     ExerciseMode,
     MuscleGroup,
+    NoteAuthorRole,
+    NoteContextType,
     PlanAssignment,
     PlanWorkout,
+    PrescriptionNote,
     SessionMessage,
     SessionStatus,
     SplitType,
@@ -1570,3 +1573,170 @@ class WorkoutService:
             )
             for s in sessions
         ]
+
+    # Prescription Note operations
+
+    async def create_prescription_note(
+        self,
+        context_type: NoteContextType,
+        context_id: uuid.UUID,
+        author_id: uuid.UUID,
+        author_role: NoteAuthorRole,
+        content: str,
+        is_pinned: bool = False,
+        organization_id: uuid.UUID | None = None,
+    ) -> PrescriptionNote:
+        """Create a new prescription note."""
+        note = PrescriptionNote(
+            context_type=context_type,
+            context_id=context_id,
+            author_id=author_id,
+            author_role=author_role,
+            content=content,
+            is_pinned=is_pinned,
+            organization_id=organization_id,
+        )
+        self.db.add(note)
+        await self.db.commit()
+        await self.db.refresh(note)
+        return note
+
+    async def get_prescription_note_by_id(
+        self,
+        note_id: uuid.UUID,
+    ) -> PrescriptionNote | None:
+        """Get a prescription note by ID."""
+        result = await self.db.execute(
+            select(PrescriptionNote)
+            .where(PrescriptionNote.id == note_id)
+            .options(selectinload(PrescriptionNote.author))
+        )
+        return result.scalar_one_or_none()
+
+    async def list_prescription_notes(
+        self,
+        context_type: NoteContextType,
+        context_id: uuid.UUID,
+        include_children: bool = False,
+        organization_id: uuid.UUID | None = None,
+    ) -> list[PrescriptionNote]:
+        """List prescription notes for a given context.
+
+        Args:
+            context_type: Type of context (plan, workout, exercise, session)
+            context_id: ID of the context object
+            include_children: If True and context_type is 'plan', also include workout/exercise notes
+            organization_id: Optional org filter
+        """
+        query = (
+            select(PrescriptionNote)
+            .where(
+                and_(
+                    PrescriptionNote.context_type == context_type,
+                    PrescriptionNote.context_id == context_id,
+                )
+            )
+            .options(selectinload(PrescriptionNote.author))
+            .order_by(PrescriptionNote.is_pinned.desc(), PrescriptionNote.created_at.desc())
+        )
+
+        if organization_id:
+            query = query.where(PrescriptionNote.organization_id == organization_id)
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def list_notes_for_student(
+        self,
+        student_id: uuid.UUID,
+        context_type: NoteContextType | None = None,
+        unread_only: bool = False,
+        limit: int = 50,
+    ) -> list[PrescriptionNote]:
+        """List notes relevant to a student (notes from trainers on their assignments).
+
+        For now, this returns notes where the student needs to see them,
+        which can be expanded later to include assignment-based filtering.
+        """
+        query = (
+            select(PrescriptionNote)
+            .where(PrescriptionNote.author_role == NoteAuthorRole.TRAINER)
+            .options(selectinload(PrescriptionNote.author))
+            .order_by(PrescriptionNote.is_pinned.desc(), PrescriptionNote.created_at.desc())
+            .limit(limit)
+        )
+
+        if context_type:
+            query = query.where(PrescriptionNote.context_type == context_type)
+
+        if unread_only:
+            query = query.where(PrescriptionNote.read_at.is_(None))
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def update_prescription_note(
+        self,
+        note: PrescriptionNote,
+        content: str | None = None,
+        is_pinned: bool | None = None,
+    ) -> PrescriptionNote:
+        """Update a prescription note."""
+        if content is not None:
+            note.content = content
+        if is_pinned is not None:
+            note.is_pinned = is_pinned
+
+        await self.db.commit()
+        await self.db.refresh(note)
+        return note
+
+    async def mark_note_as_read(
+        self,
+        note: PrescriptionNote,
+        user_id: uuid.UUID,
+    ) -> PrescriptionNote:
+        """Mark a note as read by a user."""
+        note.read_at = datetime.now(timezone.utc)
+        note.read_by_id = user_id
+        await self.db.commit()
+        await self.db.refresh(note)
+        return note
+
+    async def delete_prescription_note(
+        self,
+        note: PrescriptionNote,
+    ) -> None:
+        """Delete a prescription note."""
+        await self.db.delete(note)
+        await self.db.commit()
+
+    async def count_unread_notes(
+        self,
+        context_type: NoteContextType,
+        context_id: uuid.UUID,
+        for_role: NoteAuthorRole,
+    ) -> int:
+        """Count unread notes for a given context.
+
+        Args:
+            context_type: Type of context
+            context_id: ID of the context
+            for_role: The role of the person counting (e.g., STUDENT counts TRAINER notes)
+        """
+        # A student would count unread trainer notes, and vice versa
+        author_role_to_count = (
+            NoteAuthorRole.TRAINER if for_role == NoteAuthorRole.STUDENT else NoteAuthorRole.STUDENT
+        )
+
+        query = select(PrescriptionNote).where(
+            and_(
+                PrescriptionNote.context_type == context_type,
+                PrescriptionNote.context_id == context_id,
+                PrescriptionNote.author_role == author_role_to_count,
+                PrescriptionNote.read_at.is_(None),
+            )
+        )
+
+        result = await self.db.execute(query)
+        return len(result.scalars().all())

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.domains.workouts.models import Difficulty, ExerciseMode, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -765,3 +765,51 @@ class AIGeneratePlanResponse(BaseModel):
     duration_weeks: int
     workouts: list[AIGeneratedWorkout]
     message: str | None = Field(default=None, description="AI tips or recommendations")
+
+
+# Prescription Note schemas
+
+class PrescriptionNoteCreate(BaseModel):
+    """Create prescription note request."""
+
+    context_type: NoteContextType
+    context_id: UUID
+    content: str = Field(min_length=1, max_length=5000)
+    is_pinned: bool = False
+    organization_id: UUID | None = None
+
+
+class PrescriptionNoteUpdate(BaseModel):
+    """Update prescription note request."""
+
+    content: str | None = Field(None, min_length=1, max_length=5000)
+    is_pinned: bool | None = None
+
+
+class PrescriptionNoteResponse(BaseModel):
+    """Prescription note response."""
+
+    id: UUID
+    context_type: NoteContextType
+    context_id: UUID
+    author_id: UUID
+    author_role: NoteAuthorRole
+    author_name: str | None = None
+    content: str
+    is_pinned: bool
+    read_at: datetime | None = None
+    read_by_id: UUID | None = None
+    organization_id: UUID | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+    class Config:
+        from_attributes = True
+
+
+class PrescriptionNoteListResponse(BaseModel):
+    """List of prescription notes response."""
+
+    notes: list[PrescriptionNoteResponse]
+    total: int
+    unread_count: int = 0

@@ -704,6 +704,86 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
         return f"<PlanAssignment plan={self.plan_id} student={self.student_id}>"
 
 
+class NoteContextType(str, enum.Enum):
+    """Context types for prescription notes."""
+
+    PLAN = "plan"  # Note on training plan
+    WORKOUT = "workout"  # Note on specific workout
+    EXERCISE = "exercise"  # Note on workout exercise configuration
+    SESSION = "session"  # Note on completed session
+
+
+class NoteAuthorRole(str, enum.Enum):
+    """Author role for prescription notes."""
+
+    TRAINER = "trainer"
+    STUDENT = "student"
+
+
+class PrescriptionNote(Base, UUIDMixin, TimestampMixin):
+    """Notes between trainers and students on prescriptions.
+
+    Can be attached to different contexts:
+    - Plan: General notes about the training plan
+    - Workout: Notes about a specific workout
+    - Exercise: Notes about a specific exercise configuration
+    - Session: Notes about a completed session
+    """
+
+    __tablename__ = "prescription_notes"
+
+    # Context - what this note is attached to
+    context_type: Mapped[NoteContextType] = mapped_column(
+        Enum(NoteContextType, name="note_context_type_enum", values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
+    context_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        nullable=False,
+    )
+
+    # Author
+    author_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    author_role: Mapped[NoteAuthorRole] = mapped_column(
+        Enum(NoteAuthorRole, name="note_author_role_enum", values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
+
+    # Content
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    is_pinned: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Read tracking
+    read_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    read_by_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Organization scope
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Relationships
+    author: Mapped["User"] = relationship("User", foreign_keys=[author_id])
+    read_by: Mapped["User | None"] = relationship("User", foreign_keys=[read_by_id])
+    organization: Mapped["Organization | None"] = relationship("Organization")
+
+    def __repr__(self) -> str:
+        return f"<PrescriptionNote context={self.context_type.value}:{self.context_id}>"
+
+
 # Import for type hints
 from src.domains.organizations.models import Organization  # noqa: E402, F401
 from src.domains.users.models import User  # noqa: E402, F401
