@@ -11,3 +11,5 @@ venv/
 .vscode/
 *.log
 .DS_Store
+myfit.db
+*.db

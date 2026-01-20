@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: list[str] = [
         "http://localhost:3000",
         "http://localhost:8080",
+        "http://192.168.0.102:8080",
+        "http://192.168.0.101:8080",
+        "http://192.168.0.109:8080",
         "https://myfitplatform.com",
         "https://app.myfitplatform.com",
     ]
@@ -54,6 +57,7 @@ class Settings(BaseSettings):
 
     # AI Services
     OPENAI_API_KEY: str = ""
+    OPENAI_MODEL: str = "gpt-4o-mini"
     ANTHROPIC_API_KEY: str = ""
 
     # Payment Gateways
