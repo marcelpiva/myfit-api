@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-01-20
+
+### Added
+- **LEGS Muscle Group**
+  - New `legs` enum value for generic leg exercises
+  - `get_leg_groups()` method returns all leg-related muscle groups
+  - Filter by `legs` expands to include quadriceps, hamstrings, calves, and legs
+  - 10 new generic leg exercises in seed (bodyweight squats, lunges, pistol squat, etc.)
+
+- **Pexels Video Integration**
+  - New `add_pexels_videos.py` script to fetch exercise videos from Pexels API
+  - Muscle group-specific search terms for better video matching
+  - Exercise-specific search overrides for accurate video results
+  - Automatic video assignment to exercises without videos
+
+### Changed
+- Exercise seed now includes 121 exercises (was 111)
+- Updated `.env.example` with `PEXELS_API_KEY` configuration
+
 ## [0.2.1] - 2026-01-19
 
 ### Added

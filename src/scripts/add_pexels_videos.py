@@ -38,6 +38,7 @@ MUSCLE_GROUP_SEARCH_TERMS = {
     MuscleGroup.HAMSTRINGS: ["deadlift workout", "leg workout", "hamstring exercise"],
     MuscleGroup.GLUTES: ["hip thrust workout", "glute workout gym", "squat exercise"],
     MuscleGroup.CALVES: ["calf raise exercise", "leg workout", "calf workout gym"],
+    MuscleGroup.LEGS: ["leg workout gym", "squat workout", "leg exercise fitness"],
     MuscleGroup.ABS: ["ab workout", "core exercise gym", "plank workout"],
     MuscleGroup.CARDIO: ["running treadmill", "cardio workout gym", "cycling exercise"],
     MuscleGroup.FULL_BODY: ["full body workout", "hiit workout gym", "fitness training"],
@@ -46,28 +47,51 @@ MUSCLE_GROUP_SEARCH_TERMS = {
 
 # Specific search terms for exercises (Portuguese name -> English search)
 EXERCISE_SEARCH_OVERRIDES = {
+    # Chest
     "Supino Reto com Barra": "barbell bench press",
     "Supino Inclinado com Halteres": "incline dumbbell press",
     "Flexao de Bracos": "push up workout",
+    # Back
     "Barra Fixa (Pegada Pronada)": "pull up workout",
     "Remada Curvada com Barra": "barbell row workout",
     "Puxada Frontal": "lat pulldown exercise",
+    # Shoulders
     "Desenvolvimento com Barra": "overhead press workout",
     "Elevacao Lateral": "lateral raise dumbbell",
+    # Biceps
     "Rosca Direta com Barra": "barbell curl workout",
     "Rosca Martelo": "hammer curl exercise",
+    # Triceps
     "Triceps Corda": "cable tricep pushdown",
     "Triceps Testa": "skull crusher exercise",
+    # Legs (Generic)
+    "Agachamento com Peso Corporal": "bodyweight squat workout",
+    "Avanco Estatico": "static lunge exercise",
+    "Pistol Squat": "pistol squat workout",
+    "Nordic Curl": "nordic curl exercise",
+    "Cossack Squat": "cossack squat exercise",
+    "Step-Up": "step up exercise",
+    "Afundo Bulgaro": "bulgarian split squat",
+    "Wall Sit": "wall sit exercise",
+    "Salto em Caixa": "box jump workout",
+    "Agachamento com Salto": "jump squat exercise",
+    # Quadriceps
     "Agachamento Livre": "barbell squat workout",
     "Leg Press 45 Graus": "leg press machine",
+    # Hamstrings
     "Stiff": "romanian deadlift",
     "Levantamento Terra": "deadlift workout",
+    # Glutes
     "Hip Thrust": "hip thrust workout",
+    # Calves
     "Panturrilha em Pe": "standing calf raise",
+    # Abs
     "Abdominal Crunch": "ab crunch workout",
     "Prancha": "plank exercise",
+    # Cardio
     "Corrida na Esteira": "treadmill running",
     "Bicicleta Ergometrica": "stationary bike workout",
+    # Full Body
     "Burpee": "burpee workout",
 }
 
