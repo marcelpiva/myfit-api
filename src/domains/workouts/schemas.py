@@ -74,6 +74,11 @@ class WorkoutExerciseInput(BaseModel):
     technique_type: TechniqueType = TechniqueType.NORMAL
     exercise_group_id: str | None = Field(None, max_length=50)
     exercise_group_order: int = 0
+    # Structured technique parameters
+    drop_count: int | None = Field(None, ge=2, le=5)  # Dropset: number of drops
+    rest_between_drops: int | None = Field(None, ge=0, le=30)  # Dropset: seconds between drops
+    pause_duration: int | None = Field(None, ge=5, le=60)  # Rest-Pause/Cluster: pause in seconds
+    mini_set_count: int | None = Field(None, ge=2, le=10)  # Cluster: number of mini-sets
 
 
 class WorkoutExerciseResponse(BaseModel):
@@ -94,6 +99,11 @@ class WorkoutExerciseResponse(BaseModel):
     technique_type: TechniqueType = TechniqueType.NORMAL
     exercise_group_id: str | None = None
     exercise_group_order: int = 0
+    # Structured technique parameters
+    drop_count: int | None = None
+    rest_between_drops: int | None = None
+    pause_duration: int | None = None
+    mini_set_count: int | None = None
     estimated_seconds: int = Field(default=0, description="Estimated time in seconds for this exercise")
     exercise: ExerciseResponse
 
@@ -438,6 +448,7 @@ class PlanCreate(BaseModel):
     difficulty: Difficulty = Difficulty.INTERMEDIATE
     split_type: SplitType = SplitType.ABC
     duration_weeks: int | None = Field(None, ge=1, le=52)
+    target_workout_minutes: int | None = Field(None, ge=15, le=180)
     # Diet configuration
     include_diet: bool = False
     diet_type: str | None = Field(None, max_length=50)
@@ -463,6 +474,7 @@ class PlanUpdate(BaseModel):
     difficulty: Difficulty | None = None
     split_type: SplitType | None = None
     duration_weeks: int | None = Field(None, ge=1, le=52)
+    target_workout_minutes: int | None = Field(None, ge=15, le=180)
     # Diet configuration
     include_diet: bool | None = None
     diet_type: str | None = Field(None, max_length=50)
@@ -488,6 +500,7 @@ class PlanResponse(BaseModel):
     difficulty: Difficulty
     split_type: SplitType
     duration_weeks: int | None = None
+    target_workout_minutes: int | None = None
     # Diet configuration
     include_diet: bool = False
     diet_type: str | None = None

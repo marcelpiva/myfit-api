@@ -786,6 +786,7 @@ async def create_plan(
         difficulty=request.difficulty,
         split_type=request.split_type,
         duration_weeks=request.duration_weeks,
+        target_workout_minutes=request.target_workout_minutes,
         is_template=request.is_template,
         is_public=request.is_public,
         organization_id=request.organization_id,
@@ -830,6 +831,11 @@ async def create_plan(
                             technique_type=ex.technique_type,
                             exercise_group_id=ex.exercise_group_id,
                             exercise_group_order=ex.exercise_group_order,
+                            # Structured technique parameters
+                            drop_count=ex.drop_count,
+                            rest_between_drops=ex.rest_between_drops,
+                            pause_duration=ex.pause_duration,
+                            mini_set_count=ex.mini_set_count,
                         )
                 # Add to plan
                 await workout_service.add_workout_to_plan(
@@ -877,6 +883,7 @@ async def update_plan(
         difficulty=request.difficulty,
         split_type=request.split_type,
         duration_weeks=request.duration_weeks,
+        target_workout_minutes=request.target_workout_minutes,
         is_template=request.is_template,
         is_public=request.is_public,
         # Diet fields
@@ -943,6 +950,11 @@ async def update_plan(
                             technique_type=ex.technique_type,
                             exercise_group_id=ex.exercise_group_id,
                             exercise_group_order=ex.exercise_group_order,
+                            # Structured technique parameters
+                            drop_count=ex.drop_count,
+                            rest_between_drops=ex.rest_between_drops,
+                            pause_duration=ex.pause_duration,
+                            mini_set_count=ex.mini_set_count,
                         )
                 # Add to plan
                 await workout_service.add_workout_to_plan(
@@ -1087,6 +1099,11 @@ async def add_workout_to_plan(
                     technique_type=ex.technique_type,
                     exercise_group_id=ex.exercise_group_id,
                     exercise_group_order=ex.exercise_group_order,
+                    # Structured technique parameters
+                    drop_count=ex.drop_count,
+                    rest_between_drops=ex.rest_between_drops,
+                    pause_duration=ex.pause_duration,
+                    mini_set_count=ex.mini_set_count,
                 )
         await workout_service.add_workout_to_plan(
             plan_id=plan_id,

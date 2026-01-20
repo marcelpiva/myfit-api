@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-01-19
+
+### Added
+- **Structured Technique Parameters**
+  - New database columns: `drop_count`, `rest_between_drops`, `pause_duration`, `mini_set_count`
+  - Dropset: stores number of drops (2-5) and rest between drops (0-30s)
+  - Rest-Pause: stores pause duration (5-60s)
+  - Cluster: stores mini-set count (2-10) and pause duration
+  - Migration script: `python -m src.migrations.add_technique_params`
+
+### Changed
+- `WorkoutExerciseInput` and `WorkoutExerciseResponse` schemas include technique parameters
+- `add_exercise_to_workout` service method accepts structured technique parameters
+- Workout copy function preserves technique parameters
+
 ## [0.2.0] - 2026-01-19
 
 ### Added

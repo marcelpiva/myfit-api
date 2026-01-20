@@ -320,6 +320,11 @@ class WorkoutService:
         technique_type: TechniqueType = TechniqueType.NORMAL,
         exercise_group_id: str | None = None,
         exercise_group_order: int = 0,
+        # Structured technique parameters
+        drop_count: int | None = None,
+        rest_between_drops: int | None = None,
+        pause_duration: int | None = None,
+        mini_set_count: int | None = None,
     ) -> WorkoutExercise:
         """Add an exercise to a workout."""
         workout_exercise = WorkoutExercise(
@@ -338,6 +343,11 @@ class WorkoutService:
             technique_type=technique_type,
             exercise_group_id=exercise_group_id,
             exercise_group_order=exercise_group_order,
+            # Structured technique parameters
+            drop_count=drop_count,
+            rest_between_drops=rest_between_drops,
+            pause_duration=pause_duration,
+            mini_set_count=mini_set_count,
         )
         self.db.add(workout_exercise)
         await self.db.commit()
@@ -405,6 +415,11 @@ class WorkoutService:
                 technique_type=we.technique_type,
                 exercise_group_id=we.exercise_group_id,
                 exercise_group_order=we.exercise_group_order,
+                # Structured technique parameters
+                drop_count=we.drop_count,
+                rest_between_drops=we.rest_between_drops,
+                pause_duration=we.pause_duration,
+                mini_set_count=we.mini_set_count,
             )
             self.db.add(new_we)
 
@@ -1044,6 +1059,7 @@ class WorkoutService:
         split_type: SplitType = SplitType.ABC,
         description: str | None = None,
         duration_weeks: int | None = None,
+        target_workout_minutes: int | None = None,
         is_template: bool = False,
         is_public: bool = False,
         organization_id: uuid.UUID | None = None,
@@ -1056,6 +1072,7 @@ class WorkoutService:
             difficulty=difficulty,
             split_type=split_type,
             duration_weeks=duration_weeks,
+            target_workout_minutes=target_workout_minutes,
             is_template=is_template,
             is_public=is_public,
             created_by_id=created_by_id,
@@ -1075,6 +1092,7 @@ class WorkoutService:
         difficulty: Difficulty | None = None,
         split_type: SplitType | None = None,
         duration_weeks: int | None = None,
+        target_workout_minutes: int | None = None,
         is_template: bool | None = None,
         is_public: bool | None = None,
         # Diet fields
@@ -1100,6 +1118,8 @@ class WorkoutService:
             plan.split_type = split_type
         if duration_weeks is not None:
             plan.duration_weeks = duration_weeks
+        if target_workout_minutes is not None:
+            plan.target_workout_minutes = target_workout_minutes
         if is_template is not None:
             plan.is_template = is_template
         if is_public is not None:

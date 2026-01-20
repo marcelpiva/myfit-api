@@ -217,6 +217,12 @@ class WorkoutExercise(Base, UUIDMixin):
     exercise_group_id: Mapped[str | None] = mapped_column(String(50), nullable=True)
     exercise_group_order: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
+    # Structured technique parameters
+    drop_count: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Dropset: number of drops (2-5)
+    rest_between_drops: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Dropset: seconds between drops
+    pause_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Rest-Pause/Cluster: pause in seconds
+    mini_set_count: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Cluster: number of mini-sets
+
     # Relationships
     workout: Mapped["Workout"] = relationship(
         "Workout",
@@ -524,6 +530,7 @@ class TrainingPlan(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
     duration_weeks: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    target_workout_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     # Diet configuration
     include_diet: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
