@@ -76,7 +76,7 @@ async def list_exercises(
     db: Annotated[AsyncSession, Depends(get_db)],
     muscle_group: Annotated[MuscleGroup | None, Query()] = None,
     search: Annotated[str | None, Query(max_length=100)] = None,
-    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ExerciseResponse]:
     """List available exercises."""
