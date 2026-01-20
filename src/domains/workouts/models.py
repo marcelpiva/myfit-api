@@ -85,6 +85,15 @@ class TechniqueType(str, enum.Enum):
     CLUSTER = "cluster"
 
 
+class ExerciseMode(str, enum.Enum):
+    """Exercise execution mode - determines which fields are used."""
+
+    STRENGTH = "strength"  # Traditional sets/reps (musculação)
+    DURATION = "duration"  # Continuous cardio (esteira, bike)
+    INTERVAL = "interval"  # HIIT, Tabata (work/rest intervals)
+    DISTANCE = "distance"  # Distance-based (running)
+
+
 class SessionStatus(str, enum.Enum):
     """Workout session status for co-training."""
 
@@ -223,6 +232,26 @@ class WorkoutExercise(Base, UUIDMixin):
     pause_duration: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Rest-Pause/Cluster: pause in seconds
     mini_set_count: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Cluster: number of mini-sets
 
+    # Exercise mode (strength vs aerobic)
+    exercise_mode: Mapped[ExerciseMode] = mapped_column(
+        Enum(ExerciseMode, name="exercise_mode_enum", values_callable=lambda x: [e.value for e in x]),
+        default=ExerciseMode.STRENGTH,
+        nullable=False,
+    )
+
+    # Aerobic exercise fields - Duration mode (continuous cardio)
+    duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Total duration in minutes
+    intensity: Mapped[str | None] = mapped_column(String(20), nullable=True)  # low, moderate, high, max
+
+    # Aerobic exercise fields - Interval mode (HIIT)
+    work_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Work interval duration
+    interval_rest_seconds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Rest between intervals
+    rounds: Mapped[int | None] = mapped_column(Integer, nullable=True)  # Number of rounds
+
+    # Aerobic exercise fields - Distance mode (running)
+    distance_km: Mapped[float | None] = mapped_column(Float, nullable=True)  # Distance in kilometers
+    target_pace_min_per_km: Mapped[float | None] = mapped_column(Float, nullable=True)  # Target pace (min/km)
+
     # Relationships
     workout: Mapped["Workout"] = relationship(
         "Workout",
@@ -233,6 +262,25 @@ class WorkoutExercise(Base, UUIDMixin):
     @property
     def estimated_seconds(self) -> int:
         """Calculate estimated time for this exercise in seconds."""
+        mode = self.exercise_mode.value if self.exercise_mode else "strength"
+
+        # Handle aerobic exercise modes
+        if mode == "duration":
+            # Continuous cardio - just duration
+            return (self.duration_minutes or 30) * 60
+        elif mode == "interval":
+            # HIIT - rounds of work + rest
+            work = self.work_seconds or 30
+            rest = self.interval_rest_seconds or 30
+            num_rounds = self.rounds or 10
+            return num_rounds * (work + rest)
+        elif mode == "distance":
+            # Distance-based - estimate from pace or default 6 min/km
+            distance = self.distance_km or 5.0
+            pace = self.target_pace_min_per_km or 6.0
+            return int(distance * pace * 60)
+
+        # Strength mode - original logic
         # Base execution time per set (45s average)
         exec_time_per_set = 45
 

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.domains.workouts.models import Difficulty, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, ExerciseMode, MuscleGroup, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -79,6 +79,18 @@ class WorkoutExerciseInput(BaseModel):
     rest_between_drops: int | None = Field(None, ge=0, le=30)  # Dropset: seconds between drops
     pause_duration: int | None = Field(None, ge=5, le=60)  # Rest-Pause/Cluster: pause in seconds
     mini_set_count: int | None = Field(None, ge=2, le=10)  # Cluster: number of mini-sets
+    # Exercise mode (strength vs aerobic)
+    exercise_mode: ExerciseMode = ExerciseMode.STRENGTH
+    # Aerobic exercise fields - Duration mode
+    duration_minutes: int | None = Field(None, ge=1, le=180)  # Total duration in minutes
+    intensity: str | None = Field(None, max_length=20)  # low, moderate, high, max
+    # Aerobic exercise fields - Interval mode
+    work_seconds: int | None = Field(None, ge=5, le=300)  # Work interval duration
+    interval_rest_seconds: int | None = Field(None, ge=5, le=300)  # Rest between intervals
+    rounds: int | None = Field(None, ge=1, le=50)  # Number of rounds
+    # Aerobic exercise fields - Distance mode
+    distance_km: float | None = Field(None, ge=0.1, le=100)  # Distance in kilometers
+    target_pace_min_per_km: float | None = Field(None, ge=2, le=15)  # Target pace (min/km)
 
 
 class WorkoutExerciseResponse(BaseModel):
@@ -104,6 +116,18 @@ class WorkoutExerciseResponse(BaseModel):
     rest_between_drops: int | None = None
     pause_duration: int | None = None
     mini_set_count: int | None = None
+    # Exercise mode (strength vs aerobic)
+    exercise_mode: ExerciseMode = ExerciseMode.STRENGTH
+    # Aerobic exercise fields - Duration mode
+    duration_minutes: int | None = None
+    intensity: str | None = None
+    # Aerobic exercise fields - Interval mode
+    work_seconds: int | None = None
+    interval_rest_seconds: int | None = None
+    rounds: int | None = None
+    # Aerobic exercise fields - Distance mode
+    distance_km: float | None = None
+    target_pace_min_per_km: float | None = None
     estimated_seconds: int = Field(default=0, description="Estimated time in seconds for this exercise")
     exercise: ExerciseResponse
 

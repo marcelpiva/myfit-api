@@ -71,6 +71,23 @@ def create_app() -> FastAPI:
     async def health_check() -> dict[str, str]:
         return {"status": "healthy", "app": settings.APP_NAME}
 
+    # Admin seed endpoint (protected by secret token)
+    @app.post("/admin/seed-exercises")
+    async def seed_exercises_endpoint(token: str) -> dict[str, str | int]:
+        """Seed exercises database. Requires admin token."""
+        import os
+        admin_token = os.environ.get("JWT_SECRET", "")[:16]  # Use first 16 chars of JWT_SECRET
+        if token != admin_token:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Invalid admin token")
+
+        from src.config.database import async_session_maker
+        from src.scripts.seed_exercises import seed_exercises
+
+        async with async_session_maker() as session:
+            count = await seed_exercises(session, clear_existing=True)
+            return {"status": "success", "exercises_seeded": count}
+
     # Scalar API Reference - Modern API documentation
     @app.get("/reference", include_in_schema=False)
     async def scalar_html():

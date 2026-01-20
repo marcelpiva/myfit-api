@@ -10,6 +10,7 @@ from sqlalchemy.orm import selectinload
 from src.domains.workouts.models import (
     Difficulty,
     Exercise,
+    ExerciseMode,
     MuscleGroup,
     PlanAssignment,
     PlanWorkout,
@@ -325,6 +326,16 @@ class WorkoutService:
         rest_between_drops: int | None = None,
         pause_duration: int | None = None,
         mini_set_count: int | None = None,
+        # Exercise mode (strength vs aerobic)
+        exercise_mode: ExerciseMode = ExerciseMode.STRENGTH,
+        # Aerobic exercise fields
+        duration_minutes: int | None = None,
+        intensity: str | None = None,
+        work_seconds: int | None = None,
+        interval_rest_seconds: int | None = None,
+        rounds: int | None = None,
+        distance_km: float | None = None,
+        target_pace_min_per_km: float | None = None,
     ) -> WorkoutExercise:
         """Add an exercise to a workout."""
         workout_exercise = WorkoutExercise(
@@ -348,6 +359,16 @@ class WorkoutService:
             rest_between_drops=rest_between_drops,
             pause_duration=pause_duration,
             mini_set_count=mini_set_count,
+            # Exercise mode (strength vs aerobic)
+            exercise_mode=exercise_mode,
+            # Aerobic exercise fields
+            duration_minutes=duration_minutes,
+            intensity=intensity,
+            work_seconds=work_seconds,
+            interval_rest_seconds=interval_rest_seconds,
+            rounds=rounds,
+            distance_km=distance_km,
+            target_pace_min_per_km=target_pace_min_per_km,
         )
         self.db.add(workout_exercise)
         await self.db.commit()
@@ -420,6 +441,16 @@ class WorkoutService:
                 rest_between_drops=we.rest_between_drops,
                 pause_duration=we.pause_duration,
                 mini_set_count=we.mini_set_count,
+                # Exercise mode (strength vs aerobic)
+                exercise_mode=we.exercise_mode,
+                # Aerobic exercise fields
+                duration_minutes=we.duration_minutes,
+                intensity=we.intensity,
+                work_seconds=we.work_seconds,
+                interval_rest_seconds=we.interval_rest_seconds,
+                rounds=we.rounds,
+                distance_km=we.distance_km,
+                target_pace_min_per_km=we.target_pace_min_per_km,
             )
             self.db.add(new_we)
 

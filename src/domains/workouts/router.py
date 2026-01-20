@@ -836,6 +836,16 @@ async def create_plan(
                             rest_between_drops=ex.rest_between_drops,
                             pause_duration=ex.pause_duration,
                             mini_set_count=ex.mini_set_count,
+                            # Exercise mode (strength vs aerobic)
+                            exercise_mode=ex.exercise_mode,
+                            # Aerobic exercise fields
+                            duration_minutes=ex.duration_minutes,
+                            intensity=ex.intensity,
+                            work_seconds=ex.work_seconds,
+                            interval_rest_seconds=ex.interval_rest_seconds,
+                            rounds=ex.rounds,
+                            distance_km=ex.distance_km,
+                            target_pace_min_per_km=ex.target_pace_min_per_km,
                         )
                 # Add to plan
                 await workout_service.add_workout_to_plan(
@@ -955,6 +965,16 @@ async def update_plan(
                             rest_between_drops=ex.rest_between_drops,
                             pause_duration=ex.pause_duration,
                             mini_set_count=ex.mini_set_count,
+                            # Exercise mode (strength vs aerobic)
+                            exercise_mode=ex.exercise_mode,
+                            # Aerobic exercise fields
+                            duration_minutes=ex.duration_minutes,
+                            intensity=ex.intensity,
+                            work_seconds=ex.work_seconds,
+                            interval_rest_seconds=ex.interval_rest_seconds,
+                            rounds=ex.rounds,
+                            distance_km=ex.distance_km,
+                            target_pace_min_per_km=ex.target_pace_min_per_km,
                         )
                 # Add to plan
                 await workout_service.add_workout_to_plan(
@@ -1104,6 +1124,16 @@ async def add_workout_to_plan(
                     rest_between_drops=ex.rest_between_drops,
                     pause_duration=ex.pause_duration,
                     mini_set_count=ex.mini_set_count,
+                    # Exercise mode (strength vs aerobic)
+                    exercise_mode=ex.exercise_mode,
+                    # Aerobic exercise fields
+                    duration_minutes=ex.duration_minutes,
+                    intensity=ex.intensity,
+                    work_seconds=ex.work_seconds,
+                    interval_rest_seconds=ex.interval_rest_seconds,
+                    rounds=ex.rounds,
+                    distance_km=ex.distance_km,
+                    target_pace_min_per_km=ex.target_pace_min_per_km,
                 )
         await workout_service.add_workout_to_plan(
             plan_id=plan_id,
@@ -1400,6 +1430,21 @@ async def create_workout(
                 technique_type=ex.technique_type,
                 exercise_group_id=ex.exercise_group_id,
                 exercise_group_order=ex.exercise_group_order,
+                # Structured technique parameters
+                drop_count=ex.drop_count,
+                rest_between_drops=ex.rest_between_drops,
+                pause_duration=ex.pause_duration,
+                mini_set_count=ex.mini_set_count,
+                # Exercise mode (strength vs aerobic)
+                exercise_mode=ex.exercise_mode,
+                # Aerobic exercise fields
+                duration_minutes=ex.duration_minutes,
+                intensity=ex.intensity,
+                work_seconds=ex.work_seconds,
+                interval_rest_seconds=ex.interval_rest_seconds,
+                rounds=ex.rounds,
+                distance_km=ex.distance_km,
+                target_pace_min_per_km=ex.target_pace_min_per_km,
             )
         # Refresh to get exercises
         workout = await workout_service.get_workout_by_id(workout.id)
@@ -1540,6 +1585,21 @@ async def add_exercise(
         technique_type=request.technique_type,
         exercise_group_id=request.exercise_group_id,
         exercise_group_order=request.exercise_group_order,
+        # Structured technique parameters
+        drop_count=request.drop_count,
+        rest_between_drops=request.rest_between_drops,
+        pause_duration=request.pause_duration,
+        mini_set_count=request.mini_set_count,
+        # Exercise mode (strength vs aerobic)
+        exercise_mode=request.exercise_mode,
+        # Aerobic exercise fields
+        duration_minutes=request.duration_minutes,
+        intensity=request.intensity,
+        work_seconds=request.work_seconds,
+        interval_rest_seconds=request.interval_rest_seconds,
+        rounds=request.rounds,
+        distance_km=request.distance_km,
+        target_pace_min_per_km=request.target_pace_min_per_km,
     )
 
     # Refresh workout
