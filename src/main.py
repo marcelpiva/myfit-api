@@ -81,10 +81,10 @@ def create_app() -> FastAPI:
             from fastapi import HTTPException
             raise HTTPException(status_code=403, detail="Invalid admin token")
 
-        from src.config.database import async_session_maker
+        from src.config.database import AsyncSessionLocal
         from src.scripts.seed_exercises import seed_exercises
 
-        async with async_session_maker() as session:
+        async with AsyncSessionLocal() as session:
             count = await seed_exercises(session, clear_existing=True)
             return {"status": "success", "exercises_seeded": count}
 
