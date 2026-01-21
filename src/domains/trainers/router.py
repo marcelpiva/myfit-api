@@ -15,6 +15,7 @@ from src.domains.auth.dependencies import CurrentUser
 
 logger = logging.getLogger(__name__)
 from src.domains.organizations.models import OrganizationMembership, UserRole
+from src.domains.organizations.schemas import InviteResponse
 from src.domains.organizations.service import OrganizationService
 from src.domains.trainers.models import StudentNote
 from src.domains.trainers.schemas import (
@@ -129,6 +130,43 @@ async def list_students(
 
     # Apply pagination
     return result[offset:offset + limit]
+
+
+@router.get("/students/pending-invites", response_model=list[InviteResponse])
+async def list_pending_student_invites(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[InviteResponse]:
+    """List all pending student invites for the trainer's organization."""
+    org_id = await _get_trainer_organization(current_user, db)
+    org_service = OrganizationService(db)
+
+    org = await org_service.get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    invites = await org_service.get_pending_invites(org_id)
+
+    return [
+        InviteResponse(
+            id=invite.id,
+            email=invite.email,
+            role=invite.role,
+            organization_id=invite.organization_id,
+            organization_name=org.name,
+            invited_by_name=current_user.name,
+            expires_at=invite.expires_at,
+            created_at=invite.created_at,
+            is_expired=invite.is_expired,
+            is_accepted=invite.is_accepted,
+            token=invite.token,
+        )
+        for invite in invites
+        if invite.role == UserRole.STUDENT and not invite.is_expired and not invite.is_accepted
+    ]
 
 
 @router.get("/students/{student_id}", response_model=StudentResponse)
@@ -491,22 +529,33 @@ async def add_student(
     )
 
 
-@router.post("/students/register", response_model=StudentResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/students/register", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
 async def register_student(
     request: StudentRegisterRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     background_tasks: BackgroundTasks,
-) -> StudentResponse:
-    """Register a new student (creates user account and adds to trainer's organization)."""
+) -> InviteResponse:
+    """Invite a student to join the trainer's organization.
+
+    Creates an invitation that the student must accept after registering/logging in.
+    This ensures the student has full control over their account.
+    """
     org_id = await _get_trainer_organization(current_user, db)
     org_service = OrganizationService(db)
     user_service = UserService(db)
 
-    # Check if email already exists
+    # Get organization details for email
+    org = await org_service.get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    # Check if user is already a member
     existing_user = await user_service.get_user_by_email(request.email)
     if existing_user:
-        # User exists - check if already a member
         existing_member = await org_service.get_membership(org_id, existing_user.id)
         if existing_member and existing_member.is_active:
             raise HTTPException(
@@ -514,69 +563,48 @@ async def register_student(
                 detail="Email já cadastrado como aluno",
             )
 
-        # Add existing user as student
-        membership = await org_service.add_member(
-            org_id=org_id,
-            user_id=existing_user.id,
-            role=UserRole.STUDENT,
-            invited_by_id=current_user.id,
-        )
-
-        return StudentResponse(
-            id=membership.id,
-            user_id=membership.user_id,
-            name=existing_user.name,
-            email=existing_user.email,
-            avatar_url=existing_user.avatar_url,
-            phone=existing_user.phone,
-            joined_at=membership.joined_at,
-            is_active=membership.is_active,
-            goal=request.goal,
-            notes=request.notes,
-            workouts_count=0,
-            last_workout_at=None,
-        )
-
-    # Create new user account
-    temp_password = secrets.token_urlsafe(12)
-    new_user = await user_service.create_user(
-        email=request.email,
-        password=temp_password,
-        name=request.name,
-        phone=request.phone,
+    # Check for existing pending invite
+    pending_invites = await org_service.get_pending_invites_for_email(request.email)
+    existing_invite = next(
+        (inv for inv in pending_invites if inv.organization_id == org_id and not inv.is_expired),
+        None
     )
+    if existing_invite:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Já existe um convite pendente para este email",
+        )
 
-    # Add to organization as student
-    membership = await org_service.add_member(
+    # Create organization invite
+    invite = await org_service.create_invite(
         org_id=org_id,
-        user_id=new_user.id,
+        email=request.email,
         role=UserRole.STUDENT,
         invited_by_id=current_user.id,
     )
 
-    # Send welcome email with temp password in background
+    # Send invite email in background
     background_tasks.add_task(
-        send_welcome_email,
-        to_email=new_user.email,
-        name=new_user.name,
-        temp_password=temp_password,
+        send_invite_email_task,
+        to_email=request.email,
         trainer_name=current_user.name,
+        org_name=org.name,
+        invite_token=invite.token,
     )
-    logger.info(f"Welcome email queued for {new_user.email}")
+    logger.info(f"Invite email queued for {request.email}")
 
-    return StudentResponse(
-        id=membership.id,
-        user_id=membership.user_id,
-        name=new_user.name,
-        email=new_user.email,
-        avatar_url=new_user.avatar_url,
-        phone=new_user.phone,
-        joined_at=membership.joined_at,
-        is_active=membership.is_active,
-        goal=request.goal,
-        notes=request.notes,
-        workouts_count=0,
-        last_workout_at=None,
+    return InviteResponse(
+        id=invite.id,
+        email=invite.email,
+        role=invite.role,
+        organization_id=invite.organization_id,
+        organization_name=org.name,
+        invited_by_name=current_user.name,
+        expires_at=invite.expires_at,
+        created_at=invite.created_at,
+        is_expired=invite.is_expired,
+        is_accepted=invite.is_accepted,
+        token=invite.token,
     )
 
 
