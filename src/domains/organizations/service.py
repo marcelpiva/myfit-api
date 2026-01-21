@@ -416,7 +416,7 @@ class OrganizationService:
             select(OrganizationInvite)
             .where(
                 and_(
-                    OrganizationInvite.email == email,
+                    OrganizationInvite.email == email.lower(),
                     OrganizationInvite.accepted_at == None,
                 )
             )
