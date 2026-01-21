@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.2] - 2026-01-21
+
+### Changed
+- **Student Registration Flow** - Now uses invite system instead of direct membership
+  - `POST /trainers/students/register` creates `OrganizationInvite` instead of direct membership
+  - Students must accept invite to join trainer's organization
+  - Prevents duplicate user creation when student registers separately
+  - Sends invite email via Resend
+
+### Added
+- **Trainer Pending Invites Endpoint**
+  - `GET /trainers/students/pending-invites` - List pending student invites for trainer
+
+### Fixed
+- **Case-Insensitive Email Matching** - Pending invites query now lowercases email for comparison
+
 ## [0.4.1] - 2026-01-21
 
 ### Added
