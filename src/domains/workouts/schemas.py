@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from src.domains.workouts.models import Difficulty, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import AssignmentStatus, Difficulty, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -645,12 +645,23 @@ class PlanAssignmentResponse(BaseModel):
     end_date: date | None = None
     is_active: bool
     notes: str | None = None
+    status: AssignmentStatus = AssignmentStatus.PENDING
+    accepted_at: datetime | None = None
+    declined_reason: str | None = None
     created_at: datetime
     plan_name: str
     student_name: str
+    plan_duration_weeks: int | None = None
 
     class Config:
         from_attributes = True
+
+
+class AssignmentAcceptRequest(BaseModel):
+    """Request to accept or decline a plan assignment."""
+
+    accept: bool = True
+    declined_reason: str | None = Field(None, max_length=500)
 
 
 # AI Suggestion schemas

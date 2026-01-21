@@ -54,6 +54,14 @@ class SplitType(str, enum.Enum):
     CUSTOM = "custom"
 
 
+class AssignmentStatus(str, enum.Enum):
+    """Plan assignment status."""
+
+    PENDING = "pending"  # Waiting for student to accept
+    ACCEPTED = "accepted"  # Student accepted
+    DECLINED = "declined"  # Student declined
+
+
 class MuscleGroup(str, enum.Enum):
     """Major muscle groups."""
 
@@ -695,13 +703,22 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Assignment acceptance workflow
+    status: Mapped[AssignmentStatus] = mapped_column(
+        Enum(AssignmentStatus, name="assignment_status_enum", values_callable=lambda x: [e.value for e in x]),
+        default=AssignmentStatus.PENDING,
+        nullable=False,
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    declined_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
     # Relationships
     plan: Mapped["TrainingPlan"] = relationship("TrainingPlan")
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id])
     trainer: Mapped["User"] = relationship("User", foreign_keys=[trainer_id])
 
     def __repr__(self) -> str:
-        return f"<PlanAssignment plan={self.plan_id} student={self.student_id}>"
+        return f"<PlanAssignment plan={self.plan_id} student={self.student_id} status={self.status}>"
 
 
 class NoteContextType(str, enum.Enum):

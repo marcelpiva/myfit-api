@@ -580,6 +580,85 @@ async def register_student(
     )
 
 
+# ==================== Student Status ====================
+
+@router.patch("/students/{student_user_id}/status")
+async def update_student_status(
+    student_user_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    is_active: Annotated[bool, Query()] = True,
+) -> StudentResponse:
+    """Activate or deactivate a student."""
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    # Get all trainer's organizations and search for the student in any of them
+    trainer_orgs = await org_service.get_user_organizations(current_user.id)
+    member = None
+
+    for org in trainer_orgs:
+        # Check if trainer has appropriate role in this org
+        trainer_membership = await org_service.get_membership(org.id, current_user.id)
+        if trainer_membership and trainer_membership.role in [
+            UserRole.GYM_OWNER, UserRole.GYM_ADMIN, UserRole.TRAINER, UserRole.COACH
+        ]:
+            # Try to find the student in this org
+            student_member = await org_service.get_membership(org.id, student_user_id)
+            if student_member and student_member.role == UserRole.STUDENT:
+                member = student_member
+                break
+
+    if not member:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Aluno não encontrado",
+        )
+
+    # Update membership status
+    member.is_active = is_active
+    await db.commit()
+    await db.refresh(member)
+
+    # Get user info
+    user = await user_service.get_user_by_id(student_user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado",
+        )
+
+    # Get workout stats
+    session_result = await db.execute(
+        select(func.count(WorkoutSession.id))
+        .where(WorkoutSession.user_id == student_user_id)
+    )
+    workouts_count = session_result.scalar() or 0
+
+    last_workout = await db.execute(
+        select(WorkoutSession.completed_at)
+        .where(WorkoutSession.user_id == student_user_id)
+        .where(WorkoutSession.completed_at.isnot(None))
+        .order_by(WorkoutSession.completed_at.desc())
+        .limit(1)
+    )
+    last_workout_at = last_workout.scalar_one_or_none()
+
+    return StudentResponse(
+        user_id=user.id,
+        email=user.email,
+        name=user.name,
+        phone=user.phone,
+        avatar_url=user.avatar_url,
+        joined_at=member.joined_at,
+        is_active=member.is_active,
+        goal=None,
+        notes=None,
+        workouts_count=workouts_count,
+        last_workout_at=last_workout_at,
+    )
+
+
 # ==================== Invite Code ====================
 
 @router.get("/my-invite-code", response_model=InviteCodeResponse)
