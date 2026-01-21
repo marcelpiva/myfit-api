@@ -1131,6 +1131,7 @@ class WorkoutService:
         difficulty: Difficulty | None = None,
         split_type: SplitType | None = None,
         duration_weeks: int | None = None,
+        clear_duration_weeks: bool = False,
         target_workout_minutes: int | None = None,
         is_template: bool | None = None,
         is_public: bool | None = None,
@@ -1155,7 +1156,9 @@ class WorkoutService:
             plan.difficulty = difficulty
         if split_type is not None:
             plan.split_type = split_type
-        if duration_weeks is not None:
+        if clear_duration_weeks:
+            plan.duration_weeks = None
+        elif duration_weeks is not None:
             plan.duration_weeks = duration_weeks
         if target_workout_minutes is not None:
             plan.target_workout_minutes = target_workout_minutes

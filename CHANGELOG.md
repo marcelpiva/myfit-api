@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-01-21
+
+### Added
+- **Student Status Management** - New student status workflow
+  - `status` field on OrganizationMembership (pending, active, inactive, blocked)
+  - `PUT /organizations/{org_id}/members/{user_id}/status` - Update member status
+  - Students must accept invitation before accessing organization features
+
+- **Plan Assignment Acceptance** - Student must accept plan assignments
+  - `status` field on PlanAssignment (pending, accepted, declined)
+  - `POST /workouts/plans/assignments/{id}/accept` - Accept assignment
+  - `POST /workouts/plans/assignments/{id}/decline` - Decline assignment
+
+- **Clear Duration for Continuous Plans**
+  - `clear_duration_weeks` parameter in PlanUpdate schema
+  - Allows setting duration to null (continuous plan) via explicit flag
+
+### Fixed
+- **Route Ordering** - Fixed 422 error on `/plans/assignments` endpoint
+  - Moved assignment routes before dynamic `{plan_id}` route in FastAPI
+- **Duplicate Plan Validation** - Returns 409 Conflict when same plan already assigned to student
+
 ## [0.4.0] - 2026-01-20
 
 ### Added

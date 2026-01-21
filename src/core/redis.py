@@ -171,6 +171,11 @@ class RateLimiter:
         Returns:
             Tuple of (is_allowed, current_count)
         """
+        # Check if rate limiting is disabled
+        from src.config.settings import settings
+        if not settings.RATE_LIMIT_ENABLED:
+            return True, 0
+
         key = f"{cls.RATE_LIMIT_PREFIX}{action}:{identifier}"
         client = await get_redis()
 

@@ -217,12 +217,14 @@ async def list_members(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     role: str | None = None,
+    active_only: bool = False,
 ) -> list[MemberResponse]:
     """Get all members of an organization.
 
     Args:
         org_id: Organization UUID
         role: Optional role filter (e.g., 'student', 'trainer')
+        active_only: If True, only return active members (default: False)
     """
     org_service = OrganizationService(db)
 
@@ -234,7 +236,7 @@ async def list_members(
             detail="You are not a member of this organization",
         )
 
-    members = await org_service.get_organization_members(org_id, role=role)
+    members = await org_service.get_organization_members(org_id, role=role, active_only=active_only)
 
     # Build response with user details
     result = []

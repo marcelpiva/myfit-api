@@ -795,6 +795,315 @@ async def generate_plan_with_ai(
     )
     return AIGeneratePlanResponse(**result)
 
+# Plan assignment endpoints
+
+@router.get("/plans/assignments", response_model=list[PlanAssignmentResponse])
+async def list_plan_assignments(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    as_trainer: Annotated[bool, Query()] = False,
+    active_only: Annotated[bool, Query()] = True,
+    student_id: Annotated[UUID | None, Query()] = None,
+) -> list[PlanAssignmentResponse]:
+    """List plan assignments (as student or trainer).
+
+    If as_trainer=True and student_id is provided, returns assignments for that specific student.
+    If as_trainer=True and student_id is None, returns all assignments where current user is trainer.
+    If as_trainer=False, returns assignments for current user as student.
+    """
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    if as_trainer:
+        if student_id:
+            # Filter by specific student
+            assignments = await workout_service.list_trainer_plan_assignments(
+                trainer_id=current_user.id,
+                student_id=student_id,
+                active_only=active_only,
+            )
+        else:
+            # All trainer's assignments
+            assignments = await workout_service.list_trainer_plan_assignments(
+                trainer_id=current_user.id,
+                active_only=active_only,
+            )
+    else:
+        assignments = await workout_service.list_student_plan_assignments(
+            student_id=current_user.id,
+            active_only=active_only,
+        )
+
+    result = []
+    for a in assignments:
+        student = await user_service.get_user_by_id(a.student_id)
+        result.append(
+            PlanAssignmentResponse(
+                id=a.id,
+                plan_id=a.plan_id,
+                student_id=a.student_id,
+                trainer_id=a.trainer_id,
+                organization_id=a.organization_id,
+                start_date=a.start_date,
+                end_date=a.end_date,
+                is_active=a.is_active,
+                notes=a.notes,
+                status=a.status,
+                accepted_at=a.accepted_at,
+                declined_reason=a.declined_reason,
+                created_at=a.created_at,
+                plan_name=a.plan.name if a.plan else "",
+                student_name=student.name if student else "",
+                plan_duration_weeks=a.plan.duration_weeks if a.plan else None,
+            )
+        )
+
+    return result
+
+
+@router.post("/plans/assignments", response_model=PlanAssignmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan_assignment(
+    request: PlanAssignmentCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Assign a plan to a student."""
+    # Rate limiting: max 20 plan assignments per hour per trainer
+    is_allowed, current_count = await RateLimiter.check_rate_limit(
+        identifier=str(current_user.id),
+        action="plan_assignment",
+        max_requests=20,
+        window_seconds=3600,
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Limite de atribuições de planos excedido. Tente novamente mais tarde. ({current_count}/20 por hora)",
+        )
+
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    # Verify plan exists
+    plan = await workout_service.get_plan_by_id(request.plan_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plan not found",
+        )
+
+    # Verify student exists
+    student = await user_service.get_user_by_id(request.student_id)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found",
+        )
+
+    # Check if same plan is already assigned and active for this student
+    existing_assignments = await workout_service.list_student_plan_assignments(
+        student_id=request.student_id,
+        active_only=True,
+    )
+    for existing in existing_assignments:
+        if existing.plan_id == request.plan_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Este plano já está atribuído a este aluno",
+            )
+
+    assignment = await workout_service.create_plan_assignment(
+        plan_id=request.plan_id,
+        student_id=request.student_id,
+        trainer_id=current_user.id,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        notes=request.notes,
+        organization_id=request.organization_id,
+    )
+
+    return PlanAssignmentResponse(
+        id=assignment.id,
+        plan_id=assignment.plan_id,
+        student_id=assignment.student_id,
+        trainer_id=assignment.trainer_id,
+        organization_id=assignment.organization_id,
+        start_date=assignment.start_date,
+        end_date=assignment.end_date,
+        is_active=assignment.is_active,
+        notes=assignment.notes,
+        status=assignment.status,
+        accepted_at=assignment.accepted_at,
+        declined_reason=assignment.declined_reason,
+        created_at=assignment.created_at,
+        plan_name=plan.name,
+        student_name=student.name,
+        plan_duration_weeks=plan.duration_weeks,
+    )
+
+
+@router.post("/plans/assignments/{assignment_id}/respond", response_model=PlanAssignmentResponse)
+async def respond_to_plan_assignment(
+    assignment_id: UUID,
+    request: AssignmentAcceptRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Accept or decline a plan assignment (student only)."""
+    from datetime import datetime, timezone
+    from src.domains.workouts.models import AssignmentStatus
+
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Only the assigned student can respond
+    if assignment.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o aluno pode aceitar ou recusar esta atribuição",
+        )
+
+    # Can only respond to pending assignments
+    if assignment.status != AssignmentStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Esta atribuição já foi {assignment.status.value}",
+        )
+
+    # Update assignment status
+    if request.accept:
+        assignment.status = AssignmentStatus.ACCEPTED
+        assignment.accepted_at = datetime.now(timezone.utc)
+        assignment.declined_reason = None
+    else:
+        assignment.status = AssignmentStatus.DECLINED
+        assignment.declined_reason = request.declined_reason
+        assignment.is_active = False
+
+    await db.commit()
+    await db.refresh(assignment)
+
+    # Get student and plan info for response
+    student = await user_service.get_user_by_id(assignment.student_id)
+    plan = await workout_service.get_plan_by_id(assignment.plan_id)
+
+    return PlanAssignmentResponse(
+        id=assignment.id,
+        plan_id=assignment.plan_id,
+        student_id=assignment.student_id,
+        trainer_id=assignment.trainer_id,
+        organization_id=assignment.organization_id,
+        start_date=assignment.start_date,
+        end_date=assignment.end_date,
+        is_active=assignment.is_active,
+        notes=assignment.notes,
+        status=assignment.status,
+        accepted_at=assignment.accepted_at,
+        declined_reason=assignment.declined_reason,
+        created_at=assignment.created_at,
+        plan_name=plan.name if plan else "",
+        student_name=student.name if student else "",
+        plan_duration_weeks=plan.duration_weeks if plan else None,
+    )
+
+
+@router.put("/plans/assignments/{assignment_id}", response_model=PlanAssignmentResponse)
+async def update_plan_assignment(
+    assignment_id: UUID,
+    request: PlanAssignmentUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Update a plan assignment (trainer only)."""
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Assignment not found",
+        )
+
+    if assignment.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only edit your own assignments",
+        )
+
+    updated = await workout_service.update_plan_assignment(
+        assignment=assignment,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        is_active=request.is_active,
+        notes=request.notes,
+    )
+
+    student = await user_service.get_user_by_id(updated.student_id)
+
+    plan = await workout_service.get_plan_by_id(updated.plan_id)
+
+    return PlanAssignmentResponse(
+        id=updated.id,
+        plan_id=updated.plan_id,
+        student_id=updated.student_id,
+        trainer_id=updated.trainer_id,
+        organization_id=updated.organization_id,
+        start_date=updated.start_date,
+        end_date=updated.end_date,
+        is_active=updated.is_active,
+        notes=updated.notes,
+        status=updated.status,
+        accepted_at=updated.accepted_at,
+        declined_reason=updated.declined_reason,
+        created_at=updated.created_at,
+        plan_name=updated.plan.name if updated.plan else "",
+        student_name=student.name if student else "",
+        plan_duration_weeks=plan.duration_weeks if plan else None,
+    )
+
+
+@router.delete("/plans/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_plan_assignment(
+    assignment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete/cancel a plan assignment (trainer only, only if pending)."""
+    from src.domains.workouts.models import AssignmentStatus
+
+    workout_service = WorkoutService(db)
+
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    if assignment.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você só pode cancelar suas próprias atribuições",
+        )
+
+    # Only allow deletion of pending assignments
+    if assignment.status != AssignmentStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Apenas atribuições pendentes podem ser canceladas",
+        )
+
+    await db.delete(assignment)
+    await db.commit()
+
 
 @router.get("/plans/{plan_id}", response_model=PlanResponse)
 async def get_plan(
@@ -950,6 +1259,7 @@ async def update_plan(
         difficulty=request.difficulty,
         split_type=request.split_type,
         duration_weeks=request.duration_weeks,
+        clear_duration_weeks=request.clear_duration_weeks,
         target_workout_minutes=request.target_workout_minutes,
         is_template=request.is_template,
         is_public=request.is_public,
@@ -1235,303 +1545,6 @@ async def remove_workout_from_plan(
 
     await workout_service.remove_workout_from_plan(plan_workout_id)
 
-
-# Plan assignment endpoints
-
-@router.get("/plans/assignments", response_model=list[PlanAssignmentResponse])
-async def list_plan_assignments(
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    as_trainer: Annotated[bool, Query()] = False,
-    active_only: Annotated[bool, Query()] = True,
-    student_id: Annotated[UUID | None, Query()] = None,
-) -> list[PlanAssignmentResponse]:
-    """List plan assignments (as student or trainer).
-
-    If as_trainer=True and student_id is provided, returns assignments for that specific student.
-    If as_trainer=True and student_id is None, returns all assignments where current user is trainer.
-    If as_trainer=False, returns assignments for current user as student.
-    """
-    workout_service = WorkoutService(db)
-    user_service = UserService(db)
-
-    if as_trainer:
-        if student_id:
-            # Filter by specific student
-            assignments = await workout_service.list_trainer_plan_assignments(
-                trainer_id=current_user.id,
-                student_id=student_id,
-                active_only=active_only,
-            )
-        else:
-            # All trainer's assignments
-            assignments = await workout_service.list_trainer_plan_assignments(
-                trainer_id=current_user.id,
-                active_only=active_only,
-            )
-    else:
-        assignments = await workout_service.list_student_plan_assignments(
-            student_id=current_user.id,
-            active_only=active_only,
-        )
-
-    result = []
-    for a in assignments:
-        student = await user_service.get_user_by_id(a.student_id)
-        result.append(
-            PlanAssignmentResponse(
-                id=a.id,
-                plan_id=a.plan_id,
-                student_id=a.student_id,
-                trainer_id=a.trainer_id,
-                organization_id=a.organization_id,
-                start_date=a.start_date,
-                end_date=a.end_date,
-                is_active=a.is_active,
-                notes=a.notes,
-                status=a.status,
-                accepted_at=a.accepted_at,
-                declined_reason=a.declined_reason,
-                created_at=a.created_at,
-                plan_name=a.plan.name if a.plan else "",
-                student_name=student.name if student else "",
-                plan_duration_weeks=a.plan.duration_weeks if a.plan else None,
-            )
-        )
-
-    return result
-
-
-@router.post("/plans/assignments", response_model=PlanAssignmentResponse, status_code=status.HTTP_201_CREATED)
-async def create_plan_assignment(
-    request: PlanAssignmentCreate,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PlanAssignmentResponse:
-    """Assign a plan to a student."""
-    # Rate limiting: max 20 plan assignments per hour per trainer
-    is_allowed, current_count = await RateLimiter.check_rate_limit(
-        identifier=str(current_user.id),
-        action="plan_assignment",
-        max_requests=20,
-        window_seconds=3600,
-    )
-    if not is_allowed:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail=f"Limite de atribuições de planos excedido. Tente novamente mais tarde. ({current_count}/20 por hora)",
-        )
-
-    workout_service = WorkoutService(db)
-    user_service = UserService(db)
-
-    # Verify plan exists
-    plan = await workout_service.get_plan_by_id(request.plan_id)
-    if not plan:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Plan not found",
-        )
-
-    # Verify student exists
-    student = await user_service.get_user_by_id(request.student_id)
-    if not student:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student not found",
-        )
-
-    assignment = await workout_service.create_plan_assignment(
-        plan_id=request.plan_id,
-        student_id=request.student_id,
-        trainer_id=current_user.id,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        notes=request.notes,
-        organization_id=request.organization_id,
-    )
-
-    return PlanAssignmentResponse(
-        id=assignment.id,
-        plan_id=assignment.plan_id,
-        student_id=assignment.student_id,
-        trainer_id=assignment.trainer_id,
-        organization_id=assignment.organization_id,
-        start_date=assignment.start_date,
-        end_date=assignment.end_date,
-        is_active=assignment.is_active,
-        notes=assignment.notes,
-        status=assignment.status,
-        accepted_at=assignment.accepted_at,
-        declined_reason=assignment.declined_reason,
-        created_at=assignment.created_at,
-        plan_name=plan.name,
-        student_name=student.name,
-        plan_duration_weeks=plan.duration_weeks,
-    )
-
-
-@router.post("/plans/assignments/{assignment_id}/respond", response_model=PlanAssignmentResponse)
-async def respond_to_plan_assignment(
-    assignment_id: UUID,
-    request: AssignmentAcceptRequest,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PlanAssignmentResponse:
-    """Accept or decline a plan assignment (student only)."""
-    from datetime import datetime, timezone
-    from src.domains.workouts.models import AssignmentStatus
-
-    workout_service = WorkoutService(db)
-    user_service = UserService(db)
-
-    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
-    if not assignment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Atribuição não encontrada",
-        )
-
-    # Only the assigned student can respond
-    if assignment.student_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Apenas o aluno pode aceitar ou recusar esta atribuição",
-        )
-
-    # Can only respond to pending assignments
-    if assignment.status != AssignmentStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Esta atribuição já foi {assignment.status.value}",
-        )
-
-    # Update assignment status
-    if request.accept:
-        assignment.status = AssignmentStatus.ACCEPTED
-        assignment.accepted_at = datetime.now(timezone.utc)
-        assignment.declined_reason = None
-    else:
-        assignment.status = AssignmentStatus.DECLINED
-        assignment.declined_reason = request.declined_reason
-        assignment.is_active = False
-
-    await db.commit()
-    await db.refresh(assignment)
-
-    # Get student and plan info for response
-    student = await user_service.get_user_by_id(assignment.student_id)
-    plan = await workout_service.get_plan_by_id(assignment.plan_id)
-
-    return PlanAssignmentResponse(
-        id=assignment.id,
-        plan_id=assignment.plan_id,
-        student_id=assignment.student_id,
-        trainer_id=assignment.trainer_id,
-        organization_id=assignment.organization_id,
-        start_date=assignment.start_date,
-        end_date=assignment.end_date,
-        is_active=assignment.is_active,
-        notes=assignment.notes,
-        status=assignment.status,
-        accepted_at=assignment.accepted_at,
-        declined_reason=assignment.declined_reason,
-        created_at=assignment.created_at,
-        plan_name=plan.name if plan else "",
-        student_name=student.name if student else "",
-        plan_duration_weeks=plan.duration_weeks if plan else None,
-    )
-
-
-@router.put("/plans/assignments/{assignment_id}", response_model=PlanAssignmentResponse)
-async def update_plan_assignment(
-    assignment_id: UUID,
-    request: PlanAssignmentUpdate,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> PlanAssignmentResponse:
-    """Update a plan assignment (trainer only)."""
-    workout_service = WorkoutService(db)
-    user_service = UserService(db)
-
-    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
-    if not assignment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Assignment not found",
-        )
-
-    if assignment.trainer_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only edit your own assignments",
-        )
-
-    updated = await workout_service.update_plan_assignment(
-        assignment=assignment,
-        start_date=request.start_date,
-        end_date=request.end_date,
-        is_active=request.is_active,
-        notes=request.notes,
-    )
-
-    student = await user_service.get_user_by_id(updated.student_id)
-
-    plan = await workout_service.get_plan_by_id(updated.plan_id)
-
-    return PlanAssignmentResponse(
-        id=updated.id,
-        plan_id=updated.plan_id,
-        student_id=updated.student_id,
-        trainer_id=updated.trainer_id,
-        organization_id=updated.organization_id,
-        start_date=updated.start_date,
-        end_date=updated.end_date,
-        is_active=updated.is_active,
-        notes=updated.notes,
-        status=updated.status,
-        accepted_at=updated.accepted_at,
-        declined_reason=updated.declined_reason,
-        created_at=updated.created_at,
-        plan_name=updated.plan.name if updated.plan else "",
-        student_name=student.name if student else "",
-        plan_duration_weeks=plan.duration_weeks if plan else None,
-    )
-
-
-@router.delete("/plans/assignments/{assignment_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_plan_assignment(
-    assignment_id: UUID,
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> None:
-    """Delete/cancel a plan assignment (trainer only, only if pending)."""
-    from src.domains.workouts.models import AssignmentStatus
-
-    workout_service = WorkoutService(db)
-
-    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
-    if not assignment:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Atribuição não encontrada",
-        )
-
-    if assignment.trainer_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você só pode cancelar suas próprias atribuições",
-        )
-
-    # Only allow deletion of pending assignments
-    if assignment.status != AssignmentStatus.PENDING:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Apenas atribuições pendentes podem ser canceladas",
-        )
-
-    await db.delete(assignment)
-    await db.commit()
 
 
 # Individual workout routes (moved to end to avoid conflicts)

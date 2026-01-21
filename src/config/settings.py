@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "MyFit <noreply@myfit.app>"
 
+    # Rate Limiting
+    RATE_LIMIT_ENABLED: bool = True
+
     @property
     def email_enabled(self) -> bool:
         """Check if email is configured."""

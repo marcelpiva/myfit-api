@@ -645,6 +645,7 @@ async def update_student_status(
     last_workout_at = last_workout.scalar_one_or_none()
 
     return StudentResponse(
+        id=member.id,
         user_id=user.id,
         email=user.email,
         name=user.name,

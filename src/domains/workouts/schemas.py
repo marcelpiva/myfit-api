@@ -498,6 +498,7 @@ class PlanUpdate(BaseModel):
     difficulty: Difficulty | None = None
     split_type: SplitType | None = None
     duration_weeks: int | None = Field(None, ge=1, le=52)
+    clear_duration_weeks: bool = Field(False, description="Set to true to clear duration (continuous plan)")
     target_workout_minutes: int | None = Field(None, ge=15, le=180)
     # Diet configuration
     include_diet: bool | None = None
