@@ -3,8 +3,8 @@ import enum
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, func, text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.config.database import Base
@@ -143,6 +143,16 @@ class OrganizationInvite(Base, UUIDMixin, TimestampMixin):
     """Pending invitations to join an organization."""
 
     __tablename__ = "organization_invites"
+    __table_args__ = (
+        # Unique constraint: only one pending invite per email per org
+        Index(
+            'ix_unique_pending_invite',
+            'organization_id',
+            'email',
+            unique=True,
+            postgresql_where=text('accepted_at IS NULL'),
+        ),
+    )
 
     organization_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -165,6 +175,14 @@ class OrganizationInvite(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
     accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
+    # Additional student info (name, phone, goal, notes) from registration request
+    student_info: Mapped[dict | None] = mapped_column(JSONB, nullable=True, default=None)
+    # Resend tracking
+    resend_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_resent_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
     )

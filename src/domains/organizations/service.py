@@ -329,6 +329,7 @@ class OrganizationService:
         role: UserRole,
         invited_by_id: uuid.UUID,
         expires_in_days: int = 7,
+        student_info: dict | None = None,
     ) -> OrganizationInvite:
         """Create an invitation to join an organization.
 
@@ -338,6 +339,7 @@ class OrganizationService:
             role: Role to assign
             invited_by_id: ID of inviting user
             expires_in_days: Days until expiration
+            student_info: Optional student info (name, phone, goal, notes)
 
         Returns:
             The created invite
@@ -352,6 +354,7 @@ class OrganizationService:
             token=token,
             expires_at=expires_at,
             invited_by_id=invited_by_id,
+            student_info=student_info,
         )
         self.db.add(invite)
         await self.db.commit()
@@ -501,9 +504,39 @@ class OrganizationService:
         """
         invite.token = secrets.token_urlsafe(32)
         invite.expires_at = datetime.now(timezone.utc) + timedelta(days=expires_in_days)
+        invite.resend_count += 1
+        invite.last_resent_at = datetime.now(timezone.utc)
         await self.db.commit()
         await self.db.refresh(invite)
         return invite
+
+    async def cleanup_expired_invites(
+        self,
+        older_than_days: int = 30,
+    ) -> int:
+        """Delete expired invites older than specified days.
+
+        Args:
+            older_than_days: Only delete invites that expired more than this many days ago
+
+        Returns:
+            Number of deleted invites
+        """
+        from sqlalchemy import delete
+
+        cutoff = datetime.now(timezone.utc) - timedelta(days=older_than_days)
+        result = await self.db.execute(
+            delete(OrganizationInvite)
+            .where(
+                and_(
+                    OrganizationInvite.expires_at < datetime.now(timezone.utc),
+                    OrganizationInvite.expires_at < cutoff,
+                    OrganizationInvite.accepted_at == None,
+                )
+            )
+        )
+        await self.db.commit()
+        return result.rowcount
 
     # Permission checks
 

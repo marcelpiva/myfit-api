@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -575,13 +576,31 @@ async def register_student(
             detail="Já existe um convite pendente para este email",
         )
 
-    # Create organization invite
-    invite = await org_service.create_invite(
-        org_id=org_id,
-        email=request.email,
-        role=UserRole.STUDENT,
-        invited_by_id=current_user.id,
-    )
+    # Build student_info from request fields
+    student_info = None
+    if any([request.name, request.phone, request.goal, request.notes]):
+        student_info = {
+            "name": request.name,
+            "phone": request.phone,
+            "goal": request.goal,
+            "notes": request.notes,
+        }
+
+    # Create organization invite with student_info
+    try:
+        invite = await org_service.create_invite(
+            org_id=org_id,
+            email=request.email,
+            role=UserRole.STUDENT,
+            invited_by_id=current_user.id,
+            student_info=student_info,
+        )
+    except IntegrityError:
+        # Race condition: another request created the invite first
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Já existe um convite pendente para este email",
+        )
 
     # Send invite email in background
     background_tasks.add_task(

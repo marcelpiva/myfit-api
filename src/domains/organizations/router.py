@@ -1,4 +1,5 @@
 """Organization router with CRUD and member management endpoints."""
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -524,13 +525,23 @@ async def accept_invite(
 
     # Check if already a member
     existing = await org_service.get_membership(invite.organization_id, current_user.id)
-    if existing and existing.is_active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="You are already a member of this organization",
-        )
-
-    membership = await org_service.accept_invite(invite, current_user)
+    if existing:
+        if existing.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You are already a member of this organization",
+            )
+        else:
+            # Reactivate inactive membership
+            existing.is_active = True
+            existing.role = invite.role  # Update role in case it changed
+            invite.accepted_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(existing)
+            membership = existing
+    else:
+        # Create new membership
+        membership = await org_service.accept_invite(invite, current_user)
 
     return MemberResponse(
         id=membership.id,
@@ -649,7 +660,7 @@ async def get_my_invite_code(
     org_service = OrganizationService(db)
 
     # Get user's organizations where they are a trainer/coach/nutritionist/admin
-    memberships = await org_service.get_user_memberships(current_user.id)
+    memberships = await org_service.get_user_memberships_with_orgs(current_user.id)
 
     # Find first organization where user has professional/admin role
     professional_membership = None
