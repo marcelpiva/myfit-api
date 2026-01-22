@@ -175,7 +175,7 @@ class WorkoutResponse(BaseModel):
     tags: list[str] | None = None
     is_template: bool
     is_public: bool
-    created_by_id: UUID
+    created_by_id: UUID | None = None
     organization_id: UUID | None = None
     created_at: datetime
     exercises: list[WorkoutExerciseResponse] = []

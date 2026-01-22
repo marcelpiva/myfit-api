@@ -574,7 +574,11 @@ async def start_session(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SessionResponse:
-    """Start a new workout session."""
+    """Start a new workout session.
+
+    If is_shared=True, creates a co-training session with status 'waiting'.
+    The trainer will be notified and can join the session.
+    """
     workout_service = WorkoutService(db)
 
     # Verify workout exists
@@ -589,7 +593,46 @@ async def start_session(
         user_id=current_user.id,
         workout_id=request.workout_id,
         assignment_id=request.assignment_id,
+        is_shared=request.is_shared,
     )
+
+    # If co-training requested, notify the trainer
+    if request.is_shared:
+        # Get the trainer from the student's plan assignment
+        trainer_id = None
+        if request.assignment_id:
+            from sqlalchemy import select
+            from src.domains.workouts.models import PlanAssignment
+            assignment_query = select(PlanAssignment).where(
+                PlanAssignment.id == request.assignment_id
+            )
+            assignment_result = await db.execute(assignment_query)
+            assignment = assignment_result.scalar_one_or_none()
+            if assignment:
+                trainer_id = assignment.trainer_id
+
+        # If no trainer from assignment, try to get from user's memberships
+        if not trainer_id:
+            from sqlalchemy import select
+            from src.domains.organizations.models import OrganizationMember
+            member_query = select(OrganizationMember).where(
+                OrganizationMember.user_id == current_user.id,
+                OrganizationMember.role == "student",
+                OrganizationMember.trainer_id.isnot(None),
+            )
+            member_result = await db.execute(member_query)
+            member = member_result.scalars().first()
+            if member:
+                trainer_id = member.trainer_id
+
+        if trainer_id:
+            from src.domains.workouts.realtime import notify_cotraining_request
+            await notify_cotraining_request(
+                session=session,
+                student_name=current_user.full_name or current_user.email,
+                workout_name=workout.name,
+                trainer_id=trainer_id,
+            )
 
     return SessionResponse.model_validate(session)
 
@@ -1605,7 +1648,7 @@ async def get_workout_exercises(
             detail="Access denied",
         )
 
-    return [WorkoutExerciseResponse.model_validate(we) for we in workout.workout_exercises]
+    return [WorkoutExerciseResponse.model_validate(we) for we in workout.exercises]
 
 
 @router.post("/", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
