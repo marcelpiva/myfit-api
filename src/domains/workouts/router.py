@@ -2204,3 +2204,143 @@ async def stream_session_events(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+# ==================== Prescription Notes ====================
+
+@router.get("/notes", response_model=PrescriptionNoteListResponse)
+async def list_prescription_notes(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    context_type: Annotated[NoteContextType, Query()],
+    context_id: Annotated[UUID, Query()],
+    organization_id: Annotated[UUID | None, Query()] = None,
+) -> PrescriptionNoteListResponse:
+    """List prescription notes for a given context (plan, workout, session, or exercise)."""
+    workout_service = WorkoutService(db)
+    notes = await workout_service.list_prescription_notes(
+        context_type=context_type,
+        context_id=context_id,
+        organization_id=organization_id,
+    )
+    return PrescriptionNoteListResponse(
+        notes=[PrescriptionNoteResponse.model_validate(n) for n in notes],
+    )
+
+
+@router.get("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+async def get_prescription_note(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Get a specific prescription note by ID."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nota não encontrada",
+        )
+    return PrescriptionNoteResponse.model_validate(note)
+
+
+@router.post("/notes", response_model=PrescriptionNoteResponse, status_code=status.HTTP_201_CREATED)
+async def create_prescription_note(
+    request: PrescriptionNoteCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Create a new prescription note."""
+    workout_service = WorkoutService(db)
+
+    # Determine author role based on context
+    # TODO: Implement proper role detection based on user's role in the organization
+    author_role = NoteAuthorRole.TRAINER
+
+    note = await workout_service.create_prescription_note(
+        author_id=current_user.id,
+        author_role=author_role,
+        context_type=request.context_type,
+        context_id=request.context_id,
+        content=request.content,
+        is_pinned=request.is_pinned or False,
+        organization_id=request.organization_id,
+    )
+    return PrescriptionNoteResponse.model_validate(note)
+
+
+@router.put("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+async def update_prescription_note(
+    note_id: UUID,
+    request: PrescriptionNoteUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Update a prescription note (author only)."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nota não encontrada",
+        )
+
+    if note.author_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você só pode editar suas próprias notas",
+        )
+
+    updated = await workout_service.update_prescription_note(
+        note=note,
+        content=request.content,
+        is_pinned=request.is_pinned,
+    )
+    return PrescriptionNoteResponse.model_validate(updated)
+
+
+@router.post("/notes/{note_id}/read", response_model=PrescriptionNoteResponse)
+async def mark_note_as_read(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PrescriptionNoteResponse:
+    """Mark a prescription note as read."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nota não encontrada",
+        )
+
+    updated = await workout_service.mark_note_as_read(note)
+    return PrescriptionNoteResponse.model_validate(updated)
+
+
+@router.delete("/notes/{note_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_prescription_note(
+    note_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete a prescription note (author only)."""
+    workout_service = WorkoutService(db)
+    note = await workout_service.get_prescription_note_by_id(note_id)
+
+    if not note:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nota não encontrada",
+        )
+
+    if note.author_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você só pode deletar suas próprias notas",
+        )
+
+    await workout_service.delete_prescription_note(note)
