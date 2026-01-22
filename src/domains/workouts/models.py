@@ -62,6 +62,14 @@ class AssignmentStatus(str, enum.Enum):
     DECLINED = "declined"  # Student declined
 
 
+class TrainingMode(str, enum.Enum):
+    """Training mode for plan assignments."""
+
+    PRESENCIAL = "presencial"  # In-person training with trainer present
+    ONLINE = "online"  # Online consulting, student trains alone
+    HIBRIDO = "hibrido"  # Hybrid - some sessions in-person, some online
+
+
 class MuscleGroup(str, enum.Enum):
     """Major muscle groups."""
 
@@ -702,6 +710,13 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Training mode - determines co-training availability
+    training_mode: Mapped[TrainingMode] = mapped_column(
+        Enum(TrainingMode, name="training_mode_enum", values_callable=lambda x: [e.value for e in x]),
+        default=TrainingMode.PRESENCIAL,
+        nullable=False,
+    )
 
     # Assignment acceptance workflow
     status: Mapped[AssignmentStatus] = mapped_column(

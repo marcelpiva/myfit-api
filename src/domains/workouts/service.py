@@ -598,12 +598,22 @@ class WorkoutService:
         user_id: uuid.UUID,
         workout_id: uuid.UUID,
         assignment_id: uuid.UUID | None = None,
+        is_shared: bool = False,
     ) -> WorkoutSession:
-        """Start a new workout session."""
+        """Start a new workout session.
+
+        Args:
+            user_id: The ID of the user starting the session.
+            workout_id: The ID of the workout.
+            assignment_id: Optional assignment ID.
+            is_shared: If True, creates a co-training session in 'waiting' status.
+        """
         session = WorkoutSession(
             workout_id=workout_id,
             user_id=user_id,
             assignment_id=assignment_id,
+            is_shared=is_shared,
+            status=SessionStatus.WAITING if is_shared else SessionStatus.ACTIVE,
         )
         self.db.add(session)
         await self.db.commit()

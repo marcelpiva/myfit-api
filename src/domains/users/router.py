@@ -1,8 +1,9 @@
 """User router with profile and settings endpoints."""
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
-from sqlalchemy import select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -11,17 +12,37 @@ from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.schemas import (
     AvatarUploadResponse,
     PasswordChangeRequest,
+    PlanProgressResponse,
+    RecentActivityResponse,
+    StudentDashboardResponse,
+    StudentStatsResponse,
+    TodayWorkoutResponse,
+    TrainerInfoResponse,
     UserListResponse,
     UserProfileResponse,
     UserProfileUpdate,
     UserSettingsResponse,
     UserSettingsUpdate,
+    WeeklyProgressResponse,
 )
 from src.domains.users.service import UserService
 from src.domains.organizations.service import OrganizationService
+from src.domains.organizations.models import OrganizationMembership, UserRole
 from src.domains.organizations.schemas import UserMembershipResponse, OrganizationInMembership, InviteResponse
 from src.domains.trainers.models import StudentNote
 from src.domains.trainers.schemas import ProgressNoteResponse
+from src.domains.workouts.models import (
+    PlanAssignment,
+    PlanWorkout,
+    PrescriptionNote,
+    TrainingMode,
+    TrainingPlan,
+    Workout,
+    WorkoutExercise,
+    WorkoutSession,
+)
+from src.domains.gamification.service import GamificationService
+from src.domains.progress.models import WeightLog
 
 router = APIRouter()
 
@@ -275,3 +296,339 @@ async def get_my_trainer_notes(
         )
         for note in notes
     ]
+
+
+@router.get("/me/dashboard", response_model=StudentDashboardResponse)
+async def get_student_dashboard(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> StudentDashboardResponse:
+    """Get consolidated dashboard data for the student.
+
+    Returns all data needed for the student home page:
+    - Stats (total workouts, adherence, weight change, streak)
+    - Today's workout (from active plan)
+    - Weekly progress
+    - Recent activity
+    - Trainer info
+    - Plan progress
+    - Unread notes count
+    """
+    now = datetime.now(timezone.utc)
+    today = now.date()
+    start_of_week = now - timedelta(days=now.weekday())
+
+    # ==================== Stats ====================
+    # Total workouts completed
+    total_workouts = await db.scalar(
+        select(func.count(WorkoutSession.id))
+        .where(
+            WorkoutSession.user_id == current_user.id,
+            WorkoutSession.completed_at.isnot(None),
+        )
+    ) or 0
+
+    # Workouts this month (for adherence calculation)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    workouts_this_month = await db.scalar(
+        select(func.count(WorkoutSession.id))
+        .where(
+            WorkoutSession.user_id == current_user.id,
+            WorkoutSession.completed_at.isnot(None),
+            WorkoutSession.started_at >= start_of_month,
+        )
+    ) or 0
+
+    # Calculate adherence (workouts per week target: 5, so ~20 per month)
+    days_in_month = (now - start_of_month).days + 1
+    expected_workouts = max(1, int((days_in_month / 7) * 5))
+    adherence_percent = min(100, int((workouts_this_month / expected_workouts) * 100))
+
+    # Weight change (latest vs oldest measurement)
+    weight_change_kg = None
+    latest_weight = await db.execute(
+        select(WeightLog)
+        .where(WeightLog.user_id == current_user.id)
+        .order_by(WeightLog.logged_at.desc())
+        .limit(1)
+    )
+    latest = latest_weight.scalar_one_or_none()
+
+    oldest_weight = await db.execute(
+        select(WeightLog)
+        .where(WeightLog.user_id == current_user.id)
+        .order_by(WeightLog.logged_at.asc())
+        .limit(1)
+    )
+    oldest = oldest_weight.scalar_one_or_none()
+
+    if latest and oldest and latest.id != oldest.id:
+        weight_change_kg = round(latest.weight_kg - oldest.weight_kg, 1)
+
+    # Current streak
+    gamification_service = GamificationService(db)
+    user_points = await gamification_service.get_user_points(current_user.id)
+    current_streak = user_points.current_streak if user_points else 0
+
+    stats = StudentStatsResponse(
+        total_workouts=total_workouts,
+        adherence_percent=adherence_percent,
+        weight_change_kg=weight_change_kg,
+        current_streak=current_streak,
+    )
+
+    # ==================== Today's Workout ====================
+    today_workout = None
+    plan_progress = None
+
+    # Find active plan assignment
+    active_assignment_result = await db.execute(
+        select(PlanAssignment)
+        .where(
+            PlanAssignment.student_id == current_user.id,
+            PlanAssignment.is_active == True,
+            PlanAssignment.start_date <= today,
+        )
+        .order_by(PlanAssignment.start_date.desc())
+        .limit(1)
+    )
+    active_assignment = active_assignment_result.scalar_one_or_none()
+
+    if active_assignment:
+        # Get the plan with workouts
+        plan_result = await db.execute(
+            select(TrainingPlan)
+            .where(TrainingPlan.id == active_assignment.plan_id)
+        )
+        plan = plan_result.scalar_one_or_none()
+
+        if plan:
+            # Get plan workouts
+            plan_workouts_result = await db.execute(
+                select(PlanWorkout)
+                .where(PlanWorkout.plan_id == plan.id)
+                .order_by(PlanWorkout.order)
+            )
+            plan_workouts = plan_workouts_result.scalars().all()
+
+            if plan_workouts:
+                # Calculate which workout is for today based on weekday and rotation
+                day_of_week = now.weekday()  # 0=Monday, 6=Sunday
+
+                # Simple rotation: use number of completed sessions to determine next workout
+                completed_sessions = await db.scalar(
+                    select(func.count(WorkoutSession.id))
+                    .where(
+                        WorkoutSession.user_id == current_user.id,
+                        WorkoutSession.completed_at.isnot(None),
+                        WorkoutSession.started_at >= active_assignment.start_date,
+                    )
+                ) or 0
+
+                workout_index = completed_sessions % len(plan_workouts)
+                current_plan_workout = plan_workouts[workout_index]
+
+                # Get workout details
+                workout_result = await db.execute(
+                    select(Workout)
+                    .where(Workout.id == current_plan_workout.workout_id)
+                )
+                workout = workout_result.scalar_one_or_none()
+
+                if workout:
+                    # Count exercises
+                    exercises_count = await db.scalar(
+                        select(func.count(WorkoutExercise.id))
+                        .where(WorkoutExercise.workout_id == workout.id)
+                    ) or 0
+
+                    today_workout = TodayWorkoutResponse(
+                        id=current_plan_workout.id,
+                        name=workout.name,
+                        label=f"TREINO {current_plan_workout.label}",
+                        duration_minutes=workout.estimated_duration_min,
+                        exercises_count=exercises_count,
+                        plan_id=plan.id,
+                        workout_id=workout.id,
+                    )
+
+            # Calculate plan progress
+            total_weeks = plan.duration_weeks or 12
+            days_since_start = (today - active_assignment.start_date).days
+            current_week = min(total_weeks, max(1, (days_since_start // 7) + 1))
+            percent_complete = min(100, int((current_week / total_weeks) * 100))
+
+            plan_progress = PlanProgressResponse(
+                plan_id=plan.id,
+                plan_name=plan.name,
+                current_week=current_week,
+                total_weeks=total_weeks,
+                percent_complete=percent_complete,
+                training_mode=active_assignment.training_mode.value,
+            )
+
+    # ==================== Weekly Progress ====================
+    # Get workouts completed this week with their days
+    week_sessions_result = await db.execute(
+        select(WorkoutSession)
+        .where(
+            WorkoutSession.user_id == current_user.id,
+            WorkoutSession.completed_at.isnot(None),
+            WorkoutSession.started_at >= start_of_week,
+        )
+    )
+    week_sessions = week_sessions_result.scalars().all()
+
+    # Build days array
+    day_names = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"]
+    days_completed = set()
+    for session in week_sessions:
+        if session.started_at:
+            days_completed.add(session.started_at.weekday())
+
+    days = [day_names[i] if i in days_completed else None for i in range(7)]
+
+    weekly_progress = WeeklyProgressResponse(
+        completed=len(days_completed),
+        target=5,  # Default target
+        days=days,
+    )
+
+    # ==================== Recent Activity ====================
+    recent_activity = []
+
+    # Recent completed workouts
+    recent_workouts_result = await db.execute(
+        select(WorkoutSession)
+        .where(
+            WorkoutSession.user_id == current_user.id,
+            WorkoutSession.completed_at.isnot(None),
+        )
+        .order_by(WorkoutSession.completed_at.desc())
+        .limit(3)
+    )
+    recent_workouts = recent_workouts_result.scalars().all()
+
+    for session in recent_workouts:
+        # Get workout name
+        workout_result = await db.execute(
+            select(Workout).where(Workout.id == session.workout_id)
+        )
+        workout = workout_result.scalar_one_or_none()
+        workout_name = workout.name if workout else "Treino"
+
+        # Format time
+        time_diff = now - session.completed_at.replace(tzinfo=timezone.utc)
+        if time_diff.days > 1:
+            time_str = f"{time_diff.days} dias atrás"
+        elif time_diff.days == 1:
+            time_str = "Ontem"
+        else:
+            hours = time_diff.seconds // 3600
+            if hours > 0:
+                time_str = f"{hours}h atrás"
+            else:
+                time_str = "Agora mesmo"
+
+        recent_activity.append(
+            RecentActivityResponse(
+                title="Treino Completado",
+                subtitle=workout_name,
+                time=time_str,
+                type="workout",
+            )
+        )
+
+    # Recent weight measurements
+    recent_measurements_result = await db.execute(
+        select(WeightLog)
+        .where(WeightLog.user_id == current_user.id)
+        .order_by(WeightLog.logged_at.desc())
+        .limit(1)
+    )
+    recent_measurement = recent_measurements_result.scalar_one_or_none()
+
+    if recent_measurement:
+        time_diff = now - recent_measurement.logged_at.replace(tzinfo=timezone.utc)
+        if time_diff.days > 1:
+            time_str = f"{time_diff.days} dias atrás"
+        elif time_diff.days == 1:
+            time_str = "Ontem"
+        else:
+            time_str = "Hoje"
+
+        recent_activity.append(
+            RecentActivityResponse(
+                title="Medição Atualizada",
+                subtitle=f"Peso: {recent_measurement.weight_kg}kg",
+                time=time_str,
+                type="measurement",
+            )
+        )
+
+    # Sort by time and limit
+    recent_activity = recent_activity[:5]
+
+    # ==================== Trainer Info ====================
+    trainer_info = None
+    user_service = UserService(db)
+    org_service = OrganizationService(db)
+
+    # Find student's membership in any organization
+    memberships_result = await db.execute(
+        select(OrganizationMembership)
+        .where(
+            OrganizationMembership.user_id == current_user.id,
+            OrganizationMembership.role == UserRole.STUDENT,
+            OrganizationMembership.is_active == True,
+        )
+        .limit(1)
+    )
+    student_membership = memberships_result.scalar_one_or_none()
+
+    if student_membership:
+        # Find trainer in the same organization
+        trainer_membership_result = await db.execute(
+            select(OrganizationMembership)
+            .where(
+                OrganizationMembership.organization_id == student_membership.organization_id,
+                OrganizationMembership.role.in_([
+                    UserRole.TRAINER,
+                    UserRole.GYM_OWNER,
+                    UserRole.COACH,
+                ]),
+                OrganizationMembership.is_active == True,
+            )
+            .limit(1)
+        )
+        trainer_membership = trainer_membership_result.scalar_one_or_none()
+
+        if trainer_membership:
+            trainer_user = await user_service.get_user_by_id(trainer_membership.user_id)
+            if trainer_user:
+                trainer_info = TrainerInfoResponse(
+                    id=trainer_user.id,
+                    name=trainer_user.name,
+                    avatar_url=trainer_user.avatar_url,
+                    is_online=False,  # TODO: Implement online status
+                )
+
+    # ==================== Unread Notes Count ====================
+    unread_notes_count = await db.scalar(
+        select(func.count(PrescriptionNote.id))
+        .where(
+            # Notes where current user is the student (via plan assignment or direct)
+            PrescriptionNote.read_at.is_(None),
+            PrescriptionNote.author_id != current_user.id,
+        )
+    ) or 0
+
+    return StudentDashboardResponse(
+        stats=stats,
+        today_workout=today_workout,
+        weekly_progress=weekly_progress,
+        recent_activity=recent_activity,
+        trainer=trainer_info,
+        plan_progress=plan_progress,
+        unread_notes_count=unread_notes_count,
+    )

@@ -35,6 +35,10 @@ class SessionEventType:
     TRAINER_LEFT = "trainer_left"
     TRAINER_ADJUSTMENT = "trainer_adjustment"
 
+    # Co-training request events
+    COTRAINING_REQUESTED = "cotraining_requested"
+    COTRAINING_CANCELLED = "cotraining_cancelled"
+
     # Exercise events
     SET_COMPLETED = "set_completed"
     EXERCISE_CHANGED = "exercise_changed"
@@ -395,3 +399,64 @@ async def get_session_snapshot(
     session_manager.update_state(session_id, state)
 
     return state
+
+
+async def notify_cotraining_request(
+    session: WorkoutSession,
+    student_name: str,
+    workout_name: str,
+    trainer_id: uuid.UUID,
+) -> None:
+    """Notify trainer that a student has requested co-training.
+
+    This function should be called when a student creates a shared session
+    with is_shared=True and status=WAITING.
+
+    Args:
+        session: The workout session that was created
+        student_name: Name of the student requesting co-training
+        workout_name: Name of the workout
+        trainer_id: ID of the trainer to notify
+    """
+    # Broadcast to the session (in case trainer is already subscribed)
+    await broadcast_session_event(
+        session_id=session.id,
+        event_type=SessionEventType.COTRAINING_REQUESTED,
+        data={
+            "session_id": str(session.id),
+            "workout_id": str(session.workout_id),
+            "student_id": str(session.user_id),
+            "student_name": student_name,
+            "workout_name": workout_name,
+            "trainer_id": str(trainer_id),
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+        },
+        sender_id=session.user_id,
+    )
+
+
+async def notify_cotraining_cancelled(
+    session_id: uuid.UUID,
+    student_id: uuid.UUID,
+    trainer_id: uuid.UUID,
+    reason: str = "student_cancelled",
+) -> None:
+    """Notify trainer that a co-training request was cancelled.
+
+    Args:
+        session_id: The session ID that was cancelled
+        student_id: ID of the student who cancelled
+        trainer_id: ID of the trainer to notify
+        reason: Reason for cancellation (student_cancelled, timeout, etc.)
+    """
+    await broadcast_session_event(
+        session_id=session_id,
+        event_type=SessionEventType.COTRAINING_CANCELLED,
+        data={
+            "session_id": str(session_id),
+            "student_id": str(student_id),
+            "trainer_id": str(trainer_id),
+            "reason": reason,
+        },
+        sender_id=student_id,
+    )

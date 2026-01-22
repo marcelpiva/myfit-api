@@ -88,3 +88,76 @@ class UserListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ==================== Student Dashboard Schemas ====================
+
+
+class StudentStatsResponse(BaseModel):
+    """Student statistics."""
+
+    total_workouts: int = 0
+    adherence_percent: int = 0
+    weight_change_kg: float | None = None
+    current_streak: int = 0
+
+
+class TodayWorkoutResponse(BaseModel):
+    """Today's workout info."""
+
+    id: UUID
+    name: str
+    label: str  # "TREINO A", "TREINO B", etc.
+    duration_minutes: int = 60
+    exercises_count: int = 0
+    plan_id: UUID | None = None
+    workout_id: UUID
+
+
+class WeeklyProgressResponse(BaseModel):
+    """Weekly workout progress."""
+
+    completed: int = 0
+    target: int = 5
+    days: list[str | None] = []  # ["seg", "ter", "qua", None, None]
+
+
+class RecentActivityResponse(BaseModel):
+    """Recent activity item."""
+
+    title: str
+    subtitle: str
+    time: str
+    type: str  # "workout", "diet", "measurement", "achievement"
+
+
+class TrainerInfoResponse(BaseModel):
+    """Trainer info for student dashboard."""
+
+    id: UUID
+    name: str
+    avatar_url: str | None = None
+    is_online: bool = False
+
+
+class PlanProgressResponse(BaseModel):
+    """Current plan progress."""
+
+    plan_id: UUID
+    plan_name: str
+    current_week: int = 1
+    total_weeks: int | None = None
+    percent_complete: int = 0
+    training_mode: str = "presencial"  # "presencial", "online", "hibrido"
+
+
+class StudentDashboardResponse(BaseModel):
+    """Consolidated student dashboard response."""
+
+    stats: StudentStatsResponse
+    today_workout: TodayWorkoutResponse | None = None
+    weekly_progress: WeeklyProgressResponse
+    recent_activity: list[RecentActivityResponse] = []
+    trainer: TrainerInfoResponse | None = None
+    plan_progress: PlanProgressResponse | None = None
+    unread_notes_count: int = 0
