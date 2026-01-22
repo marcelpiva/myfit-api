@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.4] - 2026-01-22
+
+### Fixed
+- **Co-Training Session Start** - Fixed AttributeError when student starts workout session
+  - Changed from non-existent `OrganizationMembership.trainer_id` to `invited_by_id`
+  - Trainers now correctly receive co-training notifications when students start workouts
+
 ## [0.4.3] - 2026-01-22
 
 ### Added
