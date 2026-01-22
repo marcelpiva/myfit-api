@@ -614,11 +614,11 @@ async def start_session(
         # If no trainer from assignment, try to get from user's memberships
         if not trainer_id:
             from sqlalchemy import select
-            from src.domains.organizations.models import OrganizationMember
-            member_query = select(OrganizationMember).where(
-                OrganizationMember.user_id == current_user.id,
-                OrganizationMember.role == "student",
-                OrganizationMember.trainer_id.isnot(None),
+            from src.domains.organizations.models import OrganizationMembership
+            member_query = select(OrganizationMembership).where(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.role == "student",
+                OrganizationMembership.trainer_id.isnot(None),
             )
             member_result = await db.execute(member_query)
             member = member_result.scalars().first()
