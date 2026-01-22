@@ -612,18 +612,19 @@ async def start_session(
                 trainer_id = assignment.trainer_id
 
         # If no trainer from assignment, try to get from user's memberships
+        # The trainer is the one who invited the student (invited_by_id)
         if not trainer_id:
             from sqlalchemy import select
             from src.domains.organizations.models import OrganizationMembership
             member_query = select(OrganizationMembership).where(
                 OrganizationMembership.user_id == current_user.id,
                 OrganizationMembership.role == "student",
-                OrganizationMembership.trainer_id.isnot(None),
+                OrganizationMembership.invited_by_id.isnot(None),
             )
             member_result = await db.execute(member_query)
             member = member_result.scalars().first()
             if member:
-                trainer_id = member.trainer_id
+                trainer_id = member.invited_by_id
 
         if trainer_id:
             from src.domains.workouts.realtime import notify_cotraining_request
