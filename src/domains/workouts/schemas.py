@@ -798,6 +798,12 @@ class PrescriptionNoteUpdate(BaseModel):
     is_pinned: bool | None = None
 
 
+def to_camel(string: str) -> str:
+    """Convert snake_case to camelCase."""
+    components = string.split('_')
+    return components[0] + ''.join(x.title() for x in components[1:])
+
+
 class PrescriptionNoteResponse(BaseModel):
     """Prescription note response."""
 
@@ -817,6 +823,8 @@ class PrescriptionNoteResponse(BaseModel):
 
     class Config:
         from_attributes = True
+        alias_generator = to_camel
+        populate_by_name = True
 
 
 class PrescriptionNoteListResponse(BaseModel):
@@ -825,3 +833,7 @@ class PrescriptionNoteListResponse(BaseModel):
     notes: list[PrescriptionNoteResponse]
     total: int
     unread_count: int = 0
+
+    class Config:
+        alias_generator = to_camel
+        populate_by_name = True

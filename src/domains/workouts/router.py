@@ -2208,7 +2208,7 @@ async def stream_session_events(
 
 # ==================== Prescription Notes ====================
 
-@router.get("/notes", response_model=PrescriptionNoteListResponse)
+@router.get("/notes", response_model=PrescriptionNoteListResponse, response_model_by_alias=True)
 async def list_prescription_notes(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -2223,12 +2223,14 @@ async def list_prescription_notes(
         context_id=context_id,
         organization_id=organization_id,
     )
+    note_responses = [PrescriptionNoteResponse.model_validate(n) for n in notes]
     return PrescriptionNoteListResponse(
-        notes=[PrescriptionNoteResponse.model_validate(n) for n in notes],
+        notes=note_responses,
+        total=len(note_responses),
     )
 
 
-@router.get("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+@router.get("/notes/{note_id}", response_model=PrescriptionNoteResponse, response_model_by_alias=True)
 async def get_prescription_note(
     note_id: UUID,
     current_user: CurrentUser,
@@ -2245,7 +2247,7 @@ async def get_prescription_note(
     return PrescriptionNoteResponse.model_validate(note)
 
 
-@router.post("/notes", response_model=PrescriptionNoteResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/notes", response_model=PrescriptionNoteResponse, response_model_by_alias=True, status_code=status.HTTP_201_CREATED)
 async def create_prescription_note(
     request: PrescriptionNoteCreate,
     current_user: CurrentUser,
@@ -2270,7 +2272,7 @@ async def create_prescription_note(
     return PrescriptionNoteResponse.model_validate(note)
 
 
-@router.put("/notes/{note_id}", response_model=PrescriptionNoteResponse)
+@router.put("/notes/{note_id}", response_model=PrescriptionNoteResponse, response_model_by_alias=True)
 async def update_prescription_note(
     note_id: UUID,
     request: PrescriptionNoteUpdate,
@@ -2301,7 +2303,7 @@ async def update_prescription_note(
     return PrescriptionNoteResponse.model_validate(updated)
 
 
-@router.post("/notes/{note_id}/read", response_model=PrescriptionNoteResponse)
+@router.post("/notes/{note_id}/read", response_model=PrescriptionNoteResponse, response_model_by_alias=True)
 async def mark_note_as_read(
     note_id: UUID,
     current_user: CurrentUser,
