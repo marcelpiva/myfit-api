@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, UploadFile, status
 from uuid import UUID
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -399,9 +399,14 @@ async def get_student_dashboard(
         PlanAssignment.status == AssignmentStatus.ACCEPTED,  # Only show accepted plans
         PlanAssignment.start_date <= today,
     ]
-    # Filter by organization if provided
+    # Filter by organization if provided (include NULL for backward compatibility)
     if org_id:
-        assignment_filters.append(PlanAssignment.organization_id == org_id)
+        assignment_filters.append(
+            or_(
+                PlanAssignment.organization_id == org_id,
+                PlanAssignment.organization_id.is_(None),  # Backward compatibility
+            )
+        )
 
     # Find active plan assignment
     active_assignment_result = await db.execute(
