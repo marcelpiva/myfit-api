@@ -3,7 +3,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 
 logger = logging.getLogger(__name__)
 
@@ -913,6 +913,7 @@ async def create_plan_assignment(
     request: PlanAssignmentCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> PlanAssignmentResponse:
     """Assign a plan to a student."""
     # Rate limiting: max 20 plan assignments per hour per trainer
@@ -959,6 +960,14 @@ async def create_plan_assignment(
                 detail="Este plano já está atribuído a este aluno",
             )
 
+    # Use organization_id from request body, or fall back to header
+    org_id = request.organization_id
+    if org_id is None and x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass  # Invalid UUID, ignore
+
     assignment = await workout_service.create_plan_assignment(
         plan_id=request.plan_id,
         student_id=request.student_id,
@@ -966,7 +975,7 @@ async def create_plan_assignment(
         start_date=request.start_date,
         end_date=request.end_date,
         notes=request.notes,
-        organization_id=request.organization_id,
+        organization_id=org_id,
     )
 
     return PlanAssignmentResponse(
