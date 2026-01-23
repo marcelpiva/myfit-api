@@ -1233,7 +1233,7 @@ async def get_plan(
         or plan.organization_id is not None
     )
 
-    # If no direct access, check if user has a plan assignment
+    # If no direct access, check if user has a plan assignment (pending or accepted)
     if not has_access:
         assignment_query = (
             select(PlanAssignment)
@@ -1241,7 +1241,8 @@ async def get_plan(
                 PlanAssignment.plan_id == plan_id,
                 PlanAssignment.student_id == current_user.id,
                 PlanAssignment.is_active == True,
-                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+                # Allow both pending and accepted - student should see plan to accept/decline
+                PlanAssignment.status.in_([AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED]),
             )
             .limit(1)
         )
@@ -1840,7 +1841,7 @@ async def get_workout(
             .where(
                 PlanAssignment.student_id == current_user.id,
                 PlanAssignment.is_active == True,
-                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+                PlanAssignment.status.in_([AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED]),
                 PlanWorkout.workout_id == workout_id,
             )
             .limit(1)
@@ -1893,7 +1894,7 @@ async def get_workout_exercises(
             .where(
                 PlanAssignment.student_id == current_user.id,
                 PlanAssignment.is_active == True,
-                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+                PlanAssignment.status.in_([AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED]),
                 PlanWorkout.workout_id == workout_id,
             )
             .limit(1)
