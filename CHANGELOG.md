@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.7] - 2026-01-23
+
+### Added
+- **Full Plan Data in Assignments** - Plan assignment responses now include complete plan object
+  - Includes `plan_workouts` with nested workout details
+  - Enables proper workout count display in app
+  - Loads workout exercises for accurate exercise counts
+
+### Fixed
+- **Organization Context Filtering** - Dashboard now includes records with NULL organization_id
+  - Backward compatibility for existing plan assignments without organization
+  - Uses `X-Organization-ID` header for filtering when provided
+
+- **Student Access to Plans/Workouts** - Students can now access plans and workouts via assignments
+  - `GET /plans/{id}` - Checks if user has active plan assignment
+  - `GET /workouts/{id}` - Checks if workout is in assigned plan
+  - `GET /workouts/{id}/exercises` - Same permission check
+  - Allows both PENDING and ACCEPTED assignment status
+
+- **Pending Assignments Visible** - Students can see plans before accepting
+  - `list_student_plan_assignments` includes PENDING status
+  - Enables viewing plan details to make accept/decline decision
+
 ## [0.4.6] - 2026-01-23
 
 ### Fixed
