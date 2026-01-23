@@ -429,7 +429,7 @@ async def notify_cotraining_request(
             "student_name": student_name,
             "workout_name": workout_name,
             "trainer_id": str(trainer_id),
-            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "started_at": session.started_at.isoformat() if session.started_at else None,
         },
         sender_id=session.user_id,
     )

@@ -523,24 +523,25 @@ async def accept_invite(
             detail="This invitation was sent to a different email",
         )
 
-    # Check if already a member
-    existing = await org_service.get_membership(invite.organization_id, current_user.id)
-    if existing:
-        if existing.is_active:
+    # Check if already a member with the same role
+    existing_with_role = await org_service.get_membership_by_role(
+        invite.organization_id, current_user.id, invite.role
+    )
+    if existing_with_role:
+        if existing_with_role.is_active:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="You are already a member of this organization",
+                detail=f"You are already a {invite.role.value} in this organization",
             )
         else:
-            # Reactivate inactive membership
-            existing.is_active = True
-            existing.role = invite.role  # Update role in case it changed
+            # Reactivate inactive membership with same role
+            existing_with_role.is_active = True
             invite.accepted_at = datetime.now(timezone.utc)
             await db.commit()
-            await db.refresh(existing)
-            membership = existing
+            await db.refresh(existing_with_role)
+            membership = existing_with_role
     else:
-        # Create new membership
+        # Create new membership (allows multiple roles for same user)
         membership = await org_service.accept_invite(invite, current_user)
 
     return MemberResponse(

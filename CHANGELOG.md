@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.5] - 2026-01-23
+
+### Added
+- **Multiple Roles per User** - Users can now have multiple roles in same organization
+  - `get_membership_by_role()` method for checking specific role membership
+  - Example: User can be both TRAINER and STUDENT in same organization
+
+### Fixed
+- **Accept Invite Multiple Roles** - Now checks by role instead of any membership
+  - Allows accepting invite for different role in same organization
+  - Only blocks if user already has that specific role
+
+- **Multiple Memberships Query** - `get_membership()` now handles multiple results
+  - Returns highest priority role when user has multiple memberships
+  - Priority: GYM_OWNER > GYM_ADMIN > TRAINER/COACH/NUTRITIONIST > STUDENT
+
+- **Co-Training Session Start** - Fixed AttributeError in session creation
+  - Changed `current_user.full_name` to `current_user.name`
+  - Changed `session.created_at` to `session.started_at`
+
 ## [0.4.4] - 2026-01-22
 
 ### Fixed

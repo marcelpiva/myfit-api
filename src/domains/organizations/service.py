@@ -215,6 +215,9 @@ class OrganizationService:
     ) -> OrganizationMembership | None:
         """Get a user's membership in an organization.
 
+        If user has multiple memberships (e.g., trainer + student),
+        returns the one with highest privilege (admin > trainer > student).
+
         Args:
             org_id: Organization UUID
             user_id: User UUID
@@ -228,6 +231,51 @@ class OrganizationService:
                 and_(
                     OrganizationMembership.organization_id == org_id,
                     OrganizationMembership.user_id == user_id,
+                )
+            )
+        )
+        memberships = result.scalars().all()
+
+        if not memberships:
+            return None
+
+        if len(memberships) == 1:
+            return memberships[0]
+
+        # Prioritize by role: owner/admin > trainer/coach > student
+        role_priority = {
+            UserRole.GYM_OWNER: 0,
+            UserRole.GYM_ADMIN: 1,
+            UserRole.TRAINER: 2,
+            UserRole.COACH: 2,
+            UserRole.NUTRITIONIST: 2,
+            UserRole.STUDENT: 3,
+        }
+        return min(memberships, key=lambda m: role_priority.get(m.role, 99))
+
+    async def get_membership_by_role(
+        self,
+        org_id: uuid.UUID,
+        user_id: uuid.UUID,
+        role: UserRole,
+    ) -> OrganizationMembership | None:
+        """Get a user's membership in an organization with a specific role.
+
+        Args:
+            org_id: Organization UUID
+            user_id: User UUID
+            role: The specific role to check
+
+        Returns:
+            The membership if found with that role, None otherwise
+        """
+        result = await self.db.execute(
+            select(OrganizationMembership)
+            .where(
+                and_(
+                    OrganizationMembership.organization_id == org_id,
+                    OrganizationMembership.user_id == user_id,
+                    OrganizationMembership.role == role,
                 )
             )
         )
