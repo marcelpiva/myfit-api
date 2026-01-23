@@ -1214,6 +1214,9 @@ async def get_plan(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlanResponse:
     """Get plan details with workouts."""
+    from sqlalchemy import select
+    from src.domains.workouts.models import AssignmentStatus, PlanAssignment
+
     workout_service = WorkoutService(db)
     plan = await workout_service.get_plan_by_id(plan_id)
 
@@ -1224,11 +1227,29 @@ async def get_plan(
         )
 
     # Check access
-    if (
-        not plan.is_public
-        and plan.created_by_id != current_user.id
-        and plan.organization_id is None
-    ):
+    has_access = (
+        plan.is_public
+        or plan.created_by_id == current_user.id
+        or plan.organization_id is not None
+    )
+
+    # If no direct access, check if user has a plan assignment
+    if not has_access:
+        assignment_query = (
+            select(PlanAssignment)
+            .where(
+                PlanAssignment.plan_id == plan_id,
+                PlanAssignment.student_id == current_user.id,
+                PlanAssignment.is_active == True,
+                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+            )
+            .limit(1)
+        )
+        result = await db.execute(assignment_query)
+        has_assignment = result.scalar_one_or_none() is not None
+        has_access = has_assignment
+
+    if not has_access:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
