@@ -1370,7 +1370,11 @@ class WorkoutService:
         """
         query = select(PlanAssignment).where(
             PlanAssignment.trainer_id == trainer_id
-        ).options(selectinload(PlanAssignment.plan))
+        ).options(
+            selectinload(PlanAssignment.plan)
+            .selectinload(TrainingPlan.plan_workouts)
+            .selectinload(PlanWorkout.workout)
+        )
 
         if student_id:
             query = query.where(PlanAssignment.student_id == student_id)
