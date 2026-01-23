@@ -628,9 +628,12 @@ class WorkoutService:
         rating: int | None = None,
     ) -> WorkoutSession:
         """Complete a workout session."""
-        session.completed_at = datetime.utcnow()
+        session.completed_at = datetime.now(timezone.utc)
         if session.started_at:
-            delta = session.completed_at - session.started_at
+            # Normalize datetimes for SQLite compatibility (naive datetime)
+            completed = session.completed_at.replace(tzinfo=None)
+            started = session.started_at.replace(tzinfo=None) if session.started_at.tzinfo else session.started_at
+            delta = completed - started
             session.duration_minutes = int(delta.total_seconds() / 60)
         if notes is not None:
             session.notes = notes
@@ -1344,12 +1347,14 @@ class WorkoutService:
             selectinload(PlanAssignment.plan)
             .selectinload(TrainingPlan.plan_workouts)
             .selectinload(PlanWorkout.workout)
+            .selectinload(Workout.exercises)
         )
 
         if active_only:
             query = query.where(
                 PlanAssignment.is_active == True,
-                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+                # Include both pending and accepted assignments
+                PlanAssignment.status.in_([AssignmentStatus.PENDING, AssignmentStatus.ACCEPTED]),
             )
 
         result = await self.db.execute(query)
@@ -1374,6 +1379,7 @@ class WorkoutService:
             selectinload(PlanAssignment.plan)
             .selectinload(TrainingPlan.plan_workouts)
             .selectinload(PlanWorkout.workout)
+            .selectinload(Workout.exercises)
         )
 
         if student_id:
