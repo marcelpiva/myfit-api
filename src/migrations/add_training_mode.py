@@ -118,9 +118,11 @@ async def main():
         "sqlite+aiosqlite:///./myfit.db"
     )
 
-    # Convert postgres:// to postgresql:// if needed
+    # Convert postgres:// or postgresql:// to postgresql+asyncpg://
     if database_url.startswith("postgres://"):
         database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
     await migrate(database_url)
 
