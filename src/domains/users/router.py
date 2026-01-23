@@ -2,7 +2,8 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, UploadFile, status
+from uuid import UUID
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -302,6 +303,7 @@ async def get_my_trainer_notes(
 async def get_student_dashboard(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> StudentDashboardResponse:
     """Get consolidated dashboard data for the student.
 
@@ -381,14 +383,28 @@ async def get_student_dashboard(
     today_workout = None
     plan_progress = None
 
+    # Parse organization ID if provided
+    org_id = None
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass  # Invalid UUID, ignore
+
+    # Build filter conditions for plan assignment
+    assignment_filters = [
+        PlanAssignment.student_id == current_user.id,
+        PlanAssignment.is_active == True,
+        PlanAssignment.start_date <= today,
+    ]
+    # Filter by organization if provided
+    if org_id:
+        assignment_filters.append(PlanAssignment.organization_id == org_id)
+
     # Find active plan assignment
     active_assignment_result = await db.execute(
         select(PlanAssignment)
-        .where(
-            PlanAssignment.student_id == current_user.id,
-            PlanAssignment.is_active == True,
-            PlanAssignment.start_date <= today,
-        )
+        .where(*assignment_filters)
         .order_by(PlanAssignment.start_date.desc())
         .limit(1)
     )
@@ -574,14 +590,20 @@ async def get_student_dashboard(
     user_service = UserService(db)
     org_service = OrganizationService(db)
 
-    # Find student's membership in any organization
+    # Build filter conditions for student membership
+    membership_filters = [
+        OrganizationMembership.user_id == current_user.id,
+        OrganizationMembership.role == UserRole.STUDENT,
+        OrganizationMembership.is_active == True,
+    ]
+    # Filter by organization if provided
+    if org_id:
+        membership_filters.append(OrganizationMembership.organization_id == org_id)
+
+    # Find student's membership in the specified organization (or any if not specified)
     memberships_result = await db.execute(
         select(OrganizationMembership)
-        .where(
-            OrganizationMembership.user_id == current_user.id,
-            OrganizationMembership.role == UserRole.STUDENT,
-            OrganizationMembership.is_active == True,
-        )
+        .where(*membership_filters)
         .limit(1)
     )
     student_membership = memberships_result.scalar_one_or_none()
