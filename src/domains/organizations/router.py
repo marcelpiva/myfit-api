@@ -66,6 +66,7 @@ async def preview_invite(
     inviter = await user_service.get_user_by_id(invite.invited_by_id)
 
     return InvitePreviewResponse(
+        organization_id=invite.organization_id,
         organization_name=org.name if org else "Unknown",
         invited_by_name=inviter.name if inviter else "Unknown",
         role=invite.role,

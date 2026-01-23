@@ -159,6 +159,7 @@ class AcceptInviteRequest(BaseModel):
 class InvitePreviewResponse(BaseModel):
     """Public invite preview response (no auth required)."""
 
+    organization_id: UUID
     organization_name: str
     invited_by_name: str
     role: UserRole
