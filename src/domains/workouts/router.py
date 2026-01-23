@@ -1813,6 +1813,9 @@ async def get_workout(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkoutResponse:
     """Get workout details with exercises."""
+    from sqlalchemy import select
+    from src.domains.workouts.models import AssignmentStatus, PlanAssignment, PlanWorkout
+
     workout_service = WorkoutService(db)
     workout = await workout_service.get_workout_by_id(workout_id)
 
@@ -1823,11 +1826,30 @@ async def get_workout(
         )
 
     # Check access
-    if (
-        not workout.is_public
-        and workout.created_by_id != current_user.id
-        and workout.organization_id is None
-    ):
+    has_access = (
+        workout.is_public
+        or workout.created_by_id == current_user.id
+        or workout.organization_id is not None
+    )
+
+    # If no direct access, check if user has a plan assignment that includes this workout
+    if not has_access:
+        plan_assignment_query = (
+            select(PlanAssignment)
+            .join(PlanWorkout, PlanWorkout.plan_id == PlanAssignment.plan_id)
+            .where(
+                PlanAssignment.student_id == current_user.id,
+                PlanAssignment.is_active == True,
+                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+                PlanWorkout.workout_id == workout_id,
+            )
+            .limit(1)
+        )
+        result = await db.execute(plan_assignment_query)
+        has_assignment = result.scalar_one_or_none() is not None
+        has_access = has_assignment
+
+    if not has_access:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
