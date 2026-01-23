@@ -281,3 +281,675 @@ class TestDuplicateNaming:
             existing_names=["Treino A", "Treino A (5)"],  # Gap: no (2), (3), (4)
         )
         assert result == "Treino A (6)"
+
+    def test_get_next_copy_name_with_special_characters(self, workout_service: WorkoutService):
+        """Should handle names with special characters."""
+        result = workout_service._get_next_copy_name(
+            original_name="Treino - Upper & Lower",
+            existing_names=["Treino - Upper & Lower"],
+        )
+        assert result == "Treino - Upper & Lower (2)"
+
+    def test_get_next_copy_name_unicode(self, workout_service: WorkoutService):
+        """Should handle unicode characters in names."""
+        result = workout_service._get_next_copy_name(
+            original_name="Treino Força",
+            existing_names=["Treino Força", "Treino Força (2)"],
+        )
+        assert result == "Treino Força (3)"
+
+    def test_get_next_copy_name_with_parentheses_in_middle(self, workout_service: WorkoutService):
+        """Should handle names with parentheses that aren't copy numbers."""
+        result = workout_service._get_next_copy_name(
+            original_name="Push (Advanced)",
+            existing_names=["Push (Advanced)", "Push (Advanced) (2)"],
+        )
+        assert result == "Push (Advanced) (3)"
+
+    def test_get_next_copy_name_empty_string(self, workout_service: WorkoutService):
+        """Should handle empty original name gracefully."""
+        result = workout_service._get_next_copy_name(
+            original_name="",
+            existing_names=[],
+        )
+        assert result == " (2)"
+
+    def test_strip_copy_prefixes_removes_nested_prefixes(self, workout_service: WorkoutService):
+        """Should strip nested copy prefixes recursively."""
+        result = workout_service._strip_copy_prefixes("Copy of Copia de Treino A")
+        assert result == "Treino A"
+
+
+class TestListExercises:
+    """Tests for list_exercises method with muscle group filtering."""
+
+    @pytest.fixture
+    async def workout_service(self, db_session: AsyncSession) -> WorkoutService:
+        """Create a workout service instance."""
+        return WorkoutService(db_session)
+
+    @pytest.fixture
+    async def sample_exercises(
+        self,
+        db_session: AsyncSession,
+        sample_user: dict[str, Any],
+    ):
+        """Create sample exercises for different muscle groups."""
+        from src.domains.workouts.models import Exercise, MuscleGroup
+
+        exercises = []
+        muscle_groups = [
+            MuscleGroup.CHEST,
+            MuscleGroup.QUADRICEPS,
+            MuscleGroup.HAMSTRINGS,
+            MuscleGroup.CALVES,
+            MuscleGroup.BACK,
+        ]
+
+        for i, mg in enumerate(muscle_groups):
+            exercise = Exercise(
+                name=f"Test Exercise {mg.value}",
+                muscle_group=mg,
+                is_public=True,
+                is_custom=False,
+            )
+            db_session.add(exercise)
+            exercises.append(exercise)
+
+        await db_session.commit()
+        for ex in exercises:
+            await db_session.refresh(ex)
+        return exercises
+
+    @pytest.mark.asyncio
+    async def test_list_exercises_filter_by_chest(
+        self,
+        workout_service: WorkoutService,
+        sample_exercises: list,
+    ):
+        """Should filter exercises by chest muscle group."""
+        from src.domains.workouts.models import MuscleGroup
+
+        result = await workout_service.list_exercises(
+            muscle_group=MuscleGroup.CHEST
+        )
+
+        assert all(ex.muscle_group == MuscleGroup.CHEST for ex in result)
+
+    @pytest.mark.asyncio
+    async def test_list_exercises_legs_includes_all_leg_groups(
+        self,
+        workout_service: WorkoutService,
+        sample_exercises: list,
+    ):
+        """Filtering by LEGS should include quadriceps, hamstrings, calves."""
+        from src.domains.workouts.models import MuscleGroup
+
+        result = await workout_service.list_exercises(
+            muscle_group=MuscleGroup.LEGS
+        )
+
+        # Should find exercises from all leg muscle groups
+        muscle_groups_found = {ex.muscle_group for ex in result}
+        leg_groups = {MuscleGroup.QUADRICEPS, MuscleGroup.HAMSTRINGS, MuscleGroup.CALVES, MuscleGroup.LEGS}
+
+        # All found groups should be leg groups
+        assert all(mg in leg_groups for mg in muscle_groups_found)
+
+    @pytest.mark.asyncio
+    async def test_list_exercises_with_search(
+        self,
+        workout_service: WorkoutService,
+        sample_exercises: list,
+    ):
+        """Should filter exercises by search term."""
+        result = await workout_service.list_exercises(search="chest")
+
+        assert all("chest" in ex.name.lower() for ex in result)
+
+    @pytest.mark.asyncio
+    async def test_list_exercises_pagination(
+        self,
+        workout_service: WorkoutService,
+        sample_exercises: list,
+    ):
+        """Should support limit and offset pagination."""
+        all_exercises = await workout_service.list_exercises(limit=100)
+        paginated = await workout_service.list_exercises(limit=2, offset=0)
+
+        assert len(paginated) <= 2
+
+    @pytest.mark.asyncio
+    async def test_list_exercises_user_custom_exercises(
+        self,
+        db_session: AsyncSession,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+    ):
+        """Should include user's custom exercises along with public ones."""
+        from src.domains.workouts.models import Exercise, MuscleGroup
+
+        # Create a private custom exercise for the user
+        custom_exercise = Exercise(
+            name="My Custom Exercise",
+            muscle_group=MuscleGroup.CHEST,
+            is_public=False,
+            is_custom=True,
+            created_by_id=sample_user["id"],
+        )
+        db_session.add(custom_exercise)
+        await db_session.commit()
+
+        result = await workout_service.list_exercises(
+            user_id=sample_user["id"],
+            muscle_group=MuscleGroup.CHEST,
+        )
+
+        # Should include the custom exercise
+        exercise_ids = [ex.id for ex in result]
+        assert custom_exercise.id in exercise_ids
+
+
+class TestSessionOperations:
+    """Tests for workout session operations."""
+
+    @pytest.fixture
+    async def workout_service(self, db_session: AsyncSession) -> WorkoutService:
+        """Create a workout service instance."""
+        return WorkoutService(db_session)
+
+    @pytest.fixture
+    async def sample_workout(
+        self,
+        db_session: AsyncSession,
+        sample_user: dict[str, Any],
+    ):
+        """Create a sample workout for session tests."""
+        from src.domains.workouts.models import Workout
+
+        workout = Workout(
+            name="Test Workout",
+            created_by_id=sample_user["id"],
+        )
+        db_session.add(workout)
+        await db_session.commit()
+        await db_session.refresh(workout)
+        return workout
+
+    @pytest.mark.asyncio
+    async def test_start_session_creates_active_session(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Starting a session should create it with ACTIVE status."""
+        from src.domains.workouts.models import SessionStatus
+
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+        )
+
+        assert session.id is not None
+        assert session.status == SessionStatus.ACTIVE
+        assert session.started_at is not None
+
+    @pytest.mark.asyncio
+    async def test_start_shared_session_creates_waiting_status(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Starting a shared (co-training) session should have WAITING status."""
+        from src.domains.workouts.models import SessionStatus
+
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+            is_shared=True,
+        )
+
+        assert session.status == SessionStatus.WAITING
+        assert session.is_shared is True
+
+    @pytest.mark.asyncio
+    async def test_complete_session_sets_completed_at(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Completing a session should set completed_at timestamp."""
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+        )
+
+        completed = await workout_service.complete_session(session)
+
+        assert completed.completed_at is not None
+
+    @pytest.mark.asyncio
+    async def test_complete_session_calculates_duration(
+        self,
+        db_session: AsyncSession,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Completing a session should calculate duration in minutes."""
+        from datetime import datetime, timedelta
+
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+        )
+
+        # Simulate session started 45 minutes ago
+        session.started_at = datetime.utcnow() - timedelta(minutes=45)
+        await db_session.commit()
+
+        completed = await workout_service.complete_session(session)
+
+        # Duration should be approximately 45 minutes
+        assert completed.duration_minutes is not None
+        assert 44 <= completed.duration_minutes <= 46
+
+    @pytest.mark.asyncio
+    async def test_complete_session_with_notes_and_rating(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Completing a session should save notes and rating."""
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+        )
+
+        completed = await workout_service.complete_session(
+            session,
+            notes="Great workout!",
+            rating=5,
+        )
+
+        assert completed.notes == "Great workout!"
+        assert completed.rating == 5
+
+    @pytest.mark.asyncio
+    async def test_add_session_set_records_data(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+        sample_workout,
+    ):
+        """Should record set data during a session."""
+        from src.domains.workouts.models import Exercise, MuscleGroup
+
+        # Create an exercise
+        exercise = Exercise(
+            name="Bench Press",
+            muscle_group=MuscleGroup.CHEST,
+            is_public=True,
+        )
+        workout_service.db.add(exercise)
+        await workout_service.db.commit()
+        await workout_service.db.refresh(exercise)
+
+        session = await workout_service.start_session(
+            user_id=sample_user["id"],
+            workout_id=sample_workout.id,
+        )
+
+        session_set = await workout_service.add_session_set(
+            session_id=session.id,
+            exercise_id=exercise.id,
+            set_number=1,
+            reps_completed=10,
+            weight_kg=80.0,
+        )
+
+        assert session_set.id is not None
+        assert session_set.reps_completed == 10
+        assert session_set.weight_kg == 80.0
+        assert session_set.set_number == 1
+
+
+class TestDuplicateWorkout:
+    """Tests for the duplicate_workout method."""
+
+    @pytest.fixture
+    async def workout_service(self, db_session: AsyncSession) -> WorkoutService:
+        """Create a workout service instance."""
+        return WorkoutService(db_session)
+
+    @pytest.fixture
+    async def workout_with_exercises(
+        self,
+        db_session: AsyncSession,
+        sample_user: dict[str, Any],
+    ):
+        """Create a workout with exercises."""
+        from src.domains.workouts.models import (
+            Exercise,
+            MuscleGroup,
+            Workout,
+            WorkoutExercise,
+        )
+
+        # Create exercise
+        exercise = Exercise(
+            name="Bench Press",
+            muscle_group=MuscleGroup.CHEST,
+            is_public=True,
+        )
+        db_session.add(exercise)
+        await db_session.flush()
+
+        # Create workout
+        workout = Workout(
+            name="Chest Day",
+            description="Full chest workout",
+            estimated_duration_min=60,
+            is_template=True,
+            is_public=True,
+            created_by_id=sample_user["id"],
+        )
+        db_session.add(workout)
+        await db_session.flush()
+
+        # Add exercise to workout
+        workout_exercise = WorkoutExercise(
+            workout_id=workout.id,
+            exercise_id=exercise.id,
+            order=1,
+            sets=3,
+            reps="10-12",
+            rest_seconds=90,
+        )
+        db_session.add(workout_exercise)
+        await db_session.commit()
+
+        # Refresh with relationships
+        from sqlalchemy.orm import selectinload
+        from sqlalchemy import select
+
+        result = await db_session.execute(
+            select(Workout)
+            .where(Workout.id == workout.id)
+            .options(selectinload(Workout.exercises))
+        )
+        return result.scalar_one()
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_creates_new_workout(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should create a new workout with a new ID."""
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        assert new_workout.id != workout_with_exercises.id
+        assert new_workout.id is not None
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_copies_basic_fields(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should copy basic fields from original workout."""
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        assert new_workout.description == workout_with_exercises.description
+        assert new_workout.estimated_duration_min == workout_with_exercises.estimated_duration_min
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_uses_numbered_name(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should generate a numbered name for duplicate."""
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        # Should have the original name with a number
+        assert "Chest Day" in new_workout.name
+        assert "(" in new_workout.name
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_custom_name(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should use custom name if provided."""
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+            new_name="My Custom Chest Day",
+        )
+
+        assert new_workout.name == "My Custom Chest Day"
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_sets_new_owner(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+    ):
+        """Should set the new owner ID."""
+        new_owner_id = uuid.uuid4()
+
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=new_owner_id,
+        )
+
+        assert new_workout.created_by_id == new_owner_id
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_not_template_or_public(
+        self,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Duplicated workout should not be a template or public."""
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        assert new_workout.is_template is False
+        assert new_workout.is_public is False
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_copies_exercises(
+        self,
+        db_session: AsyncSession,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should copy all exercises from original workout."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from src.domains.workouts.models import Workout
+
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        # Fetch with exercises
+        result = await db_session.execute(
+            select(Workout)
+            .where(Workout.id == new_workout.id)
+            .options(selectinload(Workout.exercises))
+        )
+        new_workout_with_exercises = result.scalar_one()
+
+        assert len(new_workout_with_exercises.exercises) == len(workout_with_exercises.exercises)
+
+    @pytest.mark.asyncio
+    async def test_duplicate_workout_copies_exercise_details(
+        self,
+        db_session: AsyncSession,
+        workout_service: WorkoutService,
+        workout_with_exercises,
+        sample_user: dict[str, Any],
+    ):
+        """Should copy exercise details like sets, reps, rest."""
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        from src.domains.workouts.models import Workout
+
+        new_workout = await workout_service.duplicate_workout(
+            workout=workout_with_exercises,
+            new_owner_id=sample_user["id"],
+        )
+
+        # Fetch with exercises
+        result = await db_session.execute(
+            select(Workout)
+            .where(Workout.id == new_workout.id)
+            .options(selectinload(Workout.exercises))
+        )
+        new_workout_with_exercises = result.scalar_one()
+
+        original_ex = workout_with_exercises.exercises[0]
+        new_ex = new_workout_with_exercises.exercises[0]
+
+        assert new_ex.sets == original_ex.sets
+        assert new_ex.reps == original_ex.reps
+        assert new_ex.rest_seconds == original_ex.rest_seconds
+        assert new_ex.exercise_id == original_ex.exercise_id
+
+
+class TestExerciseOperations:
+    """Tests for exercise CRUD operations."""
+
+    @pytest.fixture
+    async def workout_service(self, db_session: AsyncSession) -> WorkoutService:
+        """Create a workout service instance."""
+        return WorkoutService(db_session)
+
+    @pytest.mark.asyncio
+    async def test_create_exercise(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+    ):
+        """Should create a custom exercise."""
+        from src.domains.workouts.models import MuscleGroup
+
+        exercise = await workout_service.create_exercise(
+            created_by_id=sample_user["id"],
+            name="Custom Squat Variation",
+            muscle_group=MuscleGroup.QUADRICEPS,
+            description="A custom squat variation",
+        )
+
+        assert exercise.id is not None
+        assert exercise.name == "Custom Squat Variation"
+        assert exercise.muscle_group == MuscleGroup.QUADRICEPS
+        assert exercise.is_custom is True
+        assert exercise.created_by_id == sample_user["id"]
+
+    @pytest.mark.asyncio
+    async def test_create_exercise_with_all_fields(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+    ):
+        """Should create exercise with all optional fields."""
+        from src.domains.workouts.models import MuscleGroup
+
+        exercise = await workout_service.create_exercise(
+            created_by_id=sample_user["id"],
+            name="Full Exercise",
+            muscle_group=MuscleGroup.CHEST,
+            description="Full description",
+            secondary_muscles=["triceps", "shoulders"],
+            equipment=["barbell", "bench"],
+            video_url="https://example.com/video",
+            image_url="https://example.com/image",
+            instructions="Step by step instructions",
+        )
+
+        assert exercise.secondary_muscles == ["triceps", "shoulders"]
+        assert exercise.equipment == ["barbell", "bench"]
+        assert exercise.video_url == "https://example.com/video"
+
+    @pytest.mark.asyncio
+    async def test_update_exercise(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+    ):
+        """Should update exercise fields."""
+        from src.domains.workouts.models import MuscleGroup
+
+        exercise = await workout_service.create_exercise(
+            created_by_id=sample_user["id"],
+            name="Original Name",
+            muscle_group=MuscleGroup.CHEST,
+        )
+
+        updated = await workout_service.update_exercise(
+            exercise=exercise,
+            name="Updated Name",
+            description="New description",
+        )
+
+        assert updated.name == "Updated Name"
+        assert updated.description == "New description"
+
+    @pytest.mark.asyncio
+    async def test_get_exercise_by_id(
+        self,
+        workout_service: WorkoutService,
+        sample_user: dict[str, Any],
+    ):
+        """Should retrieve exercise by ID."""
+        from src.domains.workouts.models import MuscleGroup
+
+        exercise = await workout_service.create_exercise(
+            created_by_id=sample_user["id"],
+            name="Test Exercise",
+            muscle_group=MuscleGroup.BACK,
+        )
+
+        found = await workout_service.get_exercise_by_id(exercise.id)
+
+        assert found is not None
+        assert found.id == exercise.id
+        assert found.name == "Test Exercise"
+
+    @pytest.mark.asyncio
+    async def test_get_exercise_by_id_not_found(
+        self,
+        workout_service: WorkoutService,
+    ):
+        """Should return None for non-existent exercise."""
+        found = await workout_service.get_exercise_by_id(uuid.uuid4())
+
+        assert found is None

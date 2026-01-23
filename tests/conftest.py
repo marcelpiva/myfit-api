@@ -2,10 +2,14 @@
 
 import uuid
 from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta
 from typing import Any
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import JSON, event
+from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.config.database import Base, get_db
@@ -13,6 +17,21 @@ from src.main import create_app
 
 # Test database URL - use SQLite in-memory for tests
 TEST_DATABASE_URL = "sqlite+aiosqlite:///:memory:"
+
+
+# =============================================================================
+# SQLite Compatibility - Map PostgreSQL types to SQLite equivalents
+# =============================================================================
+
+
+# Monkey-patch JSONB to use JSON for SQLite
+# This allows models using JSONB to work with SQLite in tests
+from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+if not hasattr(SQLiteTypeCompiler, "visit_JSONB"):
+    def visit_JSONB(self, type_, **kw):
+        return self.visit_JSON(type_, **kw)
+    SQLiteTypeCompiler.visit_JSONB = visit_JSONB
 
 
 @pytest.fixture(scope="session")
@@ -167,4 +186,118 @@ async def sample_workout_program(
         "name": program.name,
         "source_template_id": program.source_template_id,
         "created_by_id": program.created_by_id,
+    }
+
+
+# =============================================================================
+# Mock Fixtures for External Services
+# =============================================================================
+
+
+@pytest.fixture
+def mock_redis():
+    """Mock Redis client for token blacklisting."""
+    blacklist = set()
+
+    async def mock_add_to_blacklist(token: str, expires_in: int = 3600):
+        blacklist.add(token)
+
+    async def mock_is_blacklisted(token: str) -> bool:
+        return token in blacklist
+
+    with patch("src.core.redis.add_to_blacklist", side_effect=mock_add_to_blacklist):
+        with patch("src.core.redis.is_blacklisted", side_effect=mock_is_blacklisted):
+            yield blacklist
+
+
+@pytest.fixture
+def mock_email():
+    """Mock email service for all email sending operations."""
+    with patch("src.core.email.send_email", new_callable=AsyncMock) as mock:
+        mock.return_value = {"id": "mock-email-id", "status": "sent"}
+        yield mock
+
+
+@pytest.fixture
+def mock_s3():
+    """Mock AWS S3 for file uploads."""
+    mock_client = MagicMock()
+    mock_client.upload_fileobj = MagicMock(return_value=None)
+    mock_client.generate_presigned_url = MagicMock(
+        return_value="https://s3.example.com/mock-file"
+    )
+    with patch("boto3.client", return_value=mock_client):
+        yield mock_client
+
+
+@pytest.fixture
+def mock_openai():
+    """Mock OpenAI client for AI workout suggestions."""
+    mock_response = MagicMock()
+    mock_response.choices = [
+        MagicMock(message=MagicMock(content='{"exercises": [], "notes": "AI generated"}'))
+    ]
+    mock_client = AsyncMock()
+    mock_client.chat.completions.create = AsyncMock(return_value=mock_response)
+    with patch("openai.AsyncOpenAI", return_value=mock_client):
+        yield mock_client
+
+
+# =============================================================================
+# Additional Test Data Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+async def inactive_user(
+    db_session: AsyncSession, sample_organization_id: uuid.UUID
+) -> dict[str, Any]:
+    """Create an inactive user in the database."""
+    from src.domains.users.models import User
+
+    user_id = uuid.uuid4()
+    user = User(
+        id=user_id,
+        email=f"inactive-{user_id}@example.com",
+        name="Inactive User",
+        password_hash="$2b$12$test.hash.password",
+        is_active=False,
+    )
+    db_session.add(user)
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    return {
+        "id": user_id,
+        "email": user.email,
+        "name": user.name,
+        "is_active": False,
+    }
+
+
+@pytest.fixture
+async def user_with_points(
+    db_session: AsyncSession, sample_user: dict[str, Any]
+) -> dict[str, Any]:
+    """Create a user with gamification points."""
+    from src.domains.gamification.models import UserPoints
+
+    user_points = UserPoints(
+        user_id=sample_user["id"],
+        total_points=500,
+        level=3,
+        current_streak=5,
+        longest_streak=10,
+        last_activity_at=datetime.utcnow() - timedelta(days=1),
+    )
+    db_session.add(user_points)
+    await db_session.commit()
+    await db_session.refresh(user_points)
+
+    return {
+        **sample_user,
+        "points": user_points.total_points,
+        "level": user_points.level,
+        "current_streak": user_points.current_streak,
+        "longest_streak": user_points.longest_streak,
     }
