@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from src.domains.workouts.models import (
+    AssignmentStatus,
     Difficulty,
     Exercise,
     ExerciseMode,
@@ -1331,7 +1332,12 @@ class WorkoutService:
         student_id: uuid.UUID,
         active_only: bool = True,
     ) -> list[PlanAssignment]:
-        """List plan assignments for a student."""
+        """List plan assignments for a student.
+
+        When active_only=True, only returns assignments that are both:
+        - is_active == True
+        - status == ACCEPTED (student has accepted the plan)
+        """
         query = select(PlanAssignment).where(
             PlanAssignment.student_id == student_id
         ).options(
@@ -1340,7 +1346,10 @@ class WorkoutService:
         )
 
         if active_only:
-            query = query.where(PlanAssignment.is_active == True)
+            query = query.where(
+                PlanAssignment.is_active == True,
+                PlanAssignment.status == AssignmentStatus.ACCEPTED,
+            )
 
         result = await self.db.execute(query)
         return list(result.scalars().all())

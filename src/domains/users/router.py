@@ -33,6 +33,7 @@ from src.domains.organizations.schemas import UserMembershipResponse, Organizati
 from src.domains.trainers.models import StudentNote
 from src.domains.trainers.schemas import ProgressNoteResponse
 from src.domains.workouts.models import (
+    AssignmentStatus,
     PlanAssignment,
     PlanWorkout,
     PrescriptionNote,
@@ -395,6 +396,7 @@ async def get_student_dashboard(
     assignment_filters = [
         PlanAssignment.student_id == current_user.id,
         PlanAssignment.is_active == True,
+        PlanAssignment.status == AssignmentStatus.ACCEPTED,  # Only show accepted plans
         PlanAssignment.start_date <= today,
     ]
     # Filter by organization if provided
