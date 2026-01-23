@@ -884,6 +884,51 @@ async def list_plan_assignments(
     result = []
     for a in assignments:
         student = await user_service.get_user_by_id(a.student_id)
+
+        # Build full plan response if plan exists
+        plan_response = None
+        if a.plan:
+            plan_response = PlanResponse(
+                id=a.plan.id,
+                name=a.plan.name,
+                description=a.plan.description,
+                goal=a.plan.goal,
+                difficulty=a.plan.difficulty,
+                split_type=a.plan.split_type,
+                duration_weeks=a.plan.duration_weeks,
+                target_workout_minutes=a.plan.target_workout_minutes,
+                include_diet=a.plan.include_diet,
+                diet_type=a.plan.diet_type,
+                daily_calories=a.plan.daily_calories,
+                protein_grams=a.plan.protein_grams,
+                carbs_grams=a.plan.carbs_grams,
+                fat_grams=a.plan.fat_grams,
+                meals_per_day=a.plan.meals_per_day,
+                diet_notes=a.plan.diet_notes,
+                is_template=a.plan.is_template,
+                is_public=a.plan.is_public,
+                created_by_id=a.plan.created_by_id,
+                organization_id=a.plan.organization_id,
+                source_template_id=a.plan.source_template_id,
+                created_at=a.plan.created_at,
+                plan_workouts=[],  # Will be populated if plan_workouts loaded
+            )
+            # Include plan workouts if loaded
+            if hasattr(a.plan, 'plan_workouts') and a.plan.plan_workouts:
+                from src.domains.workouts.schemas import PlanWorkoutResponse, WorkoutResponse
+                plan_response.plan_workouts = [
+                    PlanWorkoutResponse(
+                        id=pw.id,
+                        workout_id=pw.workout_id,
+                        order=pw.order,
+                        label=pw.label,
+                        day_of_week=pw.day_of_week,
+                        workout=WorkoutResponse.model_validate(pw.workout) if pw.workout else None,
+                    )
+                    for pw in a.plan.plan_workouts
+                    if pw.workout
+                ]
+
         result.append(
             PlanAssignmentResponse(
                 id=a.id,
@@ -902,6 +947,7 @@ async def list_plan_assignments(
                 plan_name=a.plan.name if a.plan else "",
                 student_name=student.name if student else "",
                 plan_duration_weeks=a.plan.duration_weeks if a.plan else None,
+                plan=plan_response,
             )
         )
 

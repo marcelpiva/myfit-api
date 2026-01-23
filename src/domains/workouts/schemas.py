@@ -653,6 +653,7 @@ class PlanAssignmentResponse(BaseModel):
     plan_name: str
     student_name: str
     plan_duration_weeks: int | None = None
+    plan: PlanResponse | None = None  # Full plan data for client convenience
 
     class Config:
         from_attributes = True

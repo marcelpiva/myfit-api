@@ -1343,6 +1343,7 @@ class WorkoutService:
         ).options(
             selectinload(PlanAssignment.plan)
             .selectinload(TrainingPlan.plan_workouts)
+            .selectinload(PlanWorkout.workout)
         )
 
         if active_only:
