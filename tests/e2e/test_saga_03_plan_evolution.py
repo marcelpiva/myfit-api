@@ -237,7 +237,7 @@ class TestSaga03PlanEvolution:
         """Personal Trainer atribui novo plano ao aluno."""
         org_id = str(training_plan_setup["organization_id"])
         plan_id = str(training_plan_setup["plan"]["id"])
-        student_id = str(student_setup["membership"]["id"])
+        student_id = str(student_setup["user"]["id"])  # PlanAssignment uses user_id, not membership_id
 
         # Dado que tenho o plano evoluído pronto
         # Quando atribuo ao aluno
