@@ -28,11 +28,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan events."""
     # Startup
     print(f"Starting {settings.APP_NAME}...")
+    print(f"Environment: {settings.APP_ENV}")
+    print(f"Database URL configured: {bool(settings.DATABASE_URL)}")
 
     # Initialize database tables
-    from src.config.database import init_db
-    await init_db()
-    print("Database tables initialized")
+    try:
+        from src.config.database import init_db
+        await init_db()
+        print("Database tables initialized")
+    except Exception as e:
+        print(f"ERROR initializing database: {type(e).__name__}: {e}")
+        # Re-raise in production to prevent unhealthy startup
+        if settings.is_production:
+            raise
 
     yield
     # Shutdown
