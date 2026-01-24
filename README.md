@@ -1,6 +1,6 @@
 # MyFit API
 
-[![Version](https://img.shields.io/badge/version-0.4.5-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.4.8-blue.svg)](./CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 
 FastAPI backend for the MyFit white-label fitness platform.
@@ -93,6 +93,31 @@ src/
 ```
 
 ## Running Tests
+
+### Unit Tests
+
+```bash
+pytest tests/unit/ -v
+```
+
+### E2E Tests (User Journey SAGAs)
+
+The E2E tests cover complete user journeys and use an in-memory SQLite database for fast, isolated execution.
+
+```bash
+# Run all E2E tests
+pytest tests/e2e/ -v
+
+# Run specific SAGA
+pytest tests/e2e/test_saga_01_onboarding.py -v
+
+# Run with coverage
+pytest tests/e2e/ --cov=src/domains --cov-report=html
+```
+
+**IMPORTANT:** E2E tests include safety checks and will refuse to run against production databases.
+
+### All Tests
 
 ```bash
 pytest tests/ -v

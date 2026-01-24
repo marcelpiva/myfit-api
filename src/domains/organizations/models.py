@@ -196,7 +196,11 @@ class OrganizationInvite(Base, UUIDMixin, TimestampMixin):
         """Check if invite has expired."""
         from datetime import timezone
         now = datetime.now(timezone.utc)
-        return now > self.expires_at
+        # Handle both timezone-aware and naive datetimes (SQLite doesn't preserve tz)
+        expires_at = self.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        return now > expires_at
 
     @property
     def is_accepted(self) -> bool:

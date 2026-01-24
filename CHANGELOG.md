@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.8] - 2026-01-23
+
+### Added
+- **E2E Test Suite** - Comprehensive end-to-end tests covering user journeys (SAGAs)
+  - SAGA 1: Complete onboarding flow (registration → first workout)
+  - SAGA 2: Co-training with real-time supervision
+  - SAGA 3: Plan evolution and progress tracking
+  - SAGA 4-5: Student recovery and plan rejection flows
+  - SAGA 6-7: Physical assessments and weekly training
+  - SAGA 8-10: Scheduling, multi-client management, and feedback handling
+  - Uses SQLite in-memory database for fast, isolated test execution
+  - Includes safety checks to prevent running against production
+
+### Fixed
+- **DateTime Timezone Handling** - `OrganizationInvite.is_expired` now handles both naive and aware datetimes
+  - SQLite doesn't preserve timezone info, causing comparison errors
+  - Property now normalizes datetimes to UTC before comparison
+
 ## [0.4.7] - 2026-01-23
 
 ### Added
