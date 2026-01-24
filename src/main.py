@@ -89,7 +89,12 @@ def create_app() -> FastAPI:
     # Health check endpoint
     @app.get("/health")
     async def health_check() -> dict[str, str]:
-        return {"status": "healthy", "app": settings.APP_NAME}
+        return {
+            "status": "healthy",
+            "app": settings.APP_NAME,
+            "version": settings.APP_VERSION,
+            "environment": settings.APP_ENV,
+        }
 
     # Scalar API Reference - Modern API documentation
     @app.get("/reference", include_in_schema=False)
