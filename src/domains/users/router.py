@@ -4,7 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, UploadFile, status
 from uuid import UUID
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -37,7 +37,6 @@ from src.domains.workouts.models import (
     PlanAssignment,
     PlanWorkout,
     PrescriptionNote,
-    TrainingMode,
     TrainingPlan,
     Workout,
     WorkoutExercise,
@@ -435,9 +434,6 @@ async def get_student_dashboard(
             plan_workouts = plan_workouts_result.scalars().all()
 
             if plan_workouts:
-                # Calculate which workout is for today based on weekday and rotation
-                day_of_week = now.weekday()  # 0=Monday, 6=Sunday
-
                 # Simple rotation: use number of completed sessions to determine next workout
                 completed_sessions = await db.scalar(
                     select(func.count(WorkoutSession.id))
@@ -595,7 +591,6 @@ async def get_student_dashboard(
     # ==================== Trainer Info ====================
     trainer_info = None
     user_service = UserService(db)
-    org_service = OrganizationService(db)
 
     # Build filter conditions for student membership
     membership_filters = [

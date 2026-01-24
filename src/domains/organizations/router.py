@@ -397,6 +397,57 @@ async def remove_member(
     await org_service.remove_member(membership)
 
 
+@router.post("/{org_id}/members/{membership_id}/reactivate", response_model=MemberResponse)
+async def reactivate_member(
+    org_id: UUID,
+    membership_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MemberResponse:
+    """Reactivate an inactive member (professionals only)."""
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    # Check professional permission
+    my_membership = await org_service.get_membership(org_id, current_user.id)
+    if not my_membership or not org_service.is_professional(my_membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Professional permission required",
+        )
+
+    # Get the membership to reactivate
+    membership = await org_service.get_membership_by_id(membership_id)
+    if not membership or membership.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Membro não encontrado",
+        )
+
+    if membership.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Membro já está ativo",
+        )
+
+    # Reactivate the membership
+    reactivated = await org_service.reactivate_membership(membership)
+
+    user = await user_service.get_user_by_id(reactivated.user_id)
+
+    return MemberResponse(
+        id=reactivated.id,
+        user_id=reactivated.user_id,
+        organization_id=reactivated.organization_id,
+        role=reactivated.role,
+        joined_at=reactivated.joined_at,
+        is_active=reactivated.is_active,
+        user_name=user.name if user else "",
+        user_email=user.email if user else "",
+        user_avatar=user.avatar_url if user else None,
+    )
+
+
 # Invitations
 
 @router.post("/{org_id}/invite", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
@@ -408,6 +459,7 @@ async def create_invite(
 ) -> InviteResponse:
     """Create an invitation to join the organization (professionals and admins)."""
     org_service = OrganizationService(db)
+    user_service = UserService(db)
 
     # Check professional permission (trainers, coaches, nutritionists, admins)
     membership = await org_service.get_membership(org_id, current_user.id)
@@ -422,6 +474,41 @@ async def create_invite(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Organization not found",
+        )
+
+    # Check if user with this email already exists and is a member
+    user_by_email = await user_service.get_user_by_email(request.email)
+    if user_by_email:
+        existing_membership = await org_service.get_membership(org_id, user_by_email.id)
+        if existing_membership:
+            if existing_membership.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "ALREADY_MEMBER",
+                        "message": "Você já tem esse aluno",
+                    },
+                )
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "code": "INACTIVE_MEMBER",
+                        "message": "Este aluno já está em seus alunos, inativo. Deseja ativá-lo?",
+                        "membership_id": str(existing_membership.id),
+                    },
+                )
+
+    # Check if there's already a pending invite for this email
+    existing_invite = await org_service.get_pending_invite_by_email(org_id, request.email)
+    if existing_invite:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "PENDING_INVITE",
+                "message": "Este aluno já possui um convite pendente",
+                "invite_id": str(existing_invite.id),
+            },
         )
 
     invite = await org_service.create_invite(

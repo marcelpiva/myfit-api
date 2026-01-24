@@ -718,14 +718,17 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
 
-    # Assignment acceptance workflow
+    # Assignment acceptance workflow (auto-accepted by default)
     status: Mapped[AssignmentStatus] = mapped_column(
         Enum(AssignmentStatus, name="assignment_status_enum", values_callable=lambda x: [e.value for e in x]),
-        default=AssignmentStatus.PENDING,
+        default=AssignmentStatus.ACCEPTED,  # Auto-accepted - no approval workflow
         nullable=False,
     )
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     declined_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Acknowledgment tracking (when student viewed the assignment)
+    acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     plan: Mapped["TrainingPlan"] = relationship("TrainingPlan")
@@ -814,6 +817,82 @@ class PrescriptionNote(Base, UUIDMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<PrescriptionNote context={self.context_type.value}:{self.context_id}>"
+
+
+class ExerciseFeedbackType(str, enum.Enum):
+    """Types of feedback a student can give on an exercise."""
+
+    LIKED = "liked"  # Positive feedback (thumbs up)
+    DISLIKED = "disliked"  # Negative feedback (thumbs down)
+    SWAP = "swap"  # Request to swap the exercise
+
+
+class ExerciseFeedback(Base, UUIDMixin, TimestampMixin):
+    """Feedback per-exercise from students during workout sessions.
+
+    Allows students to indicate if they liked/disliked an exercise
+    or request a swap to a different exercise.
+    """
+
+    __tablename__ = "exercise_feedbacks"
+
+    # Context
+    session_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    workout_exercise_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workout_exercises.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    exercise_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("exercises.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    # Feedback content
+    feedback_type: Mapped[ExerciseFeedbackType] = mapped_column(
+        Enum(ExerciseFeedbackType, name="exercise_feedback_type_enum",
+             values_callable=lambda x: [e.value for e in x]),
+        nullable=False,
+    )
+    comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Trainer response (for swap requests)
+    trainer_response: Mapped[str | None] = mapped_column(Text, nullable=True)
+    responded_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replacement_exercise_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("exercises.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Organization scope
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Relationships
+    session: Mapped["WorkoutSession"] = relationship("WorkoutSession")
+    workout_exercise: Mapped["WorkoutExercise"] = relationship("WorkoutExercise")
+    exercise: Mapped["Exercise"] = relationship("Exercise", foreign_keys=[exercise_id])
+    student: Mapped["User"] = relationship("User")
+    replacement_exercise: Mapped["Exercise | None"] = relationship(
+        "Exercise", foreign_keys=[replacement_exercise_id]
+    )
+
+    def __repr__(self) -> str:
+        return f"<ExerciseFeedback type={self.feedback_type.value} exercise={self.exercise_id}>"
 
 
 # Import for type hints

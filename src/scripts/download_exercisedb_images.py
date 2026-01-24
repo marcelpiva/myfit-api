@@ -20,8 +20,6 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup

@@ -8,9 +8,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
-    String,
     Text,
-    func,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -89,3 +87,31 @@ class Appointment(Base, UUIDMixin, TimestampMixin):
     trainer = relationship("User", foreign_keys=[trainer_id], lazy="selectin")
     student = relationship("User", foreign_keys=[student_id], lazy="selectin")
     organization = relationship("Organization", lazy="selectin")
+
+
+class TrainerAvailability(Base, UUIDMixin, TimestampMixin):
+    """Trainer availability slots for scheduling."""
+
+    __tablename__ = "trainer_availability"
+
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    day_of_week: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )  # 0=Monday, 6=Sunday
+    start_time: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )  # HH:MM format
+    end_time: Mapped[str] = mapped_column(
+        Text,
+        nullable=False,
+    )  # HH:MM format
+
+    # Relationships
+    trainer = relationship("User", lazy="selectin")

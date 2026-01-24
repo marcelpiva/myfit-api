@@ -2,7 +2,7 @@
 import math
 import secrets
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -192,7 +192,7 @@ class CheckInService:
         notes: str | None = None,
     ) -> CheckIn:
         """Check out from a gym."""
-        checkin.checked_out_at = datetime.utcnow()
+        checkin.checked_out_at = datetime.now(timezone.utc)
         if notes:
             checkin.notes = notes
 
@@ -297,7 +297,7 @@ class CheckInService:
     ) -> tuple[CheckInRequest, CheckIn | None]:
         """Respond to a check-in request."""
         request.status = CheckInStatus.CONFIRMED if approved else CheckInStatus.REJECTED
-        request.responded_at = datetime.utcnow()
+        request.responded_at = datetime.now(timezone.utc)
         request.response_note = response_note
 
         checkin = None
@@ -381,7 +381,7 @@ class CheckInService:
         days: int = 30,
     ) -> dict:
         """Get check-in statistics for a user."""
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
         checkins = await self.list_checkins(
             user_id=user_id,

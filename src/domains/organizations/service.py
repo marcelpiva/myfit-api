@@ -253,6 +253,24 @@ class OrganizationService:
         }
         return min(memberships, key=lambda m: role_priority.get(m.role, 99))
 
+    async def get_membership_by_id(
+        self,
+        membership_id: uuid.UUID,
+    ) -> OrganizationMembership | None:
+        """Get a membership by its ID.
+
+        Args:
+            membership_id: The membership UUID
+
+        Returns:
+            The membership if found, None otherwise
+        """
+        result = await self.db.execute(
+            select(OrganizationMembership)
+            .where(OrganizationMembership.id == membership_id)
+        )
+        return result.scalar_one_or_none()
+
     async def get_membership_by_role(
         self,
         org_id: uuid.UUID,
@@ -477,6 +495,49 @@ class OrganizationService:
             )
         )
         return list(result.scalars().all())
+
+    async def get_pending_invite_by_email(
+        self,
+        org_id: uuid.UUID,
+        email: str,
+    ) -> OrganizationInvite | None:
+        """Get a pending invite for a specific email in an organization.
+
+        Args:
+            org_id: Organization UUID
+            email: Email to check for pending invite
+
+        Returns:
+            The pending invite if found, None otherwise
+        """
+        result = await self.db.execute(
+            select(OrganizationInvite)
+            .where(
+                and_(
+                    OrganizationInvite.organization_id == org_id,
+                    OrganizationInvite.email == email.lower(),
+                    OrganizationInvite.accepted_at == None,
+                )
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def reactivate_membership(
+        self,
+        membership: OrganizationMembership,
+    ) -> OrganizationMembership:
+        """Reactivate an inactive membership.
+
+        Args:
+            membership: The membership to reactivate
+
+        Returns:
+            The reactivated membership
+        """
+        membership.is_active = True
+        await self.db.commit()
+        await self.db.refresh(membership)
+        return membership
 
     async def accept_invite(
         self,

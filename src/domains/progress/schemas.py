@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.domains.progress.models import PhotoAngle
 
@@ -34,8 +34,7 @@ class WeightLogResponse(BaseModel):
     logged_at: datetime
     notes: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Measurement log schemas
@@ -85,8 +84,7 @@ class MeasurementLogResponse(BaseModel):
     forearm_cm: float | None = None
     notes: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Progress photo schemas
@@ -116,8 +114,7 @@ class ProgressPhotoResponse(BaseModel):
     weight_log_id: UUID | None = None
     measurement_log_id: UUID | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Weight goal schemas
@@ -143,8 +140,7 @@ class WeightGoalResponse(BaseModel):
     notes: str | None = None
     weight_to_lose: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Stats schema

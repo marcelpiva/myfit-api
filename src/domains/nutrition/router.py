@@ -1,5 +1,5 @@
 """Nutrition router with food, diet plan, and meal log endpoints."""
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from typing import Annotated
 from uuid import UUID
 
@@ -8,15 +8,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
-from src.domains.nutrition.models import FoodCategory, MealType
+from src.domains.nutrition.models import FoodCategory
 from src.domains.nutrition.schemas import (
     DailySummary,
     DietAssignmentCreate,
     DietAssignmentResponse,
-    DietAssignmentUpdate,
     DietPlanCreate,
     DietPlanListResponse,
-    DietPlanMealInput,
     DietPlanResponse,
     DietPlanUpdate,
     FoodCreate,
@@ -24,7 +22,6 @@ from src.domains.nutrition.schemas import (
     FoodResponse,
     FoodUpdate,
     MealLogCreate,
-    MealLogFoodInput,
     MealLogFoodResponse,
     MealLogResponse,
     PatientNoteCreate,

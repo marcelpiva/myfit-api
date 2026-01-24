@@ -2,7 +2,7 @@
 import uuid
 from datetime import date
 
-from sqlalchemy import select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import hash_password, verify_password

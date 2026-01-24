@@ -17,7 +17,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from sqlalchemy import select, delete
+from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import AsyncSessionLocal

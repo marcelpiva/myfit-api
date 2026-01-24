@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
-from src.core.email import send_invite_email as send_invite_email_task, send_welcome_email
+from src.core.email import send_invite_email as send_invite_email_task
 from src.domains.auth.dependencies import CurrentUser
 
 logger = logging.getLogger(__name__)
@@ -178,7 +178,6 @@ async def get_student(
 ) -> StudentResponse:
     """Get student details."""
     org_id = await _get_trainer_organization(current_user, db)
-    org_service = OrganizationService(db)
     user_service = UserService(db)
 
     # Find member by ID
@@ -742,7 +741,8 @@ async def regenerate_invite_code(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> InviteCodeResponse:
     """Regenerate the trainer's invite code."""
-    org_id = await _get_trainer_organization(current_user, db)
+    # Validate user is a trainer (result unused, call for validation only)
+    await _get_trainer_organization(current_user, db)
 
     # Generate a new code
     code = f"MYFIT-{secrets.token_hex(4).upper()}"

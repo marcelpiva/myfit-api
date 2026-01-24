@@ -1,6 +1,6 @@
 """Tests for Progress service business logic."""
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -143,7 +143,8 @@ class TestWeightLog:
             weight_kg=73.0,
         )
 
-        today = date.today()
+        # Use UTC date to match the logged_at which is stored in UTC
+        today = datetime.now(timezone.utc).date()
         logs = await service.list_weight_logs(
             sample_user["id"],
             from_date=today,
@@ -162,12 +163,12 @@ class TestWeightLog:
         await service.create_weight_log(
             user_id=sample_user["id"],
             weight_kg=80.0,
-            logged_at=datetime.utcnow() - timedelta(days=1),
+            logged_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         await service.create_weight_log(
             user_id=sample_user["id"],
             weight_kg=79.0,
-            logged_at=datetime.utcnow(),
+            logged_at=datetime.now(timezone.utc),
         )
 
         latest = await service.get_latest_weight(sample_user["id"])
@@ -265,12 +266,12 @@ class TestMeasurementLog:
         await service.create_measurement_log(
             user_id=sample_user["id"],
             waist_cm=90.0,
-            logged_at=datetime.utcnow() - timedelta(days=1),
+            logged_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         await service.create_measurement_log(
             user_id=sample_user["id"],
             waist_cm=88.0,
-            logged_at=datetime.utcnow(),
+            logged_at=datetime.now(timezone.utc),
         )
 
         latest = await service.get_latest_measurements(sample_user["id"])
@@ -500,12 +501,12 @@ class TestProgressStats:
         await service.create_weight_log(
             user_id=sample_user["id"],
             weight_kg=80.0,
-            logged_at=datetime.utcnow() - timedelta(days=15),
+            logged_at=datetime.now(timezone.utc) - timedelta(days=15),
         )
         await service.create_weight_log(
             user_id=sample_user["id"],
             weight_kg=78.0,
-            logged_at=datetime.utcnow(),
+            logged_at=datetime.now(timezone.utc),
         )
 
         # Create measurement log

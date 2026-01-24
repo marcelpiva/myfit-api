@@ -553,7 +553,8 @@ class TestMealLog:
             meal_type=MealType.DINNER,
         )
 
-        today = date.today()
+        # Use UTC date to match the logged_at which is stored in UTC
+        today = datetime.now(timezone.utc).date()
         logs = await service.list_meal_logs(
             user_id=sample_user["id"],
             from_date=today,

@@ -37,7 +37,6 @@ async def drop_orphan_tables(conn):
         "workout_programs",
         "program_workouts",
         "program_assignments",
-        "trainer_availability",
     ]
 
     print("\n=== Removendo tabelas órfãs ===")

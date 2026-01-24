@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 from src.domains.organizations.models import OrganizationType, UserRole
 
@@ -48,8 +48,7 @@ class OrganizationResponse(BaseModel):
     member_count: int = 0
     trainer_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationListResponse(BaseModel):
@@ -62,8 +61,7 @@ class OrganizationListResponse(BaseModel):
     member_count: int = 0
     created_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class OrganizationInMembership(BaseModel):
@@ -76,8 +74,7 @@ class OrganizationInMembership(BaseModel):
     member_count: int = 0
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserMembershipResponse(BaseModel):
@@ -90,8 +87,7 @@ class UserMembershipResponse(BaseModel):
     is_active: bool
     invited_by: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MemberResponse(BaseModel):
@@ -107,8 +103,7 @@ class MemberResponse(BaseModel):
     user_email: str
     user_avatar: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MemberCreate(BaseModel):
@@ -146,8 +141,7 @@ class InviteResponse(BaseModel):
     created_at: datetime
     token: str | None = None  # Token for invite link (only returned to admins)
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AcceptInviteRequest(BaseModel):

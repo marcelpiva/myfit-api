@@ -441,7 +441,7 @@ class TestInviteOperations:
             org_type=OrganizationType.GYM,
         )
 
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         invite = await service.create_invite(
             org_id=org.id,
             email="expiry@example.com",
@@ -450,7 +450,7 @@ class TestInviteOperations:
         )
 
         expected_min = before + timedelta(days=7)
-        expected_max = datetime.utcnow() + timedelta(days=7, seconds=5)
+        expected_max = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(days=7, seconds=5)
 
         # Compare naive datetimes (SQLite returns naive datetimes)
         expires_at = invite.expires_at.replace(tzinfo=None) if invite.expires_at.tzinfo else invite.expires_at

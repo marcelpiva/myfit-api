@@ -2,9 +2,9 @@
 from datetime import date, datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.domains.workouts.models import AssignmentStatus, Difficulty, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import AssignmentStatus, Difficulty, ExerciseFeedbackType, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -51,8 +51,7 @@ class ExerciseResponse(BaseModel):
     is_public: bool
     created_by_id: UUID | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Workout schemas
@@ -131,8 +130,7 @@ class WorkoutExerciseResponse(BaseModel):
     estimated_seconds: int = Field(default=0, description="Estimated time in seconds for this exercise")
     exercise: ExerciseResponse
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkoutCreate(BaseModel):
@@ -180,8 +178,7 @@ class WorkoutResponse(BaseModel):
     created_at: datetime
     exercises: list[WorkoutExerciseResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class WorkoutListResponse(BaseModel):
@@ -194,8 +191,7 @@ class WorkoutListResponse(BaseModel):
     is_template: bool
     exercise_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Assignment schemas
@@ -236,8 +232,7 @@ class AssignmentResponse(BaseModel):
     workout_name: str
     student_name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Session schemas
@@ -265,8 +260,7 @@ class SessionSetResponse(BaseModel):
     notes: str | None = None
     performed_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionStart(BaseModel):
@@ -305,8 +299,7 @@ class SessionResponse(BaseModel):
     is_completed: bool
     sets: list[SessionSetResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionListResponse(BaseModel):
@@ -323,8 +316,7 @@ class SessionListResponse(BaseModel):
     duration_minutes: int | None = None
     is_completed: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Co-Training schemas
@@ -346,8 +338,7 @@ class SessionJoinResponse(BaseModel):
     status: SessionStatus
     message: str = "Conectado a sessao com sucesso"
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionLeaveRequest(BaseModel):
@@ -380,8 +371,7 @@ class TrainerAdjustmentResponse(BaseModel):
     note: str | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionMessageCreate(BaseModel):
@@ -402,8 +392,7 @@ class SessionMessageResponse(BaseModel):
     sent_at: datetime
     is_read: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SessionStatusUpdate(BaseModel):
@@ -429,8 +418,7 @@ class ActiveSessionResponse(BaseModel):
     total_exercises: int = 0
     completed_sets: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Plan schemas
@@ -457,10 +445,9 @@ class PlanWorkoutResponse(BaseModel):
     order: int
     label: str
     day_of_week: int | None = None
-    workout: WorkoutResponse
+    workout: WorkoutResponse | None = None  # Optional for backward compatibility
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PlanCreate(BaseModel):
@@ -557,8 +544,7 @@ class PlanResponse(BaseModel):
         except (ValueError, TypeError):
             return None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PlanListResponse(BaseModel):
@@ -590,8 +576,7 @@ class PlanListResponse(BaseModel):
         except (ValueError, TypeError):
             return None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CatalogPlanResponse(BaseModel):
@@ -608,8 +593,7 @@ class CatalogPlanResponse(BaseModel):
     created_by_id: UUID | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Plan assignment schemas
@@ -646,17 +630,17 @@ class PlanAssignmentResponse(BaseModel):
     end_date: date | None = None
     is_active: bool
     notes: str | None = None
-    status: AssignmentStatus = AssignmentStatus.PENDING
+    status: AssignmentStatus = AssignmentStatus.ACCEPTED  # Default ACCEPTED (auto-accept)
     accepted_at: datetime | None = None
     declined_reason: str | None = None
+    acknowledged_at: datetime | None = None  # When student viewed the assignment
     created_at: datetime
     plan_name: str
     student_name: str
     plan_duration_weeks: int | None = None
     plan: PlanResponse | None = None  # Full plan data for client convenience
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class AssignmentAcceptRequest(BaseModel):
@@ -822,10 +806,44 @@ class PrescriptionNoteResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
-        alias_generator = to_camel
-        populate_by_name = True
+    model_config = ConfigDict(from_attributes=True, alias_generator=to_camel, populate_by_name=True)
+
+
+# Exercise Feedback schemas
+
+class ExerciseFeedbackCreate(BaseModel):
+    """Create exercise feedback request."""
+
+    feedback_type: ExerciseFeedbackType
+    comment: str | None = Field(None, max_length=500)
+
+
+class ExerciseFeedbackRespondRequest(BaseModel):
+    """Request to respond to exercise feedback (trainer)."""
+
+    trainer_response: str = Field(min_length=1, max_length=1000)
+    replacement_exercise_id: UUID | None = None
+
+
+class ExerciseFeedbackResponse(BaseModel):
+    """Exercise feedback response."""
+
+    id: UUID
+    session_id: UUID
+    workout_exercise_id: UUID
+    exercise_id: UUID
+    student_id: UUID
+    feedback_type: ExerciseFeedbackType
+    comment: str | None = None
+    exercise_name: str | None = None
+    trainer_response: str | None = None
+    responded_at: datetime | None = None
+    replacement_exercise_id: UUID | None = None
+    replacement_exercise_name: str | None = None
+    organization_id: UUID | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PrescriptionNoteListResponse(BaseModel):
@@ -835,6 +853,4 @@ class PrescriptionNoteListResponse(BaseModel):
     total: int
     unread_count: int = 0
 
-    class Config:
-        alias_generator = to_camel
-        populate_by_name = True
+    model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)

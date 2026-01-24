@@ -1,10 +1,10 @@
 """Billing router for payments and subscriptions."""
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import and_, extract, func, or_, select
+from sqlalchemy import and_, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -14,11 +14,8 @@ from src.domains.users.models import User
 
 from .models import (
     Payment,
-    PaymentMethod,
     PaymentPlan,
     PaymentStatus,
-    PaymentType,
-    RecurrenceType,
 )
 from .schemas import (
     BillingSummaryResponse,
@@ -286,7 +283,7 @@ async def mark_payment_paid(
     payment.status = PaymentStatus.PAID
     payment.payment_method = request.payment_method
     payment.payment_reference = request.payment_reference
-    payment.paid_at = request.paid_at or datetime.utcnow()
+    payment.paid_at = request.paid_at or datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(payment)
@@ -336,7 +333,7 @@ async def send_payment_reminder(
         )
 
     payment.reminder_sent = True
-    payment.reminder_sent_at = datetime.utcnow()
+    payment.reminder_sent_at = datetime.now(timezone.utc)
 
     await db.commit()
 
@@ -598,7 +595,7 @@ async def get_current_month_revenue(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> MonthlyRevenueResponse:
     """Get current month's revenue for trainer dashboard."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     year = now.year
     month = now.month
 
@@ -687,7 +684,7 @@ async def get_revenue_history(
     months_count: Annotated[int, Query(ge=1, le=24)] = 12,
 ) -> RevenueHistoryResponse:
     """Get revenue history for the last N months."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Calculate the start date (N months ago)
     start_year = now.year

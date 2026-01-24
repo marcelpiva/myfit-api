@@ -11,6 +11,8 @@ from src.domains.workouts.models import (
     AssignmentStatus,
     Difficulty,
     Exercise,
+    ExerciseFeedback,
+    ExerciseFeedbackType,
     ExerciseMode,
     MuscleGroup,
     NoteAuthorRole,
@@ -628,6 +630,7 @@ class WorkoutService:
         rating: int | None = None,
     ) -> WorkoutSession:
         """Complete a workout session."""
+        session.status = SessionStatus.COMPLETED
         session.completed_at = datetime.now(timezone.utc)
         if session.started_at:
             # Normalize datetimes for SQLite compatibility (naive datetime)
@@ -1334,12 +1337,17 @@ class WorkoutService:
         self,
         student_id: uuid.UUID,
         active_only: bool = True,
+        prescribed_only: bool = True,
     ) -> list[PlanAssignment]:
         """List plan assignments for a student.
 
         When active_only=True, only returns assignments that are both:
         - is_active == True
         - status == ACCEPTED (student has accepted the plan)
+
+        When prescribed_only=True (default), only returns assignments where
+        trainer_id != student_id, meaning only plans prescribed by a trainer
+        (not self-assigned plans).
         """
         query = select(PlanAssignment).where(
             PlanAssignment.student_id == student_id
@@ -1349,6 +1357,10 @@ class WorkoutService:
             .selectinload(PlanWorkout.workout)
             .selectinload(Workout.exercises)
         )
+
+        # Filter to only show plans prescribed by trainers (not self-assigned)
+        if prescribed_only:
+            query = query.where(PlanAssignment.trainer_id != student_id)
 
         if active_only:
             query = query.where(
@@ -1401,7 +1413,11 @@ class WorkoutService:
         notes: str | None = None,
         organization_id: uuid.UUID | None = None,
     ) -> PlanAssignment:
-        """Create a plan assignment."""
+        """Create a plan assignment.
+
+        Plans are auto-accepted (no approval workflow). The student will
+        receive a notification and can acknowledge they've seen it.
+        """
         assignment = PlanAssignment(
             plan_id=plan_id,
             student_id=student_id,
@@ -1410,8 +1426,21 @@ class WorkoutService:
             end_date=end_date,
             notes=notes,
             organization_id=organization_id,
+            # Auto-accept: no approval workflow needed
+            status=AssignmentStatus.ACCEPTED,
+            accepted_at=datetime.now(timezone.utc),
         )
         self.db.add(assignment)
+        await self.db.commit()
+        await self.db.refresh(assignment)
+        return assignment
+
+    async def acknowledge_plan_assignment(
+        self,
+        assignment: PlanAssignment,
+    ) -> PlanAssignment:
+        """Mark a plan assignment as acknowledged by the student."""
+        assignment.acknowledged_at = datetime.now(timezone.utc)
         await self.db.commit()
         await self.db.refresh(assignment)
         return assignment
@@ -1908,3 +1937,124 @@ class WorkoutService:
             return False
 
         return False
+
+    # Exercise Feedback operations
+
+    async def get_workout_exercise_by_id(
+        self,
+        workout_exercise_id: uuid.UUID,
+    ) -> WorkoutExercise | None:
+        """Get a workout exercise by ID."""
+        result = await self.db.execute(
+            select(WorkoutExercise)
+            .where(WorkoutExercise.id == workout_exercise_id)
+            .options(selectinload(WorkoutExercise.exercise))
+        )
+        return result.scalar_one_or_none()
+
+    async def create_exercise_feedback(
+        self,
+        session_id: uuid.UUID,
+        workout_exercise_id: uuid.UUID,
+        exercise_id: uuid.UUID,
+        student_id: uuid.UUID,
+        feedback_type: ExerciseFeedbackType,
+        comment: str | None = None,
+        organization_id: uuid.UUID | None = None,
+    ) -> ExerciseFeedback:
+        """Create feedback for an exercise during a workout session."""
+        feedback = ExerciseFeedback(
+            session_id=session_id,
+            workout_exercise_id=workout_exercise_id,
+            exercise_id=exercise_id,
+            student_id=student_id,
+            feedback_type=feedback_type,
+            comment=comment,
+            organization_id=organization_id,
+        )
+        self.db.add(feedback)
+        await self.db.commit()
+        await self.db.refresh(feedback)
+        return feedback
+
+    async def get_exercise_feedback_by_id(
+        self,
+        feedback_id: uuid.UUID,
+    ) -> ExerciseFeedback | None:
+        """Get an exercise feedback by ID."""
+        result = await self.db.execute(
+            select(ExerciseFeedback)
+            .where(ExerciseFeedback.id == feedback_id)
+            .options(
+                selectinload(ExerciseFeedback.exercise),
+                selectinload(ExerciseFeedback.replacement_exercise),
+            )
+        )
+        return result.scalar_one_or_none()
+
+    async def list_exercise_feedbacks_for_session(
+        self,
+        session_id: uuid.UUID,
+    ) -> list[ExerciseFeedback]:
+        """List all exercise feedbacks for a workout session."""
+        result = await self.db.execute(
+            select(ExerciseFeedback)
+            .where(ExerciseFeedback.session_id == session_id)
+            .options(
+                selectinload(ExerciseFeedback.exercise),
+                selectinload(ExerciseFeedback.replacement_exercise),
+            )
+            .order_by(ExerciseFeedback.created_at.asc())
+        )
+        return list(result.scalars().all())
+
+    async def list_pending_swap_requests(
+        self,
+        trainer_id: uuid.UUID,
+        student_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
+    ) -> list[ExerciseFeedback]:
+        """List pending swap requests for a trainer to respond to.
+
+        Returns feedbacks with type=SWAP that haven't been responded to yet.
+        """
+        # Get sessions where the trainer has access
+        # For now, filter by organization or student directly
+        query = (
+            select(ExerciseFeedback)
+            .where(
+                ExerciseFeedback.feedback_type == ExerciseFeedbackType.SWAP,
+                ExerciseFeedback.responded_at.is_(None),
+            )
+            .options(
+                selectinload(ExerciseFeedback.exercise),
+                selectinload(ExerciseFeedback.session),
+                selectinload(ExerciseFeedback.student),
+            )
+            .order_by(ExerciseFeedback.created_at.desc())
+        )
+
+        if student_id:
+            query = query.where(ExerciseFeedback.student_id == student_id)
+
+        if organization_id:
+            query = query.where(ExerciseFeedback.organization_id == organization_id)
+
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
+    async def respond_to_exercise_feedback(
+        self,
+        feedback: ExerciseFeedback,
+        trainer_response: str,
+        replacement_exercise_id: uuid.UUID | None = None,
+    ) -> ExerciseFeedback:
+        """Trainer responds to an exercise feedback (especially swap requests)."""
+        feedback.trainer_response = trainer_response
+        feedback.responded_at = datetime.now(timezone.utc)
+        if replacement_exercise_id:
+            feedback.replacement_exercise_id = replacement_exercise_id
+
+        await self.db.commit()
+        await self.db.refresh(feedback)
+        return feedback

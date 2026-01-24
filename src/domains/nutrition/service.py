@@ -2,7 +2,7 @@
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -475,9 +475,6 @@ class NutritionService:
         target_date: date,
     ) -> dict:
         """Get daily nutrition summary."""
-        start = datetime.combine(target_date, time.min)
-        end = datetime.combine(target_date, time.max)
-
         logs = await self.list_meal_logs(
             user_id=user_id,
             from_date=target_date,

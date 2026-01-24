@@ -110,3 +110,27 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = [
+    "--cov=src/domains",
+    "--cov-report=html:coverage_html",
+    "--cov-report=term-missing",
+    "--cov-branch",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["src/domains"]
+omit = [
+    "*/migrations/*",
+    "*/__init__.py",
+    "*/scripts/*",
+    "*/workouts/ai_service.py",  # Depende de OpenAI/Anthropic - requer mocks complexos
+    "*/workouts/realtime.py",     # WebSocket - requer testes E2E
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

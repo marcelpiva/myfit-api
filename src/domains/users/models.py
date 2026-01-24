@@ -1,7 +1,7 @@
 """User models for the MyFit platform."""
 import enum
 import uuid
-from datetime import date, datetime
+from datetime import date
 
 from sqlalchemy import Boolean, Date, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID

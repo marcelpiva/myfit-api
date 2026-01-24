@@ -3,7 +3,7 @@ from datetime import datetime
 from decimal import Decimal
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.domains.marketplace.models import (
     PaymentProvider,
@@ -64,8 +64,7 @@ class CreatorInfo(BaseModel):
     avatar_url: str | None = None
     is_verified: bool = False
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplateListResponse(BaseModel):
@@ -87,8 +86,7 @@ class TemplateListResponse(BaseModel):
     is_featured: bool
     creator: CreatorInfo
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplateResponse(BaseModel):
@@ -127,8 +125,7 @@ class TemplateResponse(BaseModel):
 
     creator: CreatorInfo
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TemplatePreviewResponse(BaseModel):
@@ -158,8 +155,7 @@ class TemplatePreviewResponse(BaseModel):
     meal_count: int | None = None
     target_calories: int | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Purchase Schemas ====================
@@ -204,8 +200,7 @@ class PurchaseStatusResponse(BaseModel):
     duplicated_diet_plan_id: UUID | None = None
     completed_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class PurchaseListResponse(BaseModel):
@@ -222,8 +217,7 @@ class PurchaseListResponse(BaseModel):
     completed_at: datetime | None = None
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Review Schemas ====================
@@ -249,8 +243,7 @@ class ReviewResponse(BaseModel):
     reviewer_name: str
     reviewer_avatar_url: str | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ReviewListResponse(BaseModel):
@@ -292,8 +285,7 @@ class TemplateStatsResponse(BaseModel):
     rating_count: int
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class EarningsHistoryItem(BaseModel):
@@ -336,8 +328,7 @@ class PayoutResponse(BaseModel):
     created_at: datetime
     processed_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Organization Schemas ====================
@@ -364,8 +355,7 @@ class OrganizationTemplateAccessResponse(BaseModel):
     member_price_cents: int
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Category Schemas ====================

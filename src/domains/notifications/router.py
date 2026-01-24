@@ -1,5 +1,5 @@
 """Notifications router for user notifications."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -159,7 +159,7 @@ async def mark_notification_read(
 
     if not notification.is_read:
         notification.is_read = True
-        notification.read_at = datetime.utcnow()
+        notification.read_at = datetime.now(timezone.utc)
         await db.commit()
 
 
@@ -170,7 +170,7 @@ async def mark_all_read(
     request: MarkReadRequest | None = None,
 ) -> None:
     """Mark all notifications as read (or specific ones if IDs provided)."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     if request and request.notification_ids:
         # Mark specific notifications as read

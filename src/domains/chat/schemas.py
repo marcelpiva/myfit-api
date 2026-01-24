@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from .models import ConversationType, MessageType
 
@@ -15,8 +15,7 @@ class ParticipantInfo(BaseModel):
     avatar_url: str | None = None
     last_read_at: datetime | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversationCreate(BaseModel):
@@ -42,8 +41,7 @@ class ConversationResponse(BaseModel):
     participants: list[ParticipantInfo] = []
     unread_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ConversationListResponse(BaseModel):
@@ -57,8 +55,7 @@ class ConversationListResponse(BaseModel):
     unread_count: int = 0
     other_participant: ParticipantInfo | None = None  # For direct conversations
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MessageCreate(BaseModel):
@@ -88,8 +85,7 @@ class MessageResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MessageUpdate(BaseModel):

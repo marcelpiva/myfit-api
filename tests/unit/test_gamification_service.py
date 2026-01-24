@@ -1,7 +1,7 @@
 """Tests for GamificationService - points, levels, streaks, and achievements."""
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
 from sqlalchemy import select
@@ -167,7 +167,7 @@ class TestUpdateStreak:
             level=1,
             current_streak=5,
             longest_streak=5,
-            last_activity_at=datetime.utcnow() - timedelta(days=1),
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         db_session.add(user_points)
         await db_session.commit()
@@ -190,7 +190,7 @@ class TestUpdateStreak:
             level=2,
             current_streak=10,
             longest_streak=10,
-            last_activity_at=datetime.utcnow() - timedelta(days=2),
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=2),
         )
         db_session.add(user_points)
         await db_session.commit()
@@ -212,7 +212,7 @@ class TestUpdateStreak:
             level=2,
             current_streak=5,
             longest_streak=15,
-            last_activity_at=datetime.utcnow() - timedelta(days=3),
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=3),
         )
         db_session.add(user_points)
         await db_session.commit()
@@ -234,7 +234,7 @@ class TestUpdateStreak:
             level=2,
             current_streak=10,
             longest_streak=10,
-            last_activity_at=datetime.utcnow() - timedelta(days=1),
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
         )
         db_session.add(user_points)
         await db_session.commit()
@@ -250,12 +250,14 @@ class TestUpdateStreak:
         """Last activity timestamp should be updated."""
         service = GamificationService(db_session)
 
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         user_points = await service.update_streak(sample_user["id"])
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc).replace(tzinfo=None)
 
         assert user_points.last_activity_at is not None
-        assert before <= user_points.last_activity_at <= after
+        # Normalize for SQLite compatibility (naive datetime from database)
+        last_activity = user_points.last_activity_at.replace(tzinfo=None) if user_points.last_activity_at.tzinfo else user_points.last_activity_at
+        assert before <= last_activity <= after
 
 
 class TestAwardPoints:
@@ -355,7 +357,7 @@ class TestAwardPoints:
         """Last activity timestamp should be updated."""
         service = GamificationService(db_session)
 
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc).replace(tzinfo=None)
         user_points, _ = await service.award_points(
             user_id=sample_user["id"],
             points=10,
@@ -363,7 +365,9 @@ class TestAwardPoints:
         )
 
         assert user_points.last_activity_at is not None
-        assert user_points.last_activity_at >= before
+        # Normalize for SQLite compatibility (naive datetime from database)
+        last_activity = user_points.last_activity_at.replace(tzinfo=None) if user_points.last_activity_at.tzinfo else user_points.last_activity_at
+        assert last_activity >= before
 
 
 class TestAchievements:

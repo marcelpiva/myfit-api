@@ -1,8 +1,8 @@
 """Gamification service with database operations."""
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -87,7 +87,7 @@ class GamificationService:
         # Update total points and level
         user_points.total_points += points
         user_points.level = self.calculate_level(user_points.total_points)
-        user_points.last_activity_at = datetime.utcnow()
+        user_points.last_activity_at = datetime.now(timezone.utc)
 
         await self.db.commit()
         await self.db.refresh(user_points)
@@ -98,10 +98,13 @@ class GamificationService:
     async def update_streak(self, user_id: uuid.UUID) -> UserPoints:
         """Update user's activity streak."""
         user_points = await self.get_or_create_user_points(user_id)
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         if user_points.last_activity_at:
-            days_since_last = (now - user_points.last_activity_at).days
+            # Normalize datetimes for SQLite compatibility (naive datetime)
+            now_naive = now.replace(tzinfo=None)
+            last_activity = user_points.last_activity_at.replace(tzinfo=None) if user_points.last_activity_at.tzinfo else user_points.last_activity_at
+            days_since_last = (now_naive - last_activity).days
             if days_since_last == 0:
                 # Same day, no streak update
                 pass
@@ -324,7 +327,7 @@ class GamificationService:
         all_points = list(result.scalars().all())
 
         # Calculate period start
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         if period == "weekly":
             period_start = now - timedelta(days=now.weekday())
         elif period == "monthly":

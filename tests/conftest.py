@@ -2,13 +2,13 @@
 
 import uuid
 from collections.abc import AsyncGenerator
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import JSON, event
+from sqlalchemy import JSON, event, select
 from sqlalchemy.dialects.postgresql import JSONB, UUID as PG_UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -48,6 +48,13 @@ async def test_engine():
         echo=False,
         connect_args={"check_same_thread": False},
     )
+
+    # Enable foreign key support for SQLite
+    @event.listens_for(engine.sync_engine, "connect")
+    def set_sqlite_pragma(dbapi_connection, connection_record):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
     # Import all models to register them
     from src.domains import models  # noqa: F401
@@ -288,7 +295,7 @@ async def user_with_points(
         level=3,
         current_streak=5,
         longest_streak=10,
-        last_activity_at=datetime.utcnow() - timedelta(days=1),
+        last_activity_at=datetime.now(timezone.utc) - timedelta(days=1),
     )
     db_session.add(user_points)
     await db_session.commit()
@@ -300,4 +307,85 @@ async def user_with_points(
         "level": user_points.level,
         "current_streak": user_points.current_streak,
         "longest_streak": user_points.longest_streak,
+    }
+
+
+# =============================================================================
+# Integration Test Fixtures
+# =============================================================================
+
+
+@pytest.fixture
+async def sample_user_model(db_session: AsyncSession, sample_user: dict[str, Any]):
+    """Get the actual User model instance."""
+    from src.domains.users.models import User
+
+    result = await db_session.execute(
+        select(User).where(User.id == sample_user["id"])
+    )
+    return result.scalar_one()
+
+
+@pytest.fixture
+async def authenticated_client(
+    test_engine, db_session, sample_user_model
+) -> AsyncGenerator[AsyncClient, None]:
+    """Create a test client with mocked authentication."""
+    from src.domains.auth.dependencies import get_current_user
+
+    app = create_app()
+
+    # Override the database dependency
+    async def override_get_db():
+        yield db_session
+
+    # Override the auth dependency to return our test user
+    async def override_get_current_user():
+        return sample_user_model
+
+    app.dependency_overrides[get_db] = override_get_db
+    app.dependency_overrides[get_current_user] = override_get_current_user
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        yield client
+
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def student_user(db_session: AsyncSession, sample_organization_id: uuid.UUID) -> dict[str, Any]:
+    """Create a student user in the database."""
+    from src.domains.users.models import User
+    from src.domains.organizations.models import OrganizationMembership, UserRole
+
+    user_id = uuid.uuid4()
+    user = User(
+        id=user_id,
+        email=f"student-{user_id}@example.com",
+        name="Test Student",
+        password_hash="$2b$12$test.hash.password",
+        is_active=True,
+    )
+    db_session.add(user)
+
+    membership = OrganizationMembership(
+        user_id=user_id,
+        organization_id=sample_organization_id,
+        role=UserRole.STUDENT,
+        is_active=True,
+    )
+    db_session.add(membership)
+
+    await db_session.commit()
+    await db_session.refresh(user)
+
+    return {
+        "id": user_id,
+        "email": user.email,
+        "name": user.name,
+        "organization_id": sample_organization_id,
+        "model": user,
     }

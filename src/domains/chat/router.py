@@ -1,10 +1,10 @@
 """Chat router for messaging between users."""
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -264,7 +264,7 @@ async def create_conversation(
         )
         db.add(message)
 
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = datetime.now(timezone.utc)
         conversation.last_message_preview = request.initial_message[:255]
 
     await db.commit()
@@ -417,11 +417,11 @@ async def send_message(
     # Update conversation
     conversation = await db.get(Conversation, conversation_id)
     if conversation:
-        conversation.last_message_at = datetime.utcnow()
+        conversation.last_message_at = datetime.now(timezone.utc)
         conversation.last_message_preview = request.content[:255]
 
     # Update sender's last_read_at
-    participant.last_read_at = datetime.utcnow()
+    participant.last_read_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(message)
@@ -469,7 +469,7 @@ async def update_message(
 
     message.content = request.content
     message.is_edited = True
-    message.edited_at = datetime.utcnow()
+    message.edited_at = datetime.now(timezone.utc)
 
     await db.commit()
     await db.refresh(message)
@@ -542,7 +542,7 @@ async def mark_as_read(
         if message and message.conversation_id == conversation_id:
             participant.last_read_at = message.created_at
     else:
-        participant.last_read_at = datetime.utcnow()
+        participant.last_read_at = datetime.now(timezone.utc)
 
     await db.commit()
 

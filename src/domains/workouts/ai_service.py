@@ -7,7 +7,7 @@ from typing import Any
 from openai import AsyncOpenAI
 
 from src.config.settings import settings
-from src.domains.workouts.models import Difficulty, MuscleGroup, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, WorkoutGoal
 
 # Keywords to classify exercises as compound or isolation
 COMPOUND_KEYWORDS = [

@@ -25,7 +25,7 @@ from src.config.database import get_db
 from src.core.redis import RateLimiter
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.service import UserService
-from src.domains.workouts.models import Difficulty, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import Difficulty, MuscleGroup, NoteAuthorRole, NoteContextType, SplitType, TechniqueType, WorkoutGoal
 from src.domains.workouts.schemas import (
     ActiveSessionResponse,
     AIGeneratePlanRequest,
@@ -36,6 +36,9 @@ from src.domains.workouts.schemas import (
     AssignmentUpdate,
     CatalogPlanResponse,
     ExerciseCreate,
+    ExerciseFeedbackCreate,
+    ExerciseFeedbackRespondRequest,
+    ExerciseFeedbackResponse,
     ExerciseResponse,
     ExerciseSuggestionRequest,
     ExerciseSuggestionResponse,
@@ -926,7 +929,7 @@ async def list_plan_assignments(
                         workout=WorkoutResponse.model_validate(pw.workout) if pw.workout else None,
                     )
                     for pw in a.plan.plan_workouts
-                    if pw.workout
+                    # Don't filter - include all plan_workouts even if workout is None
                 ]
 
         result.append(
@@ -995,9 +998,11 @@ async def create_plan_assignment(
         )
 
     # Check if same plan is already assigned and active for this student
+    # Use prescribed_only=False to check all assignments (including self-assigned)
     existing_assignments = await workout_service.list_student_plan_assignments(
         student_id=request.student_id,
         active_only=True,
+        prescribed_only=False,
     )
     for existing in existing_assignments:
         if existing.plan_id == request.plan_id:
@@ -1110,6 +1115,58 @@ async def respond_to_plan_assignment(
         accepted_at=assignment.accepted_at,
         declined_reason=assignment.declined_reason,
         created_at=assignment.created_at,
+        plan_name=plan.name if plan else "",
+        student_name=student.name if student else "",
+        plan_duration_weeks=plan.duration_weeks if plan else None,
+    )
+
+
+@router.post("/plans/assignments/{assignment_id}/acknowledge", response_model=PlanAssignmentResponse)
+async def acknowledge_plan_assignment(
+    assignment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Mark a plan assignment as acknowledged/viewed by the student."""
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Only the assigned student can acknowledge
+    if assignment.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o aluno pode marcar esta atribuição como visualizada",
+        )
+
+    # Acknowledge the assignment
+    acknowledged = await workout_service.acknowledge_plan_assignment(assignment)
+
+    # Get student and plan info for response
+    student = await user_service.get_user_by_id(acknowledged.student_id)
+    plan = await workout_service.get_plan_by_id(acknowledged.plan_id)
+
+    return PlanAssignmentResponse(
+        id=acknowledged.id,
+        plan_id=acknowledged.plan_id,
+        student_id=acknowledged.student_id,
+        trainer_id=acknowledged.trainer_id,
+        organization_id=acknowledged.organization_id,
+        start_date=acknowledged.start_date,
+        end_date=acknowledged.end_date,
+        is_active=acknowledged.is_active,
+        notes=acknowledged.notes,
+        status=acknowledged.status,
+        accepted_at=acknowledged.accepted_at,
+        acknowledged_at=acknowledged.acknowledged_at,
+        declined_reason=acknowledged.declined_reason,
+        created_at=acknowledged.created_at,
         plan_name=plan.name if plan else "",
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
@@ -1804,6 +1861,238 @@ async def delete_prescription_note_endpoint(
             detail="Você só pode deletar suas próprias notas",
         )
     await workout_service.delete_prescription_note(note)
+
+
+# Exercise Feedback endpoints
+
+@router.post(
+    "/sessions/{session_id}/exercises/{workout_exercise_id}/feedback",
+    response_model=ExerciseFeedbackResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_exercise_feedback(
+    session_id: UUID,
+    workout_exercise_id: UUID,
+    request: ExerciseFeedbackCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header()] = None,
+) -> ExerciseFeedbackResponse:
+    """Create feedback for an exercise (student during workout)."""
+    workout_service = WorkoutService(db)
+
+    # Verify session exists and belongs to the user
+    session = await workout_service.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sessão não encontrada",
+        )
+    if session.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você só pode dar feedback em suas próprias sessões",
+        )
+
+    # Get workout exercise to get exercise_id
+    workout_exercise = await workout_service.get_workout_exercise_by_id(workout_exercise_id)
+    if not workout_exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Exercício não encontrado no treino",
+        )
+
+    # Get organization_id from header if not provided
+    org_id = None
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
+    feedback = await workout_service.create_exercise_feedback(
+        session_id=session_id,
+        workout_exercise_id=workout_exercise_id,
+        exercise_id=workout_exercise.exercise_id,
+        student_id=current_user.id,
+        feedback_type=request.feedback_type,
+        comment=request.comment,
+        organization_id=org_id,
+    )
+
+    # Get exercise name
+    exercise = await workout_service.get_exercise_by_id(feedback.exercise_id)
+
+    return ExerciseFeedbackResponse(
+        id=feedback.id,
+        session_id=feedback.session_id,
+        workout_exercise_id=feedback.workout_exercise_id,
+        exercise_id=feedback.exercise_id,
+        student_id=feedback.student_id,
+        feedback_type=feedback.feedback_type,
+        comment=feedback.comment,
+        exercise_name=exercise.name if exercise else None,
+        trainer_response=feedback.trainer_response,
+        responded_at=feedback.responded_at,
+        replacement_exercise_id=feedback.replacement_exercise_id,
+        organization_id=feedback.organization_id,
+        created_at=feedback.created_at,
+    )
+
+
+@router.get("/sessions/{session_id}/feedbacks", response_model=list[ExerciseFeedbackResponse])
+async def list_session_feedbacks(
+    session_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[ExerciseFeedbackResponse]:
+    """List all exercise feedbacks for a session."""
+    workout_service = WorkoutService(db)
+
+    # Verify session exists and user has access
+    session = await workout_service.get_session_by_id(session_id)
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sessão não encontrada",
+        )
+    # Allow access to session owner or trainer
+    if session.user_id != current_user.id and session.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem acesso a esta sessão",
+        )
+
+    feedbacks = await workout_service.list_exercise_feedbacks_for_session(session_id)
+
+    result = []
+    for fb in feedbacks:
+        exercise = await workout_service.get_exercise_by_id(fb.exercise_id)
+        replacement = None
+        if fb.replacement_exercise_id:
+            replacement = await workout_service.get_exercise_by_id(fb.replacement_exercise_id)
+
+        result.append(ExerciseFeedbackResponse(
+            id=fb.id,
+            session_id=fb.session_id,
+            workout_exercise_id=fb.workout_exercise_id,
+            exercise_id=fb.exercise_id,
+            student_id=fb.student_id,
+            feedback_type=fb.feedback_type,
+            comment=fb.comment,
+            exercise_name=exercise.name if exercise else None,
+            trainer_response=fb.trainer_response,
+            responded_at=fb.responded_at,
+            replacement_exercise_id=fb.replacement_exercise_id,
+            replacement_exercise_name=replacement.name if replacement else None,
+            organization_id=fb.organization_id,
+            created_at=fb.created_at,
+        ))
+
+    return result
+
+
+@router.get("/trainer/exercise-feedbacks", response_model=list[ExerciseFeedbackResponse])
+async def list_trainer_exercise_feedbacks(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    student_id: Annotated[UUID | None, Query()] = None,
+    x_organization_id: Annotated[str | None, Header()] = None,
+) -> list[ExerciseFeedbackResponse]:
+    """List pending swap requests for trainer to respond to."""
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    # Get organization_id from header
+    org_id = None
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
+    feedbacks = await workout_service.list_pending_swap_requests(
+        trainer_id=current_user.id,
+        student_id=student_id,
+        organization_id=org_id,
+    )
+
+    result = []
+    for fb in feedbacks:
+        exercise = await workout_service.get_exercise_by_id(fb.exercise_id)
+
+        result.append(ExerciseFeedbackResponse(
+            id=fb.id,
+            session_id=fb.session_id,
+            workout_exercise_id=fb.workout_exercise_id,
+            exercise_id=fb.exercise_id,
+            student_id=fb.student_id,
+            feedback_type=fb.feedback_type,
+            comment=fb.comment,
+            exercise_name=exercise.name if exercise else None,
+            trainer_response=fb.trainer_response,
+            responded_at=fb.responded_at,
+            replacement_exercise_id=fb.replacement_exercise_id,
+            organization_id=fb.organization_id,
+            created_at=fb.created_at,
+        ))
+
+    return result
+
+
+@router.put("/feedbacks/{feedback_id}/respond", response_model=ExerciseFeedbackResponse)
+async def respond_to_exercise_feedback(
+    feedback_id: UUID,
+    request: ExerciseFeedbackRespondRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ExerciseFeedbackResponse:
+    """Trainer responds to an exercise feedback (especially swap requests)."""
+    workout_service = WorkoutService(db)
+
+    feedback = await workout_service.get_exercise_feedback_by_id(feedback_id)
+    if not feedback:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Feedback não encontrado",
+        )
+
+    # Verify replacement exercise exists if provided
+    replacement_exercise = None
+    if request.replacement_exercise_id:
+        replacement_exercise = await workout_service.get_exercise_by_id(
+            request.replacement_exercise_id
+        )
+        if not replacement_exercise:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Exercício de substituição não encontrado",
+            )
+
+    updated = await workout_service.respond_to_exercise_feedback(
+        feedback=feedback,
+        trainer_response=request.trainer_response,
+        replacement_exercise_id=request.replacement_exercise_id,
+    )
+
+    exercise = await workout_service.get_exercise_by_id(updated.exercise_id)
+
+    return ExerciseFeedbackResponse(
+        id=updated.id,
+        session_id=updated.session_id,
+        workout_exercise_id=updated.workout_exercise_id,
+        exercise_id=updated.exercise_id,
+        student_id=updated.student_id,
+        feedback_type=updated.feedback_type,
+        comment=updated.comment,
+        exercise_name=exercise.name if exercise else None,
+        trainer_response=updated.trainer_response,
+        responded_at=updated.responded_at,
+        replacement_exercise_id=updated.replacement_exercise_id,
+        replacement_exercise_name=replacement_exercise.name if replacement_exercise else None,
+        organization_id=updated.organization_id,
+        created_at=updated.created_at,
+    )
 
 
 # Individual workout routes (moved to end to avoid conflicts)

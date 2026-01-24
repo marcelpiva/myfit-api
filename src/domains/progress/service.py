@@ -1,8 +1,8 @@
 """Progress service with database operations."""
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.domains.progress.models import (
@@ -67,7 +67,7 @@ class ProgressService:
         log = WeightLog(
             user_id=user_id,
             weight_kg=weight_kg,
-            logged_at=logged_at or datetime.utcnow(),
+            logged_at=logged_at or datetime.now(timezone.utc),
             notes=notes,
         )
         self.db.add(log)
@@ -162,7 +162,7 @@ class ProgressService:
         """Create a new measurement log."""
         log = MeasurementLog(
             user_id=user_id,
-            logged_at=logged_at or datetime.utcnow(),
+            logged_at=logged_at or datetime.now(timezone.utc),
             chest_cm=chest_cm,
             waist_cm=waist_cm,
             hips_cm=hips_cm,
@@ -289,7 +289,7 @@ class ProgressService:
             photo_url=photo_url,
             thumbnail_url=thumbnail_url,
             angle=angle,
-            logged_at=logged_at or datetime.utcnow(),
+            logged_at=logged_at or datetime.now(timezone.utc),
             notes=notes,
             weight_log_id=weight_log_id,
             measurement_log_id=measurement_log_id,
@@ -356,7 +356,7 @@ class ProgressService:
         days: int = 30,
     ) -> dict:
         """Get progress statistics for a user."""
-        cutoff_date = datetime.utcnow() - timedelta(days=days)
+        cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
 
         # Get weight stats
         weight_logs = await self.list_weight_logs(

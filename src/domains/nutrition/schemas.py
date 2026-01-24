@@ -2,7 +2,7 @@
 from datetime import date, datetime, time
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.domains.nutrition.models import FoodCategory, MealType
 
@@ -68,8 +68,7 @@ class FoodResponse(BaseModel):
     is_public: bool
     created_by_id: UUID | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class FoodListResponse(BaseModel):
@@ -82,8 +81,7 @@ class FoodListResponse(BaseModel):
     protein: float
     category: FoodCategory
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Diet plan schemas
@@ -147,8 +145,7 @@ class DietPlanMealFoodResponse(BaseModel):
     notes: str | None = None
     food: FoodResponse
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DietPlanMealResponse(BaseModel):
@@ -162,8 +159,7 @@ class DietPlanMealResponse(BaseModel):
     foods: list[DietPlanMealFoodResponse] = []
     total_calories: float = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DietPlanResponse(BaseModel):
@@ -184,8 +180,7 @@ class DietPlanResponse(BaseModel):
     created_at: datetime
     meals: list[DietPlanMealResponse] = []
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DietPlanListResponse(BaseModel):
@@ -197,8 +192,7 @@ class DietPlanListResponse(BaseModel):
     is_template: bool
     meal_count: int = 0
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Assignment schemas
@@ -239,8 +233,7 @@ class DietAssignmentResponse(BaseModel):
     plan_name: str
     student_name: str
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Meal log schemas
@@ -275,8 +268,7 @@ class MealLogFoodResponse(BaseModel):
     carbs: float
     fat: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class MealLogResponse(BaseModel):
@@ -293,8 +285,7 @@ class MealLogResponse(BaseModel):
     total_carbs: float
     total_fat: float
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DailySummary(BaseModel):
@@ -342,5 +333,4 @@ class PatientNoteResponse(BaseModel):
     is_private: bool
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)

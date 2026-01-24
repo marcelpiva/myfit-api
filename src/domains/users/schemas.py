@@ -2,7 +2,7 @@
 from datetime import date
 from uuid import UUID
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.domains.users.models import Gender, Theme, Units
 
@@ -22,8 +22,7 @@ class UserProfileResponse(BaseModel):
     is_active: bool
     is_verified: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserProfileUpdate(BaseModel):
@@ -49,8 +48,7 @@ class UserSettingsResponse(BaseModel):
     goal_weight: float | None = None
     target_calories: int | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserSettingsUpdate(BaseModel):
@@ -86,8 +84,7 @@ class UserListResponse(BaseModel):
     avatar_url: str | None = None
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # ==================== Student Dashboard Schemas ====================

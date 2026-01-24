@@ -1,6 +1,6 @@
 """Tests for Billing router business logic."""
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -113,7 +113,7 @@ async def paid_payment(
         currency="BRL",
         due_date=date.today() - timedelta(days=3),
         status=PaymentStatus.PAID,
-        paid_at=datetime.utcnow(),
+        paid_at=datetime.now(timezone.utc),
         payment_method=PaymentMethod.PIX,
     )
     db_session.add(payment)
@@ -326,7 +326,7 @@ class TestMarkPaymentPaid:
     ):
         """Should set status to PAID."""
         sample_payment.status = PaymentStatus.PAID
-        sample_payment.paid_at = datetime.utcnow()
+        sample_payment.paid_at = datetime.now(timezone.utc)
         sample_payment.payment_method = PaymentMethod.PIX
         await db_session.commit()
         await db_session.refresh(sample_payment)
@@ -338,11 +338,11 @@ class TestMarkPaymentPaid:
         self, db_session: AsyncSession, sample_payment: Payment
     ):
         """Should record payment timestamp."""
-        before = datetime.utcnow()
+        before = datetime.now(timezone.utc)
         sample_payment.status = PaymentStatus.PAID
-        sample_payment.paid_at = datetime.utcnow()
+        sample_payment.paid_at = datetime.now(timezone.utc)
         await db_session.commit()
-        after = datetime.utcnow()
+        after = datetime.now(timezone.utc)
 
         assert sample_payment.paid_at >= before
         assert sample_payment.paid_at <= after
@@ -352,7 +352,7 @@ class TestMarkPaymentPaid:
     ):
         """Should record payment method."""
         sample_payment.status = PaymentStatus.PAID
-        sample_payment.paid_at = datetime.utcnow()
+        sample_payment.paid_at = datetime.now(timezone.utc)
         sample_payment.payment_method = PaymentMethod.CREDIT_CARD
         sample_payment.payment_reference = "TX123456"
         await db_session.commit()
@@ -381,7 +381,7 @@ class TestPaymentReminder:
     ):
         """Should update reminder_sent flag."""
         sample_payment.reminder_sent = True
-        sample_payment.reminder_sent_at = datetime.utcnow()
+        sample_payment.reminder_sent_at = datetime.now(timezone.utc)
         await db_session.commit()
         await db_session.refresh(sample_payment)
 
@@ -978,13 +978,13 @@ class TestRevenueCalculation:
             currency="BRL",
             due_date=date.today(),
             status=PaymentStatus.PAID,
-            paid_at=datetime.utcnow(),
+            paid_at=datetime.now(timezone.utc),
         )
         db_session.add(payment)
         await db_session.commit()
 
         # Calculate revenue
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         result = await db_session.execute(
             select(Payment).where(
                 Payment.payee_id == trainer_user["id"],
@@ -1051,7 +1051,7 @@ class TestRevenueCalculation:
             currency="BRL",
             due_date=date.today(),
             status=PaymentStatus.PAID,
-            paid_at=datetime.utcnow(),
+            paid_at=datetime.now(timezone.utc),
         )
         # Create pending payment
         pending = Payment(

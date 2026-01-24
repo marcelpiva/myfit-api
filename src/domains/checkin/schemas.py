@@ -2,7 +2,7 @@
 from datetime import datetime
 from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from src.domains.checkin.models import CheckInMethod, CheckInStatus
 
@@ -46,8 +46,7 @@ class GymResponse(BaseModel):
     radius_meters: int
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Check-in schemas
@@ -95,8 +94,7 @@ class CheckInResponse(BaseModel):
     duration_minutes: int | None = None
     gym: GymResponse | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Check-in code schemas
@@ -121,8 +119,7 @@ class CheckInCodeResponse(BaseModel):
     max_uses: int | None = None
     is_valid: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Check-in request schemas
@@ -156,8 +153,7 @@ class CheckInRequestResponse(BaseModel):
     created_at: datetime
     gym: GymResponse | None = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # Stats schema

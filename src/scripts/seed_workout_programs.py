@@ -16,7 +16,6 @@ Or from the api directory:
 import asyncio
 import sys
 from pathlib import Path
-from uuid import UUID
 
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -31,7 +30,6 @@ from src.domains.workouts.models import (
     WorkoutExercise,
     TrainingPlan,
     PlanWorkout,
-    MuscleGroup,
     Difficulty,
     WorkoutGoal,
     SplitType,
