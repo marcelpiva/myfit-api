@@ -23,6 +23,7 @@ from src.domains.organizations.schemas import (
 )
 from src.domains.organizations.service import OrganizationService
 from src.domains.users.service import UserService
+from src.domains.notifications.push_service import send_push_notification
 
 router = APIRouter()
 
@@ -476,17 +477,21 @@ async def create_invite(
             detail="Organization not found",
         )
 
-    # Check if user with this email already exists and is a member
+    # Check if user with this email already exists and has the SAME role
     user_by_email = await user_service.get_user_by_email(request.email)
     if user_by_email:
-        existing_membership = await org_service.get_membership(org_id, user_by_email.id)
-        if existing_membership:
-            if existing_membership.is_active:
+        # Only check for membership with the specific role being invited
+        # This allows users to have multiple roles (e.g., owner + student)
+        existing_with_role = await org_service.get_membership_by_role(
+            org_id, user_by_email.id, request.role
+        )
+        if existing_with_role:
+            if existing_with_role.is_active:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "code": "ALREADY_MEMBER",
-                        "message": "Você já tem esse aluno",
+                        "message": f"Este usuário já é {request.role.value} nesta organização",
                     },
                 )
             else:
@@ -495,7 +500,7 @@ async def create_invite(
                     detail={
                         "code": "INACTIVE_MEMBER",
                         "message": "Este aluno já está em seus alunos, inativo. Deseja ativá-lo?",
-                        "membership_id": str(existing_membership.id),
+                        "membership_id": str(existing_with_role.id),
                     },
                 )
 
@@ -517,6 +522,20 @@ async def create_invite(
         role=request.role,
         invited_by_id=current_user.id,
     )
+
+    # Send push notification if user exists
+    if user_by_email:
+        await send_push_notification(
+            db=db,
+            user_id=user_by_email.id,
+            title="Novo Convite",
+            body=f"{current_user.name} convidou você para {org.name}",
+            data={
+                "type": "invite",
+                "invite_id": str(invite.id),
+                "organization_id": str(org_id),
+            },
+        )
 
     return InviteResponse(
         id=invite.id,

@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-01-24
+
+### Added
+- **Push Notifications for Workout Updates** - Students receive notifications when trainer edits their workout
+  - Triggered on workout update (`PUT /{workout_id}`)
+  - Triggered on exercise added (`POST /{workout_id}/exercises`)
+  - Triggered on exercise removed (`DELETE /{workout_id}/exercises/{id}`)
+  - Notifies all students with active assignments for the workout
+
+- **Push Notification when Student Starts Workout** - Trainer receives notification
+  - Message: "[Student name] iniciou o treino '[workout name]'"
+  - Includes session_id, student_id, workout_id in data payload
+  - Works for both regular and co-training sessions
+
+- **Push Notification when Student Views Plan** - Trainer receives notification
+  - Triggered on `POST /plans/assignments/{id}/acknowledge`
+  - Message: "[Student name] visualizou o plano '[plan name]'"
+  - Helps trainers know when students have seen their assigned plans
+
 ## [0.4.9] - 2026-01-24
 
 ### Added

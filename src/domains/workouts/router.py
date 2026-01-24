@@ -603,37 +603,57 @@ async def start_session(
         is_shared=request.is_shared,
     )
 
-    # If co-training requested, notify the trainer
-    if request.is_shared:
-        # Get the trainer from the student's plan assignment
-        trainer_id = None
-        if request.assignment_id:
-            from sqlalchemy import select
-            from src.domains.workouts.models import PlanAssignment
-            assignment_query = select(PlanAssignment).where(
-                PlanAssignment.id == request.assignment_id
-            )
-            assignment_result = await db.execute(assignment_query)
-            assignment = assignment_result.scalar_one_or_none()
-            if assignment:
-                trainer_id = assignment.trainer_id
+    # Get the trainer to notify
+    trainer_id = None
+    if request.assignment_id:
+        from sqlalchemy import select
+        from src.domains.workouts.models import PlanAssignment
+        assignment_query = select(PlanAssignment).where(
+            PlanAssignment.id == request.assignment_id
+        )
+        assignment_result = await db.execute(assignment_query)
+        assignment = assignment_result.scalar_one_or_none()
+        if assignment:
+            trainer_id = assignment.trainer_id
 
-        # If no trainer from assignment, try to get from user's memberships
-        # The trainer is the one who invited the student (invited_by_id)
-        if not trainer_id:
-            from sqlalchemy import select
-            from src.domains.organizations.models import OrganizationMembership
-            member_query = select(OrganizationMembership).where(
-                OrganizationMembership.user_id == current_user.id,
-                OrganizationMembership.role == "student",
-                OrganizationMembership.invited_by_id.isnot(None),
-            )
-            member_result = await db.execute(member_query)
-            member = member_result.scalars().first()
-            if member:
-                trainer_id = member.invited_by_id
+    # If no trainer from assignment, try to get from user's memberships
+    # The trainer is the one who invited the student (invited_by_id)
+    if not trainer_id:
+        from sqlalchemy import select
+        from src.domains.organizations.models import OrganizationMembership
+        member_query = select(OrganizationMembership).where(
+            OrganizationMembership.user_id == current_user.id,
+            OrganizationMembership.role == "student",
+            OrganizationMembership.invited_by_id.isnot(None),
+        )
+        member_result = await db.execute(member_query)
+        member = member_result.scalars().first()
+        if member:
+            trainer_id = member.invited_by_id
 
-        if trainer_id:
+    # Send push notification to trainer when student starts a workout
+    if trainer_id:
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=trainer_id,
+                title="Aluno iniciou treino",
+                body=f"{current_user.name or current_user.email} iniciou o treino '{workout.name}'",
+                data={
+                    "type": "session_started",
+                    "session_id": str(session.id),
+                    "student_id": str(current_user.id),
+                    "student_name": current_user.name or current_user.email,
+                    "workout_id": str(workout.id),
+                    "workout_name": workout.name,
+                    "is_shared": str(request.is_shared).lower(),
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send push notification to trainer {trainer_id}: {e}")
+
+        # If co-training requested, also send SSE notification
+        if request.is_shared:
             from src.domains.workouts.realtime import notify_cotraining_request
             await notify_cotraining_request(
                 session=session,
@@ -1152,6 +1172,26 @@ async def acknowledge_plan_assignment(
     # Get student and plan info for response
     student = await user_service.get_user_by_id(acknowledged.student_id)
     plan = await workout_service.get_plan_by_id(acknowledged.plan_id)
+
+    # Send push notification to trainer that student viewed the plan
+    if acknowledged.trainer_id:
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=acknowledged.trainer_id,
+                title="Plano visualizado",
+                body=f"{current_user.name or current_user.email} visualizou o plano '{plan.name if plan else 'atribuído'}'",
+                data={
+                    "type": "plan_acknowledged",
+                    "assignment_id": str(acknowledged.id),
+                    "plan_id": str(acknowledged.plan_id),
+                    "student_id": str(acknowledged.student_id),
+                    "student_name": current_user.name or current_user.email,
+                    "plan_name": plan.name if plan else "",
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send push notification to trainer {acknowledged.trainer_id}: {e}")
 
     return PlanAssignmentResponse(
         id=acknowledged.id,
@@ -2358,6 +2398,37 @@ async def update_workout(
         is_public=request.is_public,
     )
 
+    # Send push notification to all students with active assignments for this workout
+    try:
+        from sqlalchemy import select
+        from src.domains.workouts.models import WorkoutAssignment
+
+        result = await db.execute(
+            select(WorkoutAssignment.student_id).where(
+                WorkoutAssignment.workout_id == workout_id,
+                WorkoutAssignment.is_active == True,
+            )
+        )
+        student_ids = [row[0] for row in result.fetchall()]
+
+        for student_id in student_ids:
+            try:
+                await send_push_notification(
+                    db=db,
+                    user_id=student_id,
+                    title="Treino atualizado",
+                    body=f"Seu treino '{updated.name}' foi atualizado pelo personal",
+                    data={
+                        "type": "workout_updated",
+                        "workout_id": str(workout_id),
+                        "workout_name": updated.name,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send push notification to student {student_id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to notify students about workout update: {e}")
+
     return WorkoutResponse.model_validate(updated)
 
 
@@ -2475,6 +2546,38 @@ async def add_exercise(
 
     # Refresh workout
     workout = await workout_service.get_workout_by_id(workout_id)
+
+    # Send push notification to all students with active assignments
+    try:
+        from sqlalchemy import select
+        from src.domains.workouts.models import WorkoutAssignment
+
+        result = await db.execute(
+            select(WorkoutAssignment.student_id).where(
+                WorkoutAssignment.workout_id == workout_id,
+                WorkoutAssignment.is_active == True,
+            )
+        )
+        student_ids = [row[0] for row in result.fetchall()]
+
+        for student_id in student_ids:
+            try:
+                await send_push_notification(
+                    db=db,
+                    user_id=student_id,
+                    title="Treino atualizado",
+                    body=f"Seu treino '{workout.name}' foi atualizado pelo personal",
+                    data={
+                        "type": "workout_updated",
+                        "workout_id": str(workout_id),
+                        "workout_name": workout.name,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send push notification to student {student_id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to notify students about workout update: {e}")
+
     return WorkoutResponse.model_validate(workout)
 
 
@@ -2502,6 +2605,37 @@ async def remove_exercise(
         )
 
     await workout_service.remove_exercise_from_workout(workout_exercise_id)
+
+    # Send push notification to all students with active assignments
+    try:
+        from sqlalchemy import select
+        from src.domains.workouts.models import WorkoutAssignment
+
+        result = await db.execute(
+            select(WorkoutAssignment.student_id).where(
+                WorkoutAssignment.workout_id == workout_id,
+                WorkoutAssignment.is_active == True,
+            )
+        )
+        student_ids = [row[0] for row in result.fetchall()]
+
+        for student_id in student_ids:
+            try:
+                await send_push_notification(
+                    db=db,
+                    user_id=student_id,
+                    title="Treino atualizado",
+                    body=f"Seu treino '{workout.name}' foi atualizado pelo personal",
+                    data={
+                        "type": "workout_updated",
+                        "workout_id": str(workout_id),
+                        "workout_name": workout.name,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send push notification to student {student_id}: {e}")
+    except Exception as e:
+        logger.error(f"Failed to notify students about workout update: {e}")
 
 
 # Co-Training endpoints
