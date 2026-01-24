@@ -24,11 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Message: "[Student name] visualizou o plano '[plan name]'"
   - Helps trainers know when students have seen their assigned plans
 
+- **Push Notification Debug Endpoints** - Endpoints for troubleshooting push notifications
+  - `GET /notifications/debug/push-status` - Check Firebase config and device tokens
+  - `POST /notifications/debug/test-push` - Send test notification to current user
+
 ### Fixed
 - **Organization Context Filtering** - Students with multiple trainers now see only data from selected trainer
   - `GET /plans/assignments` filters by `X-Organization-ID` header
   - `GET /users/me/trainer-notes` filters by `X-Organization-ID` header
   - Backward compatible: includes records with NULL organization_id
+
+### Changed
+- **Environment Documentation** - Added Firebase credentials to `.env.example`
+  - `FIREBASE_CREDENTIALS_PATH` or `FIREBASE_CREDENTIALS_JSON` for FCM
 
 ## [0.4.9] - 2026-01-24
 

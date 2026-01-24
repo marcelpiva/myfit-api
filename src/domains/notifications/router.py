@@ -547,3 +547,59 @@ async def list_devices(
         )
         for t in tokens
     ]
+
+
+# ==================== Debug Endpoints ====================
+
+
+@router.get("/debug/push-status")
+async def get_push_status(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Debug endpoint to check push notification status for current user."""
+    from .push_service import _init_firebase
+
+    firebase_app = _init_firebase()
+
+    query = select(DeviceToken).where(
+        and_(
+            DeviceToken.user_id == current_user.id,
+            DeviceToken.is_active == True,
+        )
+    )
+    result = await db.execute(query)
+    tokens = list(result.scalars().all())
+
+    return {
+        "firebase_configured": firebase_app is not None,
+        "active_device_tokens": len(tokens),
+        "devices": [
+            {
+                "platform": t.platform.value,
+                "token_prefix": t.token[:20] + "..." if t.token else None,
+                "last_used": t.last_used_at.isoformat() if t.last_used_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in tokens
+        ],
+    }
+
+
+@router.post("/debug/test-push")
+async def send_test_push(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Send a test push notification to current user's devices."""
+    from .push_service import send_push_notification
+
+    count = await send_push_notification(
+        db=db,
+        user_id=current_user.id,
+        title="Teste de Notificação",
+        body="Se você vê isso, push notifications estão funcionando!",
+        data={"type": "test"},
+    )
+
+    return {"success": count > 0, "notifications_sent": count}
