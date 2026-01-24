@@ -1338,6 +1338,7 @@ class WorkoutService:
         student_id: uuid.UUID,
         active_only: bool = True,
         prescribed_only: bool = True,
+        organization_id: uuid.UUID | None = None,
     ) -> list[PlanAssignment]:
         """List plan assignments for a student.
 
@@ -1348,6 +1349,9 @@ class WorkoutService:
         When prescribed_only=True (default), only returns assignments where
         trainer_id != student_id, meaning only plans prescribed by a trainer
         (not self-assigned plans).
+
+        When organization_id is provided, only returns assignments from that
+        organization (useful when student has multiple trainers).
         """
         query = select(PlanAssignment).where(
             PlanAssignment.student_id == student_id
@@ -1361,6 +1365,10 @@ class WorkoutService:
         # Filter to only show plans prescribed by trainers (not self-assigned)
         if prescribed_only:
             query = query.where(PlanAssignment.trainer_id != student_id)
+
+        # Filter by organization (when student has multiple trainers)
+        if organization_id:
+            query = query.where(PlanAssignment.organization_id == organization_id)
 
         if active_only:
             query = query.where(
@@ -1377,6 +1385,7 @@ class WorkoutService:
         trainer_id: uuid.UUID,
         active_only: bool = True,
         student_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> list[PlanAssignment]:
         """List plan assignments created by a trainer.
 
@@ -1384,6 +1393,7 @@ class WorkoutService:
             trainer_id: The trainer's user ID
             active_only: If True, only return active assignments
             student_id: If provided, filter by specific student
+            organization_id: If provided, filter by organization
         """
         query = select(PlanAssignment).where(
             PlanAssignment.trainer_id == trainer_id
@@ -1396,6 +1406,9 @@ class WorkoutService:
 
         if student_id:
             query = query.where(PlanAssignment.student_id == student_id)
+
+        if organization_id:
+            query = query.where(PlanAssignment.organization_id == organization_id)
 
         if active_only:
             query = query.where(PlanAssignment.is_active == True)

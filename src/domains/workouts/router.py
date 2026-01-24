@@ -875,15 +875,22 @@ async def list_plan_assignments(
     as_trainer: Annotated[bool, Query()] = False,
     active_only: Annotated[bool, Query()] = True,
     student_id: Annotated[UUID | None, Query()] = None,
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> list[PlanAssignmentResponse]:
     """List plan assignments (as student or trainer).
 
     If as_trainer=True and student_id is provided, returns assignments for that specific student.
     If as_trainer=True and student_id is None, returns all assignments where current user is trainer.
     If as_trainer=False, returns assignments for current user as student.
+
+    When X-Organization-ID header is provided, filters assignments by organization context.
+    This is important for students with multiple trainers.
     """
     workout_service = WorkoutService(db)
     user_service = UserService(db)
+
+    # Parse organization_id from header if provided
+    organization_id = UUID(x_organization_id) if x_organization_id else None
 
     if as_trainer:
         if student_id:
@@ -892,17 +899,20 @@ async def list_plan_assignments(
                 trainer_id=current_user.id,
                 student_id=student_id,
                 active_only=active_only,
+                organization_id=organization_id,
             )
         else:
             # All trainer's assignments
             assignments = await workout_service.list_trainer_plan_assignments(
                 trainer_id=current_user.id,
                 active_only=active_only,
+                organization_id=organization_id,
             )
     else:
         assignments = await workout_service.list_student_plan_assignments(
             student_id=current_user.id,
             active_only=active_only,
+            organization_id=organization_id,
         )
 
     result = []

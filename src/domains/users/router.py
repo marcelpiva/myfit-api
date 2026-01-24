@@ -269,6 +269,7 @@ async def get_my_pending_invites(
 async def get_my_trainer_notes(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[ProgressNoteResponse]:
@@ -276,10 +277,28 @@ async def get_my_trainer_notes(
 
     SECURITY FIX: VULN-5 - Students can now see notes written about them.
     This endpoint returns StudentNotes where the current user is the student.
+
+    When X-Organization-ID header is provided, filters notes by organization
+    (useful when student has multiple trainers).
     """
+    filters = [StudentNote.student_id == current_user.id]
+
+    # Filter by organization if provided
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+            filters.append(
+                or_(
+                    StudentNote.organization_id == org_id,
+                    StudentNote.organization_id.is_(None),  # Backward compatibility
+                )
+            )
+        except ValueError:
+            pass  # Invalid UUID, ignore
+
     result = await db.execute(
         select(StudentNote)
-        .where(StudentNote.student_id == current_user.id)
+        .where(*filters)
         .order_by(StudentNote.created_at.desc())
         .offset(offset)
         .limit(limit)
