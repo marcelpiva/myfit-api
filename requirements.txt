@@ -29,6 +29,7 @@ email-validator==2.3.0
 factory_boy==3.3.3
 Faker==40.1.2
 fastapi==0.128.0
+firebase-admin==6.7.0
 filelock==3.20.3
 greenlet==3.3.0
 gunicorn==23.0.0

@@ -10,8 +10,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 
-from .models import Notification, NotificationPriority, NotificationType
+from .models import DeviceToken, Notification, NotificationPriority, NotificationType
 from .schemas import (
+    DeviceRegisterRequest,
+    DeviceTokenResponse,
     MarkReadRequest,
     NotificationCreate,
     NotificationListResponse,
@@ -441,3 +443,107 @@ async def notify_appointment_reminder(
             organization_id=organization_id,
         ),
     )
+
+
+# ==================== Device Token Endpoints ====================
+
+
+@router.post("/devices", response_model=DeviceTokenResponse, status_code=status.HTTP_201_CREATED)
+async def register_device(
+    request: DeviceRegisterRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> DeviceTokenResponse:
+    """Register a device token for push notifications."""
+    # Check if token already exists
+    existing_query = select(DeviceToken).where(DeviceToken.token == request.token)
+    result = await db.execute(existing_query)
+    existing_token = result.scalar_one_or_none()
+
+    if existing_token:
+        # Update existing token to current user if different
+        if existing_token.user_id != current_user.id:
+            existing_token.user_id = current_user.id
+        existing_token.is_active = True
+        existing_token.last_used_at = datetime.now(timezone.utc)
+        await db.commit()
+        await db.refresh(existing_token)
+        return DeviceTokenResponse(
+            id=existing_token.id,
+            token=existing_token.token,
+            platform=existing_token.platform,
+            is_active=existing_token.is_active,
+            created_at=existing_token.created_at,
+        )
+
+    # Create new token
+    device_token = DeviceToken(
+        user_id=current_user.id,
+        token=request.token,
+        platform=request.platform,
+        is_active=True,
+        last_used_at=datetime.now(timezone.utc),
+    )
+    db.add(device_token)
+    await db.commit()
+    await db.refresh(device_token)
+
+    return DeviceTokenResponse(
+        id=device_token.id,
+        token=device_token.token,
+        platform=device_token.platform,
+        is_active=device_token.is_active,
+        created_at=device_token.created_at,
+    )
+
+
+@router.delete("/devices/{token}", status_code=status.HTTP_204_NO_CONTENT)
+async def unregister_device(
+    token: str,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Unregister a device token (on logout or app uninstall)."""
+    query = select(DeviceToken).where(
+        and_(
+            DeviceToken.token == token,
+            DeviceToken.user_id == current_user.id,
+        )
+    )
+    result = await db.execute(query)
+    device_token = result.scalar_one_or_none()
+
+    if device_token:
+        device_token.is_active = False
+        await db.commit()
+
+
+@router.get("/devices", response_model=list[DeviceTokenResponse])
+async def list_devices(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[DeviceTokenResponse]:
+    """List all registered devices for current user."""
+    query = (
+        select(DeviceToken)
+        .where(
+            and_(
+                DeviceToken.user_id == current_user.id,
+                DeviceToken.is_active == True,
+            )
+        )
+        .order_by(DeviceToken.last_used_at.desc())
+    )
+    result = await db.execute(query)
+    tokens = list(result.scalars().all())
+
+    return [
+        DeviceTokenResponse(
+            id=t.id,
+            token=t.token,
+            platform=t.platform,
+            is_active=t.is_active,
+            created_at=t.created_at,
+        )
+        for t in tokens
+    ]

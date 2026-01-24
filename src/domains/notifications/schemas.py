@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import NotificationPriority, NotificationType
+from .models import DevicePlatform, NotificationPriority, NotificationType
 
 
 class NotificationCreate(BaseModel):
@@ -67,3 +67,25 @@ class MarkReadRequest(BaseModel):
     """Schema for marking notifications as read."""
 
     notification_ids: list[UUID] | None = None  # If None, mark all as read
+
+
+# ==================== Device Token Schemas ====================
+
+
+class DeviceRegisterRequest(BaseModel):
+    """Schema for registering a device token."""
+
+    token: str = Field(..., min_length=10, max_length=500)
+    platform: DevicePlatform
+
+
+class DeviceTokenResponse(BaseModel):
+    """Schema for device token response."""
+
+    id: UUID
+    token: str
+    platform: DevicePlatform
+    is_active: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

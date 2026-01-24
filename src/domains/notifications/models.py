@@ -143,3 +143,33 @@ class Notification(Base, UUIDMixin, TimestampMixin):
     user = relationship("User", foreign_keys=[user_id], lazy="selectin")
     sender = relationship("User", foreign_keys=[sender_id], lazy="selectin")
     organization = relationship("Organization", lazy="selectin")
+
+
+class DevicePlatform(str, enum.Enum):
+    """Mobile platform for push notifications."""
+
+    IOS = "ios"
+    ANDROID = "android"
+
+
+class DeviceToken(Base, UUIDMixin, TimestampMixin):
+    """FCM device token for push notifications."""
+
+    __tablename__ = "device_tokens"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    token: Mapped[str] = mapped_column(String(500), nullable=False, unique=True, index=True)
+    platform: Mapped[DevicePlatform] = mapped_column(
+        Enum(DevicePlatform),
+        nullable=False,
+    )
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    user = relationship("User", lazy="selectin")

@@ -76,6 +76,7 @@ from src.domains.workouts.schemas import (
     WorkoutUpdate,
 )
 from src.domains.workouts.service import WorkoutService
+from src.domains.notifications.push_service import send_push_notification
 
 router = APIRouter()
 
@@ -1922,6 +1923,35 @@ async def create_exercise_feedback(
 
     # Get exercise name
     exercise = await workout_service.get_exercise_by_id(feedback.exercise_id)
+    exercise_name = exercise.name if exercise else "Exercício"
+
+    # Send push notification to trainer if swap request
+    if request.feedback_type == "swap" and org_id:
+        try:
+            # Find trainer for this student in the organization
+            from src.domains.organizations.service import OrganizationService
+            org_service = OrganizationService(db)
+            membership = await org_service.get_membership(org_id, current_user.id)
+
+            if membership and membership.invited_by_id:
+                # Send push to trainer
+                await send_push_notification(
+                    db=db,
+                    user_id=membership.invited_by_id,
+                    title="Pedido de troca de exercício",
+                    body=f"{current_user.name} pediu para trocar: {exercise_name}",
+                    data={
+                        "type": "feedback_swap",
+                        "feedback_id": str(feedback.id),
+                        "student_id": str(current_user.id),
+                        "student_name": current_user.name,
+                        "exercise_name": exercise_name,
+                    },
+                )
+                logger.info(f"Push notification sent to trainer {membership.invited_by_id} for swap request")
+        except Exception as e:
+            # Don't fail the request if notification fails
+            logger.error(f"Failed to send swap notification: {e}")
 
     return ExerciseFeedbackResponse(
         id=feedback.id,
@@ -1931,7 +1961,7 @@ async def create_exercise_feedback(
         student_id=feedback.student_id,
         feedback_type=feedback.feedback_type,
         comment=feedback.comment,
-        exercise_name=exercise.name if exercise else None,
+        exercise_name=exercise_name,
         trainer_response=feedback.trainer_response,
         responded_at=feedback.responded_at,
         replacement_exercise_id=feedback.replacement_exercise_id,
@@ -2076,6 +2106,33 @@ async def respond_to_exercise_feedback(
     )
 
     exercise = await workout_service.get_exercise_by_id(updated.exercise_id)
+    exercise_name = exercise.name if exercise else "Exercício"
+
+    # Send push notification to student about the response
+    try:
+        if replacement_exercise:
+            title = "Exercício substituído"
+            body = f"Seu personal trocou {exercise_name} por {replacement_exercise.name}"
+        else:
+            title = "Resposta do personal"
+            body = f"Seu personal respondeu sobre {exercise_name}"
+
+        await send_push_notification(
+            db=db,
+            user_id=feedback.student_id,
+            title=title,
+            body=body,
+            data={
+                "type": "feedback_response",
+                "feedback_id": str(feedback.id),
+                "exercise_name": exercise_name,
+                "replacement_exercise_name": replacement_exercise.name if replacement_exercise else None,
+            },
+        )
+        logger.info(f"Push notification sent to student {feedback.student_id} for feedback response")
+    except Exception as e:
+        # Don't fail the request if notification fails
+        logger.error(f"Failed to send feedback response notification: {e}")
 
     return ExerciseFeedbackResponse(
         id=updated.id,
