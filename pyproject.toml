@@ -1,7 +1,7 @@
 [project]
 name = "myfit-api"
 version = "1.0.0"
-description = "MyFit Platform API - White-label fitness platform backend"
+description = "MyFit Platform API"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "Proprietary" }
@@ -57,6 +57,9 @@ dependencies = [
     "orjson>=3.10.0",
     "tenacity>=9.0.0",
     "structlog>=24.4.0",
+
+    # Observability (GlitchTip/Sentry compatible)
+    "sentry-sdk[fastapi]>=2.0.0",
 
     # API Documentation
     "scalar-fastapi>=1.0.0",

@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.9] - 2026-01-24
+
+### Added
+- **GlitchTip Observability** - Error tracking and performance monitoring
+  - New `src/core/observability.py` module with Sentry SDK integration
+  - `init_observability()` - initializes GlitchTip with FastAPI/SQLAlchemy integrations
+  - `set_user_context()` / `clear_user_context()` - user context for error reports
+  - `capture_exception()` / `capture_message()` - manual error capture
+  - Configurable via `GLITCHTIP_DSN`, `GLITCHTIP_TRACES_SAMPLE_RATE`, `GLITCHTIP_PROFILES_SAMPLE_RATE`
+
+### Changed
+- Removed "white-label" terminology from project description
+
 ## [0.4.8] - 2026-01-23
 
 ### Added

@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
 
+    # Observability (GlitchTip/Sentry)
+    GLITCHTIP_DSN: str = ""
+    GLITCHTIP_TRACES_SAMPLE_RATE: float = 0.2
+    GLITCHTIP_PROFILES_SAMPLE_RATE: float = 0.1
+
     @property
     def email_enabled(self) -> bool:
         """Check if email is configured."""

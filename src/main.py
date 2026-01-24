@@ -6,6 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from scalar_fastapi import get_scalar_api_reference
 
 from src.config.settings import settings
+from src.core.observability import init_observability
 from src.domains.auth.router import router as auth_router
 from src.domains.billing.router import router as billing_router
 from src.domains.chat.router import router as chat_router
@@ -40,9 +41,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # Initialize observability (GlitchTip/Sentry)
+    init_observability()
+
     app = FastAPI(
         title=settings.APP_NAME,
-        description="White-label fitness platform API",
+        description="MyFit Platform API",
         version="1.0.0",
         docs_url="/docs" if settings.DEBUG else None,
         redoc_url="/redoc" if settings.DEBUG else None,
