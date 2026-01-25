@@ -452,3 +452,290 @@ class TestChangePassword:
         assert not verify_password("oldpassword", user.password_hash)
         # New password should work
         assert verify_password("newpassword", user.password_hash)
+
+
+class TestGoogleLogin:
+    """Tests for Google Sign-In functionality."""
+
+    async def test_verify_google_token_returns_none_on_error(
+        self, db_session: AsyncSession
+    ):
+        """Token verification should return None on any exception."""
+        service = AuthService(db_session)
+
+        # Mock httpx to raise an exception
+        with patch("src.domains.auth.service.httpx.AsyncClient") as mock_client:
+            mock_client.side_effect = Exception("Network error")
+
+            result = await service.verify_google_token("any_token")
+
+        assert result is None
+
+    async def test_authenticate_or_create_google_user_new_user(
+        self, db_session: AsyncSession
+    ):
+        """New Google user should create account."""
+        service = AuthService(db_session)
+
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "google_new_123",
+                "email": "newgoogle@example.com",
+                "name": "New Google User",
+                "picture": "https://example.com/new.jpg",
+                "email_verified": True,
+            }
+
+            result = await service.authenticate_or_create_google_user("token")
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is True
+        assert user.email == "newgoogle@example.com"
+        assert user.google_id == "google_new_123"
+        assert user.name == "New Google User"
+        assert user.is_verified is True
+
+    async def test_authenticate_or_create_google_user_existing_by_google_id(
+        self, db_session: AsyncSession
+    ):
+        """Existing Google user should be returned."""
+        service = AuthService(db_session)
+
+        # First create the user
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "google_existing_123",
+                "email": "existinggoogle@example.com",
+                "name": "Existing Google",
+                "picture": None,
+                "email_verified": True,
+            }
+            await service.authenticate_or_create_google_user("token")
+
+        # Now authenticate again
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "google_existing_123",
+                "email": "existinggoogle@example.com",
+                "name": "Existing Google",
+                "picture": None,
+                "email_verified": True,
+            }
+            result = await service.authenticate_or_create_google_user("token")
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is False
+        assert user.google_id == "google_existing_123"
+
+    async def test_authenticate_or_create_google_user_links_existing_email(
+        self, db_session: AsyncSession
+    ):
+        """Google login should link to existing email account."""
+        service = AuthService(db_session)
+
+        # Create user with email
+        existing_user = await service.create_user(
+            email="linkme@example.com",
+            password="password123",
+            name="Link User",
+        )
+
+        # Now login with Google using same email
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "google_link_123",
+                "email": "linkme@example.com",
+                "name": "Link User",
+                "picture": "https://example.com/pic.jpg",
+                "email_verified": True,
+            }
+            result = await service.authenticate_or_create_google_user("token")
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is False
+        assert user.id == existing_user.id
+        assert user.google_id == "google_link_123"
+
+    async def test_authenticate_or_create_google_user_invalid_token(
+        self, db_session: AsyncSession
+    ):
+        """Invalid token should return None."""
+        service = AuthService(db_session)
+
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = None
+
+            result = await service.authenticate_or_create_google_user("invalid")
+
+        assert result is None
+
+    async def test_get_user_by_google_id(self, db_session: AsyncSession):
+        """Should find user by Google ID."""
+        service = AuthService(db_session)
+
+        # Create Google user
+        with patch.object(service, "verify_google_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "google_find_123",
+                "email": "findgoogle@example.com",
+                "name": "Find Google",
+                "picture": None,
+                "email_verified": True,
+            }
+            await service.authenticate_or_create_google_user("token")
+
+        # Find by google_id
+        user = await service.get_user_by_google_id("google_find_123")
+        assert user is not None
+        assert user.email == "findgoogle@example.com"
+
+        # Not found
+        user = await service.get_user_by_google_id("nonexistent")
+        assert user is None
+
+
+class TestAppleLogin:
+    """Tests for Apple Sign-In functionality."""
+
+    async def test_authenticate_or_create_apple_user_new_user(
+        self, db_session: AsyncSession
+    ):
+        """New Apple user should create account."""
+        service = AuthService(db_session)
+
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_new_123",
+                "email": "newapple@example.com",
+                "email_verified": True,
+            }
+
+            result = await service.authenticate_or_create_apple_user(
+                "token", user_name="New Apple User"
+            )
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is True
+        assert user.email == "newapple@example.com"
+        assert user.apple_id == "apple_new_123"
+        assert user.name == "New Apple User"
+        assert user.is_verified is True
+
+    async def test_authenticate_or_create_apple_user_existing_by_apple_id(
+        self, db_session: AsyncSession
+    ):
+        """Existing Apple user should be returned."""
+        service = AuthService(db_session)
+
+        # First create the user
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_existing_123",
+                "email": "existingapple@example.com",
+                "email_verified": True,
+            }
+            await service.authenticate_or_create_apple_user("token", user_name="Apple")
+
+        # Now authenticate again (Apple doesn't send name on subsequent logins)
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_existing_123",
+                "email": None,  # Apple may not provide email on subsequent logins
+                "email_verified": False,
+            }
+            result = await service.authenticate_or_create_apple_user("token")
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is False
+        assert user.apple_id == "apple_existing_123"
+
+    async def test_authenticate_or_create_apple_user_links_existing_email(
+        self, db_session: AsyncSession
+    ):
+        """Apple login should link to existing email account."""
+        service = AuthService(db_session)
+
+        # Create user with email
+        existing_user = await service.create_user(
+            email="linkapple@example.com",
+            password="password123",
+            name="Link Apple User",
+        )
+
+        # Now login with Apple using same email
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_link_123",
+                "email": "linkapple@example.com",
+                "email_verified": True,
+            }
+            result = await service.authenticate_or_create_apple_user("token")
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is False
+        assert user.id == existing_user.id
+        assert user.apple_id == "apple_link_123"
+
+    async def test_authenticate_or_create_apple_user_no_email_new_user(
+        self, db_session: AsyncSession
+    ):
+        """Apple user without email should use relay email."""
+        service = AuthService(db_session)
+
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_noemail_123",
+                "email": None,
+                "email_verified": False,
+            }
+
+            result = await service.authenticate_or_create_apple_user(
+                "token", user_name="No Email"
+            )
+
+        assert result is not None
+        user, is_new = result
+        assert is_new is True
+        assert user.email == "apple_noemail_123@privaterelay.appleid.com"
+        assert user.name == "No Email"
+
+    async def test_authenticate_or_create_apple_user_invalid_token(
+        self, db_session: AsyncSession
+    ):
+        """Invalid token should return None."""
+        service = AuthService(db_session)
+
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = None
+
+            result = await service.authenticate_or_create_apple_user("invalid")
+
+        assert result is None
+
+    async def test_get_user_by_apple_id(self, db_session: AsyncSession):
+        """Should find user by Apple ID."""
+        service = AuthService(db_session)
+
+        # Create Apple user
+        with patch.object(service, "verify_apple_token") as mock_verify:
+            mock_verify.return_value = {
+                "sub": "apple_find_123",
+                "email": "findapple@example.com",
+                "email_verified": True,
+            }
+            await service.authenticate_or_create_apple_user("token", user_name="Apple")
+
+        # Find by apple_id
+        user = await service.get_user_by_apple_id("apple_find_123")
+        assert user is not None
+        assert user.email == "findapple@example.com"
+
+        # Not found
+        user = await service.get_user_by_apple_id("nonexistent")
+        assert user is None

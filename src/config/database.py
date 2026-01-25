@@ -95,11 +95,47 @@ async def _run_pending_migrations() -> None:
     SQLAlchemy's create_all() doesn't add columns to existing tables,
     so we need to run migrations manually.
     """
-    try:
-        from src.migrations.add_plan_snapshot import upgrade as add_plan_snapshot
-        await add_plan_snapshot()
-    except Exception as e:
-        print(f"Migration warning: {e}")
+    from sqlalchemy import text
+
+    migrations = [
+        # (column_name, table_name, column_definition, default_value)
+        ("user_type", "users", "VARCHAR(20)", "'student'"),
+        ("auth_provider", "users", "VARCHAR(20)", "'email'"),
+        ("google_id", "users", "VARCHAR(255)", None),
+        ("apple_id", "users", "VARCHAR(255)", None),
+        ("cref", "users", "VARCHAR(20)", None),
+        ("cref_verified", "users", "BOOLEAN", "FALSE"),
+        ("cref_verified_at", "users", "TIMESTAMP", None),
+        ("is_verified", "users", "BOOLEAN", "FALSE"),
+        ("training_mode", "plan_assignments", "VARCHAR(20)", "'online'"),
+        ("acknowledged_at", "plan_assignments", "TIMESTAMP", None),
+        ("auto_accept", "trainers", "BOOLEAN", "FALSE"),
+        ("dnd_enabled", "user_settings", "BOOLEAN", "FALSE"),
+        ("dnd_start_time", "user_settings", "TIME", None),
+        ("dnd_end_time", "user_settings", "TIME", None),
+        ("status", "workout_plans", "VARCHAR(20)", "'active'"),
+    ]
+
+    async with engine.begin() as conn:
+        for column_name, table_name, column_type, default_value in migrations:
+            try:
+                # Check if column exists
+                result = await conn.execute(
+                    text(f"""
+                        SELECT column_name FROM information_schema.columns
+                        WHERE table_name = :table_name AND column_name = :column_name
+                    """),
+                    {"table_name": table_name, "column_name": column_name},
+                )
+                if result.fetchone() is None:
+                    # Column doesn't exist, add it
+                    default_clause = f" DEFAULT {default_value}" if default_value else ""
+                    sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}{default_clause}"
+                    await conn.execute(text(sql))
+                    print(f"Added column {table_name}.{column_name}")
+            except Exception as e:
+                # Column might already exist or other error
+                print(f"Migration note ({table_name}.{column_name}): {e}")
 
 
 async def _sync_enum_values() -> None:

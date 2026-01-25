@@ -71,6 +71,7 @@ python-dateutil==2.9.0.post0
 python-dotenv==1.2.1
 python-jose==3.5.0
 python-multipart==0.0.21
+PyJWT[crypto]>=2.8.0
 PyYAML==6.0.3
 redis==7.1.0
 resend>=2.0.0
