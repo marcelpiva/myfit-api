@@ -218,6 +218,70 @@ def create_e2e_app() -> FastAPI:
             "environment": os.getenv("ENVIRONMENT", "development"),
         }
 
+    @app.get("/test/waiting-sessions")
+    async def list_waiting_sessions(db: AsyncSession = Depends(get_e2e_db)):
+        """
+        List all sessions that are waiting for a trainer to join.
+
+        Returns:
+            List of waiting sessions with student info
+        """
+        from sqlalchemy import select
+        from src.domains.workouts.models import WorkoutSession, SessionStatus
+
+        query = select(WorkoutSession).where(
+            WorkoutSession.is_shared == True,  # noqa: E712
+            WorkoutSession.status == SessionStatus.WAITING,
+        )
+        result = await db.execute(query)
+        sessions = result.scalars().all()
+
+        return {
+            "status": "ok",
+            "sessions": [
+                {
+                    "id": str(s.id),
+                    "workout_id": str(s.workout_id),
+                    "user_id": str(s.user_id),
+                    "trainer_id": str(s.trainer_id) if s.trainer_id else None,
+                    "status": s.status.value,
+                    "is_shared": s.is_shared,
+                    "started_at": s.started_at.isoformat() if s.started_at else None,
+                }
+                for s in sessions
+            ],
+        }
+
+    @app.post("/test/sessions/{session_id}/trainer-join")
+    async def trainer_join_session(
+        session_id: str,
+        trainer_id: str,
+        db: AsyncSession = Depends(get_e2e_db),
+    ):
+        """
+        Force a trainer to join a session (bypasses auth for testing).
+
+        Args:
+            session_id: Session UUID
+            trainer_id: Trainer UUID
+        """
+        import uuid
+        from src.domains.workouts.models import WorkoutSession, SessionStatus
+
+        session = await db.get(WorkoutSession, uuid.UUID(session_id))
+        if not session:
+            raise HTTPException(status_code=404, detail="Session not found")
+
+        session.trainer_id = uuid.UUID(trainer_id)
+        session.status = SessionStatus.ACTIVE
+        await db.commit()
+
+        return {
+            "status": "ok",
+            "session_id": session_id,
+            "trainer_id": trainer_id,
+        }
+
     return app
 
 
