@@ -93,10 +93,11 @@ async def _run_pending_migrations() -> None:
     """Run any pending migrations for existing tables.
 
     SQLAlchemy's create_all() doesn't add columns to existing tables,
-    so we need to run migrations manually. Each migration runs in its
-    own transaction to prevent cascade failures.
+    so we need to run migrations manually. Each migration runs with
+    a fresh connection to avoid transaction state issues.
     """
     from sqlalchemy import text
+    from sqlalchemy.ext.asyncio import create_async_engine
 
     migrations = [
         # (column_name, table_name, column_definition, default_value)
@@ -117,27 +118,39 @@ async def _run_pending_migrations() -> None:
         ("status", "workout_plans", "VARCHAR(20)", "'active'"),
     ]
 
-    for column_name, table_name, column_type, default_value in migrations:
-        try:
-            # Each migration in its own transaction
-            async with engine.begin() as conn:
-                # Check if column exists
-                result = await conn.execute(
-                    text("""
-                        SELECT column_name FROM information_schema.columns
-                        WHERE table_name = :table_name AND column_name = :column_name
-                    """),
-                    {"table_name": table_name, "column_name": column_name},
-                )
-                if result.fetchone() is None:
-                    # Column doesn't exist, add it
-                    default_clause = f" DEFAULT {default_value}" if default_value else ""
-                    sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}{default_clause}"
-                    await conn.execute(text(sql))
-                    print(f"Added column {table_name}.{column_name}")
-        except Exception as e:
-            # Column might already exist or other error - continue with next
-            print(f"Migration note ({table_name}.{column_name}): {e}")
+    # Create a separate engine for migrations to avoid connection state issues
+    migration_engine = create_async_engine(_database_url, pool_pre_ping=True)
+
+    try:
+        for column_name, table_name, column_type, default_value in migrations:
+            try:
+                async with migration_engine.connect() as conn:
+                    # Check if column exists
+                    result = await conn.execute(
+                        text("""
+                            SELECT column_name FROM information_schema.columns
+                            WHERE table_name = :table_name AND column_name = :column_name
+                        """),
+                        {"table_name": table_name, "column_name": column_name},
+                    )
+                    row = result.fetchone()
+                    await conn.commit()
+
+                    if row is None:
+                        # Column doesn't exist, add it in a new transaction
+                        async with migration_engine.connect() as conn2:
+                            default_clause = f" DEFAULT {default_value}" if default_value else ""
+                            sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}{default_clause}"
+                            await conn2.execute(text(sql))
+                            await conn2.commit()
+                            print(f"Added column {table_name}.{column_name}")
+            except Exception as e:
+                # Column might already exist or other error - continue with next
+                err_str = str(e)
+                if "already exists" not in err_str.lower():
+                    print(f"Migration note ({table_name}.{column_name}): {e}")
+    finally:
+        await migration_engine.dispose()
 
 
 async def _sync_enum_values() -> None:
