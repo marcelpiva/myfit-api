@@ -43,6 +43,7 @@ MUSCLE_GROUP_SEARCH_TERMS = {
     MuscleGroup.CARDIO: ["running treadmill", "cardio workout gym", "cycling exercise"],
     MuscleGroup.FULL_BODY: ["full body workout", "hiit workout gym", "fitness training"],
     MuscleGroup.FOREARMS: ["forearm workout", "arm exercise gym", "wrist curl"],
+    MuscleGroup.STRETCHING: ["stretching workout", "yoga stretch", "flexibility exercise", "stretching routine"],
 }
 
 # Specific search terms for exercises (Portuguese name -> English search)
@@ -93,6 +94,27 @@ EXERCISE_SEARCH_OVERRIDES = {
     "Bicicleta Ergometrica": "stationary bike workout",
     # Full Body
     "Burpee": "burpee workout",
+    # Stretching
+    "Alongamento de Posterior de Coxa": "hamstring stretch",
+    "Alongamento de Quadríceps": "quad stretch standing",
+    "Alongamento de Panturrilha": "calf stretch wall",
+    "Alongamento de Glúteos": "glute stretch lying",
+    "Alongamento de Adutores (Borboleta)": "butterfly stretch",
+    "Alongamento de Flexores do Quadril": "hip flexor stretch",
+    "Alongamento de Peitoral na Parede": "chest stretch wall",
+    "Alongamento de Tríceps": "tricep stretch",
+    "Alongamento de Ombros (Braço Cruzado)": "shoulder stretch",
+    "Alongamento de Lombar (Joelhos ao Peito)": "lower back stretch",
+    "Alongamento Lateral de Tronco": "side stretch standing",
+    "Alongamento de Pescoço Lateral": "neck stretch",
+    "Rotação de Coluna Sentado": "seated spinal twist",
+    "Cat-Cow (Gato-Vaca)": "cat cow stretch yoga",
+    "Alongamento do Piriforme": "piriformis stretch",
+    "Child's Pose (Postura da Criança)": "child pose yoga",
+    "Downward Dog (Cachorro Olhando para Baixo)": "downward dog yoga",
+    "Alongamento de Antebraço": "forearm stretch wrist",
+    "Cobra Stretch (Postura da Cobra)": "cobra pose yoga",
+    "Alongamento de Trapézio": "trapezius stretch",
 }
 
 

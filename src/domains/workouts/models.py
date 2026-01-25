@@ -87,6 +87,7 @@ class MuscleGroup(str, enum.Enum):
     LEGS = "legs"  # Generic legs - includes quadriceps, hamstrings, calves
     FULL_BODY = "full_body"
     CARDIO = "cardio"
+    STRETCHING = "stretching"  # Flexibility and stretching exercises
 
     @classmethod
     def get_leg_groups(cls) -> list["MuscleGroup"]:
