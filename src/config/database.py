@@ -80,3 +80,42 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+
+    # Add missing enum values for PostgreSQL (enums don't auto-update with create_all)
+    if not _is_sqlite:
+        await _sync_enum_values()
+
+
+async def _sync_enum_values() -> None:
+    """Add missing enum values to PostgreSQL enums.
+
+    PostgreSQL enums don't automatically update when model enums change.
+    This function adds any missing values.
+    """
+    from sqlalchemy import text
+
+    # Define expected enum values
+    enum_updates = [
+        ("exercise_mode_enum", ["strength", "duration", "interval", "distance", "stretching"]),
+    ]
+
+    async with engine.begin() as conn:
+        for enum_name, expected_values in enum_updates:
+            # Get current enum values
+            result = await conn.execute(
+                text(f"""
+                    SELECT enumlabel FROM pg_enum
+                    WHERE enumtypid = (SELECT oid FROM pg_type WHERE typname = :enum_name)
+                """),
+                {"enum_name": enum_name},
+            )
+            current_values = {row[0] for row in result.fetchall()}
+
+            # Add missing values
+            for value in expected_values:
+                if value not in current_values:
+                    print(f"Adding '{value}' to {enum_name}...")
+                    await conn.execute(
+                        text(f"ALTER TYPE {enum_name} ADD VALUE '{value}'")
+                    )
+                    print(f"Successfully added '{value}' to {enum_name}")
