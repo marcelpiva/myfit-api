@@ -93,7 +93,8 @@ async def _run_pending_migrations() -> None:
     """Run any pending migrations for existing tables.
 
     SQLAlchemy's create_all() doesn't add columns to existing tables,
-    so we need to run migrations manually.
+    so we need to run migrations manually. Each migration runs in its
+    own transaction to prevent cascade failures.
     """
     from sqlalchemy import text
 
@@ -116,12 +117,13 @@ async def _run_pending_migrations() -> None:
         ("status", "workout_plans", "VARCHAR(20)", "'active'"),
     ]
 
-    async with engine.begin() as conn:
-        for column_name, table_name, column_type, default_value in migrations:
-            try:
+    for column_name, table_name, column_type, default_value in migrations:
+        try:
+            # Each migration in its own transaction
+            async with engine.begin() as conn:
                 # Check if column exists
                 result = await conn.execute(
-                    text(f"""
+                    text("""
                         SELECT column_name FROM information_schema.columns
                         WHERE table_name = :table_name AND column_name = :column_name
                     """),
@@ -133,9 +135,9 @@ async def _run_pending_migrations() -> None:
                     sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}{default_clause}"
                     await conn.execute(text(sql))
                     print(f"Added column {table_name}.{column_name}")
-            except Exception as e:
-                # Column might already exist or other error
-                print(f"Migration note ({table_name}.{column_name}): {e}")
+        except Exception as e:
+            # Column might already exist or other error - continue with next
+            print(f"Migration note ({table_name}.{column_name}): {e}")
 
 
 async def _sync_enum_values() -> None:
