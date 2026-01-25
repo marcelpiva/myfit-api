@@ -697,7 +697,7 @@ async def send_test_push(
         db,
         NotificationCreate(
             user_id=current_user.id,
-            notification_type=NotificationType.SYSTEM,
+            notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
             title=test_title,
             body=test_body,
             icon="bell",
