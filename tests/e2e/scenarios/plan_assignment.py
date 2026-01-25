@@ -41,14 +41,15 @@ from src.domains.workouts.models import (
 
 
 # Known credentials for E2E tests
-TRAINER_EMAIL = "trainer@e2e.test"
+# Using @example.com since .test TLD is rejected by email validator
+TRAINER_EMAIL = "trainer@example.com"
 TRAINER_PASSWORD = "Trainer123!"
 TRAINER_NAME = "E2E Trainer"
 
 STUDENTS = [
-    {"email": "student1@e2e.test", "password": "Student1!", "name": "Ana Silva"},
-    {"email": "student2@e2e.test", "password": "Student2!", "name": "Bruno Costa"},
-    {"email": "student3@e2e.test", "password": "Student3!", "name": "Carla Dias"},
+    {"email": "student1@example.com", "password": "Student1!", "name": "Ana Silva"},
+    {"email": "student2@example.com", "password": "Student2!", "name": "Bruno Costa"},
+    {"email": "student3@example.com", "password": "Student3!", "name": "Carla Dias"},
 ]
 
 ORGANIZATION_NAME = "E2E Test Organization"

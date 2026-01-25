@@ -26,6 +26,7 @@ import uvicorn
 from fastapi import Depends, FastAPI, HTTPException
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import StaticPool
 
 # Environment safety check
 ALLOWED_ENVIRONMENTS = {"local", "development", "test", "testing"}
@@ -72,6 +73,8 @@ async def init_database():
         E2E_DATABASE_URL,
         echo=os.getenv("SQL_ECHO", "false").lower() == "true",
         connect_args={"check_same_thread": False},
+        # StaticPool ensures all connections use the same in-memory database
+        poolclass=StaticPool,
     )
 
     # Enable foreign keys for SQLite
@@ -123,11 +126,34 @@ async def lifespan(app: FastAPI):
 # Create the E2E test server app
 def create_e2e_app() -> FastAPI:
     """Create FastAPI app for E2E testing."""
+    from contextlib import asynccontextmanager
     from src.main import create_app
     from src.config.database import get_db
 
-    # Create main app
+    # Create main app without its default lifespan (we'll manage our own)
     app = create_app()
+
+    # Store original lifespan if any
+    original_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def e2e_lifespan(app: FastAPI):
+        """Custom lifespan that initializes E2E database."""
+        # Initialize E2E database first
+        await init_database()
+
+        # Then run original lifespan if it exists
+        if original_lifespan:
+            async with original_lifespan(app):
+                yield
+        else:
+            yield
+
+        # Cleanup E2E database
+        await close_database()
+
+    # Replace lifespan
+    app.router.lifespan_context = e2e_lifespan
 
     # Override database dependency to use in-memory SQLite
     app.dependency_overrides[get_db] = get_e2e_db
@@ -147,6 +173,7 @@ def create_e2e_app() -> FastAPI:
         Returns:
             Credentials and IDs for test clients
         """
+        import traceback
         from tests.e2e.scenarios import SCENARIOS
 
         if scenario_name not in SCENARIOS:
@@ -155,18 +182,26 @@ def create_e2e_app() -> FastAPI:
                 detail=f"Scenario '{scenario_name}' not found. Available: {list(SCENARIOS.keys())}",
             )
 
-        # Clear existing data first
-        await _reset_database(db)
+        try:
+            # Clear existing data first
+            await _reset_database(db)
 
-        # Setup scenario
-        setup_fn = SCENARIOS[scenario_name]
-        data = await setup_fn(db)
+            # Setup scenario
+            setup_fn = SCENARIOS[scenario_name]
+            data = await setup_fn(db)
 
-        return {
-            "status": "ok",
-            "scenario": scenario_name,
-            "data": data,
-        }
+            return {
+                "status": "ok",
+                "scenario": scenario_name,
+                "data": data,
+            }
+        except Exception as e:
+            print(f"Error setting up scenario '{scenario_name}': {e}")
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to setup scenario: {str(e)}",
+            )
 
     @app.post("/test/reset")
     async def reset_database(db: AsyncSession = Depends(get_e2e_db)):
