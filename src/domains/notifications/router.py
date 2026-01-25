@@ -689,11 +689,27 @@ async def send_test_push(
     logger.info(f"🔔 Sending test push to user {current_user.id} ({current_user.email})")
     logger.info(f"🔔 Found {len(tokens)} active device token(s)")
 
+    test_title = "Teste de Notificação 🔔"
+    test_body = "Se você vê isso, push notifications estão funcionando!"
+
+    # Create in-app notification first
+    await create_notification(
+        db,
+        NotificationCreate(
+            user_id=current_user.id,
+            notification_type=NotificationType.SYSTEM,
+            title=test_title,
+            body=test_body,
+            icon="bell",
+        ),
+    )
+
+    # Send push notification
     count = await send_push_notification(
         db=db,
         user_id=current_user.id,
-        title="Teste de Notificação 🔔",
-        body="Se você vê isso, push notifications estão funcionando!",
+        title=test_title,
+        body=test_body,
         data={"type": "test", "timestamp": str(datetime.now(timezone.utc).isoformat())},
     )
 
@@ -702,5 +718,5 @@ async def send_test_push(
         "notifications_sent": count,
         "total_devices": len(tokens),
         "firebase_status": firebase_status,
-        "message": "Notification sent! Check your device." if count > 0 else "Failed to send notification. Check server logs for details.",
+        "message": "Notification sent! Check your device and notifications screen." if count > 0 else "Failed to send notification. Check server logs for details.",
     }
