@@ -86,31 +86,48 @@ async def upload_avatar(
 ) -> AvatarUploadResponse:
     """Upload user avatar image.
 
-    TODO: Implement S3 upload when AWS credentials are configured.
-    Currently returns a placeholder URL.
+    Supports JPEG, PNG, WebP, and GIF formats. Maximum size: 5MB.
+    Uploads to configured storage (S3/R2 or local filesystem).
     """
-    # Validate file type
-    allowed_types = ["image/jpeg", "image/png", "image/webp"]
-    if file.content_type not in allowed_types:
+    from src.core.storage import (
+        FileTooLargeError,
+        InvalidContentTypeError,
+        StorageError,
+        storage_service,
+    )
+
+    # Read file content
+    content = await file.read()
+
+    try:
+        # Upload to storage (validation happens inside)
+        avatar_url = await storage_service.upload_avatar(
+            user_id=str(current_user.id),
+            file_content=content,
+            content_type=file.content_type or "application/octet-stream",
+        )
+    except InvalidContentTypeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Invalid file type. Allowed: JPEG, PNG, WebP",
+            detail="Invalid file type. Allowed: JPEG, PNG, WebP, GIF",
         )
-
-    # Validate file size (max 5MB)
-    max_size = 5 * 1024 * 1024
-    content = await file.read()
-    if len(content) > max_size:
+    except FileTooLargeError:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="File too large. Maximum size: 5MB",
         )
+    except StorageError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload file: {str(e)}",
+        )
 
-    # TODO: Upload to S3 and get URL
-    # For now, return a placeholder
-    avatar_url = f"https://placeholder.com/avatars/{current_user.id}.jpg"
-
+    # Delete old avatar if it exists
     user_service = UserService(db)
+    if current_user.avatar_url:
+        await storage_service.delete_file(current_user.avatar_url)
+
+    # Update user with new avatar URL
     await user_service.update_avatar(current_user, avatar_url)
 
     return AvatarUploadResponse(avatar_url=avatar_url)

@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import DevicePlatform, NotificationPriority, NotificationType
+from .models import DevicePlatform, NotificationCategory, NotificationPriority, NotificationType
 
 
 class NotificationCreate(BaseModel):
@@ -89,3 +89,50 @@ class DeviceTokenResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ==================== Notification Preference Schemas ====================
+
+
+class NotificationPreferenceUpdate(BaseModel):
+    """Schema for updating a single notification preference."""
+
+    notification_type: NotificationType
+    enabled: bool | None = None
+    push_enabled: bool | None = None
+    email_enabled: bool | None = None
+
+
+class NotificationPreferenceResponse(BaseModel):
+    """Schema for notification preference response."""
+
+    notification_type: NotificationType
+    category: NotificationCategory
+    enabled: bool
+    push_enabled: bool
+    email_enabled: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class NotificationPreferencesResponse(BaseModel):
+    """Schema for all notification preferences."""
+
+    preferences: list[NotificationPreferenceResponse]
+    # Summary by category
+    categories: dict[str, bool]  # category -> all enabled in category
+
+
+class CategoryPreferenceUpdate(BaseModel):
+    """Schema for updating all preferences in a category."""
+
+    category: NotificationCategory
+    enabled: bool
+    push_enabled: bool | None = None
+    email_enabled: bool | None = None
+
+
+class BulkPreferenceUpdate(BaseModel):
+    """Schema for bulk updating notification preferences."""
+
+    preferences: list[NotificationPreferenceUpdate]

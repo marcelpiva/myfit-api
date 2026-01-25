@@ -3,7 +3,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,9 @@ from src.domains.workouts.schemas import (
     AssignmentCreate,
     AssignmentResponse,
     AssignmentUpdate,
+    BatchPlanAssignmentCreate,
+    BatchPlanAssignmentResponse,
+    BatchPlanAssignmentResult,
     CatalogPlanResponse,
     ExerciseCreate,
     ExerciseFeedbackCreate,
@@ -43,6 +46,7 @@ from src.domains.workouts.schemas import (
     ExerciseSuggestionRequest,
     ExerciseSuggestionResponse,
     ExerciseUpdate,
+    MarkVersionViewedRequest,
     PlanAssignmentCreate,
     PlanAssignmentResponse,
     PlanAssignmentUpdate,
@@ -50,6 +54,9 @@ from src.domains.workouts.schemas import (
     PlanListResponse,
     PlanResponse,
     PlanUpdate,
+    PlanVersionListResponse,
+    PlanVersionResponse,
+    PlanVersionUpdateRequest,
     PlanWorkoutInput,
     SessionComplete,
     SessionJoinResponse,
@@ -193,6 +200,105 @@ async def update_exercise(
     )
 
     return ExerciseResponse.model_validate(updated)
+
+
+from pydantic import BaseModel as PydanticBaseModel
+
+
+class ExerciseMediaUploadResponse(PydanticBaseModel):
+    """Response for exercise media upload."""
+
+    url: str
+    content_type: str
+
+
+@router.post("/exercises/{exercise_id}/media")
+async def upload_exercise_media(
+    exercise_id: UUID,
+    file: UploadFile,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    media_type: Annotated[str, Query(description="Type of media: 'image' or 'video'")] = "image",
+) -> ExerciseMediaUploadResponse:
+    """Upload media (image or video) for a custom exercise.
+
+    Supports JPEG, PNG, WebP, GIF for images.
+    Supports MP4, MOV, WebM for videos.
+    Maximum size: 5MB for images, 50MB for videos.
+
+    After uploading, use PUT /exercises/{exercise_id} to update the
+    exercise's image_url or video_url field with the returned URL.
+    """
+    from src.core.storage import (
+        FileTooLargeError,
+        InvalidContentTypeError,
+        StorageError,
+        storage_service,
+    )
+
+    # Verify exercise exists and user owns it
+    workout_service = WorkoutService(db)
+    exercise = await workout_service.get_exercise_by_id(exercise_id)
+
+    if not exercise:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Exercise not found",
+        )
+
+    # Only owner can upload media for custom exercises
+    if exercise.created_by_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You can only upload media for your own exercises",
+        )
+
+    # Read file content
+    content = await file.read()
+    content_type = file.content_type or "application/octet-stream"
+
+    try:
+        # Upload to storage
+        url = await storage_service.upload_exercise_media(
+            file_content=content,
+            content_type=content_type,
+            user_id=str(current_user.id),
+        )
+    except InvalidContentTypeError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid file type. Images: JPEG, PNG, WebP, GIF. Videos: MP4, MOV, WebM",
+        )
+    except FileTooLargeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        )
+    except StorageError as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to upload file: {str(e)}",
+        )
+
+    # Optionally auto-update the exercise with the new URL
+    if media_type == "image":
+        # Delete old image if exists
+        if exercise.image_url:
+            await storage_service.delete_file(exercise.image_url)
+        await workout_service.update_exercise(
+            exercise=exercise,
+            image_url=url,
+        )
+    elif media_type == "video":
+        # Delete old video if exists
+        if exercise.video_url:
+            await storage_service.delete_file(exercise.video_url)
+        await workout_service.update_exercise(
+            exercise=exercise,
+            video_url=url,
+        )
+
+    return ExerciseMediaUploadResponse(url=url, content_type=content_type)
 
 
 @router.post("/exercises/suggest", response_model=ExerciseSuggestionResponse)
@@ -984,6 +1090,10 @@ async def list_plan_assignments(
                     # Don't filter - include all plan_workouts even if workout is None
                 ]
 
+        # Get version info
+        version = getattr(a, 'version', 1)
+        last_version_viewed = getattr(a, 'last_version_viewed', None)
+
         result.append(
             PlanAssignmentResponse(
                 id=a.id,
@@ -1004,6 +1114,11 @@ async def list_plan_assignments(
                 plan_duration_weeks=a.plan.duration_weeks if a.plan else None,
                 plan=plan_response,
                 plan_snapshot=a.plan_snapshot,
+                version=version,
+                last_version_viewed=last_version_viewed,
+                has_unviewed_updates=(
+                    last_version_viewed is None or version > last_version_viewed
+                ),
             )
         )
 
@@ -1138,6 +1253,166 @@ async def create_plan_assignment(
         student_name=student.name,
         plan_duration_weeks=plan.duration_weeks,
         plan_snapshot=assignment.plan_snapshot,
+        version=getattr(assignment, 'version', 1),
+        last_version_viewed=getattr(assignment, 'last_version_viewed', None),
+        has_unviewed_updates=True,  # New assignment always has unviewed updates
+    )
+
+
+@router.post("/plans/assignments/batch", response_model=BatchPlanAssignmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_batch_plan_assignment(
+    request: BatchPlanAssignmentCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
+) -> BatchPlanAssignmentResponse:
+    """Assign a plan to multiple students at once.
+
+    This endpoint allows trainers to prescribe the same plan to multiple students
+    in a single request, sending notifications to each student.
+
+    Returns a summary of successful and failed assignments.
+    """
+    # Rate limiting: max 5 batch assignments per hour per trainer
+    is_allowed, current_count = await RateLimiter.check_rate_limit(
+        identifier=str(current_user.id),
+        action="batch_plan_assignment",
+        max_requests=5,
+        window_seconds=3600,
+    )
+    if not is_allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"Limite de prescrições em massa excedido. Tente novamente mais tarde. ({current_count}/5 por hora)",
+        )
+
+    workout_service = WorkoutService(db)
+    user_service = UserService(db)
+
+    # Verify plan exists
+    plan = await workout_service.get_plan_by_id(request.plan_id)
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Plan not found",
+        )
+
+    # Use organization_id from request body, or fall back to header
+    org_id = request.organization_id
+    if org_id is None and x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
+    results: list[BatchPlanAssignmentResult] = []
+    successful = 0
+    failed = 0
+
+    for student_id in request.student_ids:
+        try:
+            # Verify student exists
+            student = await user_service.get_user_by_id(student_id)
+            if not student:
+                results.append(BatchPlanAssignmentResult(
+                    student_id=student_id,
+                    student_name="Unknown",
+                    success=False,
+                    error="Aluno não encontrado",
+                ))
+                failed += 1
+                continue
+
+            # Check if plan is already assigned to this student
+            existing_assignments = await workout_service.list_student_plan_assignments(
+                student_id=student_id,
+                active_only=True,
+                prescribed_only=False,
+            )
+            already_assigned = any(a.plan_id == request.plan_id for a in existing_assignments)
+            if already_assigned:
+                results.append(BatchPlanAssignmentResult(
+                    student_id=student_id,
+                    student_name=student.name,
+                    success=False,
+                    error="Este plano já está atribuído a este aluno",
+                ))
+                failed += 1
+                continue
+
+            # Create assignment
+            assignment = await workout_service.create_plan_assignment(
+                plan_id=request.plan_id,
+                student_id=student_id,
+                trainer_id=current_user.id,
+                start_date=request.start_date,
+                end_date=request.end_date,
+                notes=request.notes,
+                organization_id=org_id,
+            )
+
+            # Send notifications
+            try:
+                await create_notification(
+                    db=db,
+                    notification_data=NotificationCreate(
+                        user_id=student_id,
+                        notification_type=NotificationType.PLAN_ASSIGNED,
+                        title="Novo plano de treino",
+                        body=f"{current_user.name} atribuiu o plano '{plan.name}' para você",
+                        icon="clipboard-list",
+                        action_type="navigate",
+                        action_data=f'{{"route": "/plans/{assignment.plan_id}"}}',
+                        reference_type="plan_assignment",
+                        reference_id=assignment.id,
+                        organization_id=org_id,
+                        sender_id=current_user.id,
+                    ),
+                )
+
+                await send_push_notification(
+                    db=db,
+                    user_id=student_id,
+                    title="Novo plano de treino",
+                    body=f"{current_user.name} atribuiu o plano '{plan.name}' para você",
+                    data={
+                        "type": "plan_assigned",
+                        "assignment_id": str(assignment.id),
+                        "plan_id": str(assignment.plan_id),
+                        "plan_name": plan.name,
+                        "trainer_id": str(current_user.id),
+                        "trainer_name": current_user.name or current_user.email,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send notifications to student {student_id}: {e}")
+
+            results.append(BatchPlanAssignmentResult(
+                student_id=student_id,
+                student_name=student.name,
+                success=True,
+                assignment_id=assignment.id,
+            ))
+            successful += 1
+
+        except Exception as e:
+            logger.error(f"Error assigning plan to student {student_id}: {e}")
+            student = await user_service.get_user_by_id(student_id)
+            results.append(BatchPlanAssignmentResult(
+                student_id=student_id,
+                student_name=student.name if student else "Unknown",
+                success=False,
+                error=str(e),
+            ))
+            failed += 1
+
+    return BatchPlanAssignmentResponse(
+        plan_id=request.plan_id,
+        plan_name=plan.name,
+        total_students=len(request.student_ids),
+        successful=successful,
+        failed=failed,
+        results=results,
     )
 
 
@@ -1193,6 +1468,9 @@ async def respond_to_plan_assignment(
     student = await user_service.get_user_by_id(assignment.student_id)
     plan = await workout_service.get_plan_by_id(assignment.plan_id)
 
+    version = getattr(assignment, 'version', 1)
+    last_version_viewed = getattr(assignment, 'last_version_viewed', None)
+
     return PlanAssignmentResponse(
         id=assignment.id,
         plan_id=assignment.plan_id,
@@ -1211,6 +1489,11 @@ async def respond_to_plan_assignment(
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
         plan_snapshot=assignment.plan_snapshot,
+        version=version,
+        last_version_viewed=last_version_viewed,
+        has_unviewed_updates=(
+            last_version_viewed is None or version > last_version_viewed
+        ),
     )
 
 
@@ -1284,6 +1567,9 @@ async def acknowledge_plan_assignment(
         except Exception as e:
             logger.warning(f"Failed to send notification to trainer {acknowledged.trainer_id}: {e}")
 
+    version = getattr(acknowledged, 'version', 1)
+    last_version_viewed = getattr(acknowledged, 'last_version_viewed', None)
+
     return PlanAssignmentResponse(
         id=acknowledged.id,
         plan_id=acknowledged.plan_id,
@@ -1303,6 +1589,11 @@ async def acknowledge_plan_assignment(
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
         plan_snapshot=acknowledged.plan_snapshot,
+        version=version,
+        last_version_viewed=last_version_viewed,
+        has_unviewed_updates=(
+            last_version_viewed is None or version > last_version_viewed
+        ),
     )
 
 
@@ -1342,6 +1633,9 @@ async def update_plan_assignment(
 
     plan = await workout_service.get_plan_by_id(updated.plan_id)
 
+    version = getattr(updated, 'version', 1)
+    last_version_viewed = getattr(updated, 'last_version_viewed', None)
+
     return PlanAssignmentResponse(
         id=updated.id,
         plan_id=updated.plan_id,
@@ -1360,6 +1654,11 @@ async def update_plan_assignment(
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
         plan_snapshot=updated.plan_snapshot,
+        version=version,
+        last_version_viewed=last_version_viewed,
+        has_unviewed_updates=(
+            last_version_viewed is None or version > last_version_viewed
+        ),
     )
 
 
@@ -1396,6 +1695,312 @@ async def delete_plan_assignment(
 
     await db.delete(assignment)
     await db.commit()
+
+
+# Plan Version History endpoints
+
+@router.get("/plans/assignments/{assignment_id}/versions", response_model=PlanVersionListResponse)
+async def list_plan_versions(
+    assignment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanVersionListResponse:
+    """Get version history for a plan assignment.
+
+    Both trainer and student can view versions for assignments they're involved in.
+    """
+    from sqlalchemy import select
+    from src.domains.workouts.models import PlanAssignment, PlanVersion
+
+    # Get assignment
+    workout_service = WorkoutService(db)
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Check access (trainer or student)
+    if assignment.trainer_id != current_user.id and assignment.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem acesso a esta atribuição",
+        )
+
+    # Get versions
+    query = (
+        select(PlanVersion)
+        .where(PlanVersion.assignment_id == assignment_id)
+        .order_by(PlanVersion.version.desc())
+    )
+    result = await db.execute(query)
+    versions = result.scalars().all()
+
+    # Build response with changed_by names
+    version_responses = []
+    for v in versions:
+        changed_by_name = None
+        if v.changed_by_id:
+            user_service = UserService(db)
+            changed_by = await user_service.get_user_by_id(v.changed_by_id)
+            if changed_by:
+                changed_by_name = changed_by.name
+
+        version_responses.append(PlanVersionResponse(
+            id=v.id,
+            assignment_id=v.assignment_id,
+            version=v.version,
+            snapshot=v.snapshot,
+            changed_at=v.changed_at,
+            changed_by_id=v.changed_by_id,
+            changed_by_name=changed_by_name,
+            change_description=v.change_description,
+        ))
+
+    return PlanVersionListResponse(
+        assignment_id=assignment_id,
+        current_version=assignment.version,
+        versions=version_responses,
+        total=len(version_responses),
+    )
+
+
+@router.get("/plans/assignments/{assignment_id}/versions/{version}", response_model=PlanVersionResponse)
+async def get_plan_version(
+    assignment_id: UUID,
+    version: int,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanVersionResponse:
+    """Get a specific version of a plan assignment."""
+    from sqlalchemy import select
+    from src.domains.workouts.models import PlanAssignment, PlanVersion
+
+    # Get assignment
+    workout_service = WorkoutService(db)
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Check access
+    if assignment.trainer_id != current_user.id and assignment.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem acesso a esta atribuição",
+        )
+
+    # Get specific version
+    query = (
+        select(PlanVersion)
+        .where(
+            PlanVersion.assignment_id == assignment_id,
+            PlanVersion.version == version,
+        )
+    )
+    result = await db.execute(query)
+    plan_version = result.scalar_one_or_none()
+
+    if not plan_version:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Versão {version} não encontrada",
+        )
+
+    # Get changed_by name
+    changed_by_name = None
+    if plan_version.changed_by_id:
+        user_service = UserService(db)
+        changed_by = await user_service.get_user_by_id(plan_version.changed_by_id)
+        if changed_by:
+            changed_by_name = changed_by.name
+
+    return PlanVersionResponse(
+        id=plan_version.id,
+        assignment_id=plan_version.assignment_id,
+        version=plan_version.version,
+        snapshot=plan_version.snapshot,
+        changed_at=plan_version.changed_at,
+        changed_by_id=plan_version.changed_by_id,
+        changed_by_name=changed_by_name,
+        change_description=plan_version.change_description,
+    )
+
+
+@router.post("/plans/assignments/{assignment_id}/versions", response_model=PlanAssignmentResponse, status_code=status.HTTP_201_CREATED)
+async def update_plan_assignment_with_version(
+    assignment_id: UUID,
+    request: PlanVersionUpdateRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Update a plan assignment's snapshot and create a new version (trainer only).
+
+    This saves the current snapshot as a version before updating with the new data.
+    The student will be notified of the update.
+    """
+    from datetime import datetime, timezone
+    from src.domains.workouts.models import PlanAssignment, PlanVersion
+
+    # Get assignment
+    workout_service = WorkoutService(db)
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Only trainer can update
+    if assignment.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o personal pode atualizar a prescrição",
+        )
+
+    # Save current version before updating
+    if assignment.plan_snapshot:
+        version_record = PlanVersion(
+            assignment_id=assignment_id,
+            version=assignment.version,
+            snapshot=assignment.plan_snapshot,
+            changed_at=datetime.now(timezone.utc),
+            changed_by_id=current_user.id,
+            change_description=request.change_description or f"Versão {assignment.version}",
+        )
+        db.add(version_record)
+
+    # Update assignment with new snapshot
+    assignment.plan_snapshot = request.plan_snapshot
+    assignment.version += 1
+    assignment.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(assignment)
+
+    # Get related data for response
+    plan = await workout_service.get_plan_by_id(assignment.plan_id)
+    user_service = UserService(db)
+    student = await user_service.get_user_by_id(assignment.student_id)
+
+    # Notify student of update
+    try:
+        await create_notification(
+            db=db,
+            notification_data=NotificationCreate(
+                user_id=assignment.student_id,
+                type=NotificationType.PLAN_UPDATED,
+                title="Plano atualizado",
+                message=f"Seu plano de treino foi atualizado por {current_user.name}",
+                data={"assignment_id": str(assignment_id), "version": assignment.version},
+            ),
+        )
+    except Exception as e:
+        logger.warning(f"Failed to create notification for plan update: {e}")
+
+    return PlanAssignmentResponse(
+        id=assignment.id,
+        plan_id=assignment.plan_id,
+        student_id=assignment.student_id,
+        trainer_id=assignment.trainer_id,
+        organization_id=assignment.organization_id,
+        start_date=assignment.start_date,
+        end_date=assignment.end_date,
+        is_active=assignment.is_active,
+        notes=assignment.notes,
+        status=assignment.status,
+        accepted_at=assignment.accepted_at,
+        declined_reason=assignment.declined_reason,
+        acknowledged_at=assignment.acknowledged_at,
+        created_at=assignment.created_at,
+        plan_name=plan.name if plan else "",
+        student_name=student.name if student else "",
+        plan_duration_weeks=plan.duration_weeks if plan else None,
+        plan_snapshot=assignment.plan_snapshot,
+        version=assignment.version,
+        last_version_viewed=assignment.last_version_viewed,
+        has_unviewed_updates=(
+            assignment.last_version_viewed is None
+            or assignment.version > assignment.last_version_viewed
+        ),
+    )
+
+
+@router.post("/plans/assignments/{assignment_id}/versions/viewed", response_model=PlanAssignmentResponse)
+async def mark_version_viewed(
+    assignment_id: UUID,
+    request: MarkVersionViewedRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> PlanAssignmentResponse:
+    """Mark a plan version as viewed by the student.
+
+    If no version is specified, marks the current version as viewed.
+    """
+    from datetime import datetime, timezone
+
+    # Get assignment
+    workout_service = WorkoutService(db)
+    assignment = await workout_service.get_plan_assignment_by_id(assignment_id)
+
+    if not assignment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Atribuição não encontrada",
+        )
+
+    # Only student can mark as viewed
+    if assignment.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o aluno pode marcar como visualizado",
+        )
+
+    # Mark version as viewed
+    version_to_mark = request.version if request.version is not None else assignment.version
+    assignment.last_version_viewed = version_to_mark
+    assignment.updated_at = datetime.now(timezone.utc)
+
+    await db.commit()
+    await db.refresh(assignment)
+
+    # Get related data for response
+    plan = await workout_service.get_plan_by_id(assignment.plan_id)
+    user_service = UserService(db)
+    student = await user_service.get_user_by_id(assignment.student_id)
+
+    return PlanAssignmentResponse(
+        id=assignment.id,
+        plan_id=assignment.plan_id,
+        student_id=assignment.student_id,
+        trainer_id=assignment.trainer_id,
+        organization_id=assignment.organization_id,
+        start_date=assignment.start_date,
+        end_date=assignment.end_date,
+        is_active=assignment.is_active,
+        notes=assignment.notes,
+        status=assignment.status,
+        accepted_at=assignment.accepted_at,
+        declined_reason=assignment.declined_reason,
+        acknowledged_at=assignment.acknowledged_at,
+        created_at=assignment.created_at,
+        plan_name=plan.name if plan else "",
+        student_name=student.name if student else "",
+        plan_duration_weeks=plan.duration_weeks if plan else None,
+        plan_snapshot=assignment.plan_snapshot,
+        version=assignment.version,
+        last_version_viewed=assignment.last_version_viewed,
+        has_unviewed_updates=(
+            assignment.last_version_viewed is None
+            or assignment.version > assignment.last_version_viewed
+        ),
+    )
 
 
 @router.get("/plans/{plan_id}", response_model=PlanResponse)

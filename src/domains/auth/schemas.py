@@ -1,3 +1,4 @@
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -9,6 +10,10 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     name: str = Field(min_length=2, max_length=100)
+    user_type: Literal["personal", "student"] = Field(
+        default="student",
+        description="User type: 'personal' for trainers, 'student' for clients",
+    )
 
 
 class LoginRequest(BaseModel):
@@ -52,6 +57,11 @@ class UserResponse(BaseModel):
     bio: str | None = None
     is_active: bool
     is_verified: bool
+    auth_provider: str = "email"
+    user_type: str = "student"  # "personal" or "student"
+    # Professional credentials
+    cref: str | None = None
+    cref_verified: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -68,3 +78,50 @@ class PasswordChangeRequest(BaseModel):
 
     current_password: str
     new_password: str = Field(min_length=6, max_length=128)
+
+
+class GoogleLoginRequest(BaseModel):
+    """Google Sign-In request."""
+
+    id_token: str = Field(..., description="Google ID token from client")
+
+
+class AppleLoginRequest(BaseModel):
+    """Apple Sign-In request."""
+
+    id_token: str = Field(..., description="Apple ID token from client")
+    user_name: str | None = Field(None, description="User's name (only provided on first login)")
+
+
+class SocialAuthResponse(BaseModel):
+    """Social authentication response."""
+
+    user: "UserResponse"
+    tokens: TokenResponse
+    is_new_user: bool = Field(..., description="Whether this is a new registration")
+
+
+class SendVerificationCodeRequest(BaseModel):
+    """Request to send verification code."""
+
+    email: EmailStr
+
+
+class VerifyCodeRequest(BaseModel):
+    """Request to verify email code."""
+
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6, description="6-digit verification code")
+
+
+class VerifyCodeResponse(BaseModel):
+    """Response for email verification."""
+
+    verified: bool
+    message: str
+
+
+class ResendVerificationCodeRequest(BaseModel):
+    """Request to resend verification code."""
+
+    email: EmailStr

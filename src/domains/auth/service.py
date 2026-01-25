@@ -1,6 +1,9 @@
 """Authentication service with database operations."""
+import logging
 import uuid
+from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,7 +15,9 @@ from src.core.security import (
     hash_password,
     verify_password,
 )
-from src.domains.users.models import User, UserSettings
+from src.domains.users.models import AuthProvider, User, UserSettings
+
+logger = logging.getLogger(__name__)
 
 
 class AuthService:
@@ -54,6 +59,7 @@ class AuthService:
         email: str,
         password: str,
         name: str,
+        user_type: str = "student",
     ) -> User:
         """Create a new user with default settings.
 
@@ -61,15 +67,22 @@ class AuthService:
             email: User's email
             password: Plain text password
             name: User's full name
+            user_type: User type ('personal' or 'student')
 
         Returns:
             The created User object
         """
+        from src.domains.users.models import UserType
+
+        # Map string to enum
+        user_type_enum = UserType.PERSONAL if user_type == "personal" else UserType.STUDENT
+
         # Create user
         user = User(
             email=email.lower(),
             password_hash=hash_password(password),
             name=name,
+            user_type=user_type_enum,
             is_active=True,
             is_verified=False,
         )
@@ -194,3 +207,378 @@ class AuthService:
 
         # Invalidate all user's refresh tokens
         await TokenBlacklist.invalidate_all_user_tokens(str(user.id))
+
+    # ==================== Social Login Methods ====================
+
+    async def get_user_by_google_id(self, google_id: str) -> User | None:
+        """Get a user by Google ID.
+
+        Args:
+            google_id: The Google user ID
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        result = await self.db.execute(
+            select(User).where(User.google_id == google_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def get_user_by_apple_id(self, apple_id: str) -> User | None:
+        """Get a user by Apple ID.
+
+        Args:
+            apple_id: The Apple user ID
+
+        Returns:
+            The User object if found, None otherwise
+        """
+        result = await self.db.execute(
+            select(User).where(User.apple_id == apple_id)
+        )
+        return result.scalar_one_or_none()
+
+    async def verify_google_token(self, id_token: str) -> dict[str, Any] | None:
+        """Verify Google ID token and return user info.
+
+        Args:
+            id_token: The Google ID token
+
+        Returns:
+            Dict with user info (sub, email, name, picture) or None if invalid
+        """
+        try:
+            # Verify with Google's tokeninfo endpoint
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"https://oauth2.googleapis.com/tokeninfo?id_token={id_token}"
+                )
+
+                if response.status_code != 200:
+                    logger.warning(f"Google token verification failed: {response.text}")
+                    return None
+
+                data = response.json()
+
+                # Verify the token is for our app
+                valid_client_ids = [
+                    settings.GOOGLE_CLIENT_ID,
+                    settings.GOOGLE_CLIENT_ID_IOS,
+                    settings.GOOGLE_CLIENT_ID_ANDROID,
+                ]
+                # Filter out empty strings
+                valid_client_ids = [cid for cid in valid_client_ids if cid]
+
+                if data.get("aud") not in valid_client_ids:
+                    logger.warning(
+                        f"Google token aud mismatch. Got: {data.get('aud')}, "
+                        f"Expected one of: {valid_client_ids}"
+                    )
+                    return None
+
+                return {
+                    "sub": data.get("sub"),  # Google user ID
+                    "email": data.get("email"),
+                    "name": data.get("name", ""),
+                    "picture": data.get("picture"),
+                    "email_verified": data.get("email_verified") == "true",
+                }
+
+        except Exception as e:
+            logger.error(f"Error verifying Google token: {e}")
+            return None
+
+    async def verify_apple_token(self, id_token: str) -> dict[str, Any] | None:
+        """Verify Apple ID token and return user info.
+
+        Args:
+            id_token: The Apple ID token
+
+        Returns:
+            Dict with user info (sub, email) or None if invalid
+        """
+        try:
+            import jwt
+            from jwt import PyJWKClient
+
+            # Get Apple's public keys
+            jwks_client = PyJWKClient("https://appleid.apple.com/auth/keys")
+            signing_key = jwks_client.get_signing_key_from_jwt(id_token)
+
+            # Decode and verify the token
+            data = jwt.decode(
+                id_token,
+                signing_key.key,
+                algorithms=["RS256"],
+                audience=settings.APPLE_CLIENT_ID,
+                issuer="https://appleid.apple.com",
+            )
+
+            return {
+                "sub": data.get("sub"),  # Apple user ID
+                "email": data.get("email"),
+                "email_verified": data.get("email_verified", False),
+            }
+
+        except Exception as e:
+            logger.error(f"Error verifying Apple token: {e}")
+            return None
+
+    async def authenticate_or_create_google_user(
+        self,
+        id_token: str,
+    ) -> tuple[User, bool] | None:
+        """Authenticate or create user via Google Sign-In.
+
+        Args:
+            id_token: The Google ID token
+
+        Returns:
+            Tuple of (User, is_new_user) or None if token is invalid
+        """
+        # Verify the token
+        google_data = await self.verify_google_token(id_token)
+        if not google_data:
+            return None
+
+        google_id = google_data["sub"]
+        email = google_data.get("email")
+        name = google_data.get("name", "")
+        picture = google_data.get("picture")
+
+        if not email:
+            logger.warning("Google token missing email")
+            return None
+
+        # Check if user exists by Google ID
+        user = await self.get_user_by_google_id(google_id)
+        if user:
+            # Update avatar if changed
+            if picture and user.avatar_url != picture:
+                user.avatar_url = picture
+                await self.db.commit()
+            return user, False
+
+        # Check if user exists by email (link accounts)
+        user = await self.get_user_by_email(email)
+        if user:
+            # Link Google account to existing user
+            user.google_id = google_id
+            user.auth_provider = AuthProvider.GOOGLE
+            if picture and not user.avatar_url:
+                user.avatar_url = picture
+            await self.db.commit()
+            return user, False
+
+        # Create new user
+        user = User(
+            email=email.lower(),
+            password_hash=hash_password(uuid.uuid4().hex),  # Random password
+            name=name or email.split("@")[0],
+            google_id=google_id,
+            auth_provider=AuthProvider.GOOGLE,
+            avatar_url=picture,
+            is_active=True,
+            is_verified=True,  # Google emails are verified
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        # Create default settings
+        user_settings = UserSettings(user_id=user.id)
+        self.db.add(user_settings)
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        return user, True
+
+    async def authenticate_or_create_apple_user(
+        self,
+        id_token: str,
+        user_name: str | None = None,
+    ) -> tuple[User, bool] | None:
+        """Authenticate or create user via Apple Sign-In.
+
+        Args:
+            id_token: The Apple ID token
+            user_name: Optional user name (only provided on first login)
+
+        Returns:
+            Tuple of (User, is_new_user) or None if token is invalid
+        """
+        # Verify the token
+        apple_data = await self.verify_apple_token(id_token)
+        if not apple_data:
+            return None
+
+        apple_id = apple_data["sub"]
+        email = apple_data.get("email")
+
+        # Check if user exists by Apple ID
+        user = await self.get_user_by_apple_id(apple_id)
+        if user:
+            return user, False
+
+        # Apple might not provide email on subsequent logins
+        if email:
+            # Check if user exists by email (link accounts)
+            user = await self.get_user_by_email(email)
+            if user:
+                # Link Apple account to existing user
+                user.apple_id = apple_id
+                user.auth_provider = AuthProvider.APPLE
+                await self.db.commit()
+                return user, False
+
+        # Create new user
+        # Use provided name, or email prefix, or "Apple User"
+        name = user_name or (email.split("@")[0] if email else "Apple User")
+
+        user = User(
+            email=(email or f"{apple_id}@privaterelay.appleid.com").lower(),
+            password_hash=hash_password(uuid.uuid4().hex),  # Random password
+            name=name,
+            apple_id=apple_id,
+            auth_provider=AuthProvider.APPLE,
+            is_active=True,
+            is_verified=True,  # Apple emails are verified
+        )
+        self.db.add(user)
+        await self.db.flush()
+
+        # Create default settings
+        user_settings = UserSettings(user_id=user.id)
+        self.db.add(user_settings)
+        await self.db.commit()
+        await self.db.refresh(user)
+
+        return user, True
+
+    # ==================== Email Verification Methods ====================
+
+    async def create_verification_code(
+        self,
+        email: str,
+        purpose: str = "registration",
+    ) -> str:
+        """Create a new email verification code.
+
+        Args:
+            email: The email address to verify
+            purpose: Purpose of verification ("registration", "password_reset")
+
+        Returns:
+            The 6-digit verification code
+        """
+        import random
+        from datetime import datetime, timedelta, timezone
+
+        from src.domains.users.models import EmailVerification
+
+        # Generate 6-digit code
+        code = "".join([str(random.randint(0, 9)) for _ in range(6)])
+
+        # Invalidate any existing codes for this email and purpose
+        from sqlalchemy import update
+
+        await self.db.execute(
+            update(EmailVerification)
+            .where(
+                EmailVerification.email == email.lower(),
+                EmailVerification.purpose == purpose,
+                EmailVerification.is_used == False,  # noqa: E712
+            )
+            .values(is_used=True)
+        )
+
+        # Create new verification record
+        verification = EmailVerification(
+            email=email.lower(),
+            code=code,
+            purpose=purpose,
+            is_used=False,
+            expires_at=datetime.now(timezone.utc) + timedelta(minutes=15),
+        )
+        self.db.add(verification)
+        await self.db.commit()
+
+        return code
+
+    async def verify_code(
+        self,
+        email: str,
+        code: str,
+        purpose: str = "registration",
+    ) -> bool:
+        """Verify an email verification code.
+
+        Args:
+            email: The email address
+            code: The verification code
+            purpose: Purpose of verification
+
+        Returns:
+            True if code is valid, False otherwise
+        """
+        from datetime import datetime, timezone
+
+        from sqlalchemy import and_
+
+        from src.domains.users.models import EmailVerification
+
+        result = await self.db.execute(
+            select(EmailVerification).where(
+                and_(
+                    EmailVerification.email == email.lower(),
+                    EmailVerification.code == code,
+                    EmailVerification.purpose == purpose,
+                    EmailVerification.is_used == False,  # noqa: E712
+                    EmailVerification.expires_at > datetime.now(timezone.utc),
+                )
+            )
+        )
+        verification = result.scalar_one_or_none()
+
+        if not verification:
+            return False
+
+        # Mark as used
+        verification.is_used = True
+        await self.db.commit()
+
+        return True
+
+    async def verify_user_email(self, user: User) -> None:
+        """Mark a user's email as verified.
+
+        Args:
+            user: The User object to verify
+        """
+        user.is_verified = True
+        await self.db.commit()
+
+    async def send_verification_email(
+        self,
+        email: str,
+        name: str,
+    ) -> bool:
+        """Generate and send a verification code to an email address.
+
+        Args:
+            email: The email address
+            name: The user's name
+
+        Returns:
+            True if email was sent successfully
+        """
+        from src.core.email import send_verification_code_email
+
+        # Create verification code
+        code = await self.create_verification_code(email, "registration")
+
+        # Send email
+        return await send_verification_code_email(
+            to_email=email,
+            name=name,
+            code=code,
+        )

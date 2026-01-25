@@ -1,14 +1,22 @@
 """User models for the MyFit platform."""
 import enum
 import uuid
-from datetime import date
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Date, DateTime, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.config.database import Base
 from src.core.models import TimestampMixin, UUIDMixin
+
+
+class AuthProvider(str, enum.Enum):
+    """Authentication provider options."""
+
+    EMAIL = "email"
+    GOOGLE = "google"
+    APPLE = "apple"
 
 
 class Gender(str, enum.Enum):
@@ -32,6 +40,13 @@ class Units(str, enum.Enum):
 
     METRIC = "metric"
     IMPERIAL = "imperial"
+
+
+class UserType(str, enum.Enum):
+    """User type indicating primary role in the platform."""
+
+    PERSONAL = "personal"  # Personal trainer / Professional
+    STUDENT = "student"  # Student / Client
 
 
 class User(Base, UUIDMixin, TimestampMixin):
@@ -60,6 +75,27 @@ class User(Base, UUIDMixin, TimestampMixin):
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # User type (personal trainer or student)
+    user_type: Mapped[UserType] = mapped_column(
+        Enum(UserType, name="user_type_enum", values_callable=lambda x: [e.value for e in x]),
+        default=UserType.STUDENT,
+        nullable=False,
+    )
+
+    # Social login fields
+    auth_provider: Mapped[AuthProvider] = mapped_column(
+        Enum(AuthProvider, name="auth_provider_enum", values_callable=lambda x: [e.value for e in x]),
+        default=AuthProvider.EMAIL,
+        nullable=False,
+    )
+    google_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+    apple_id: Mapped[str | None] = mapped_column(String(255), unique=True, nullable=True)
+
+    # Professional credentials (for trainers)
+    cref: Mapped[str | None] = mapped_column(String(20), nullable=True)  # CREF registration number
+    cref_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    cref_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Relationships
     settings: Mapped["UserSettings"] = relationship(
         "UserSettings",
@@ -82,6 +118,21 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     def __repr__(self) -> str:
         return f"<User {self.email}>"
+
+
+class EmailVerification(Base, UUIDMixin, TimestampMixin):
+    """Email verification codes for user registration and password reset."""
+
+    __tablename__ = "email_verifications"
+
+    email: Mapped[str] = mapped_column(String(255), index=True, nullable=False)
+    code: Mapped[str] = mapped_column(String(6), nullable=False)
+    purpose: Mapped[str] = mapped_column(String(50), nullable=False)  # "registration", "password_reset"
+    is_used: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    def __repr__(self) -> str:
+        return f"<EmailVerification email={self.email} purpose={self.purpose}>"
 
 
 class UserSettings(Base, UUIDMixin):
@@ -109,6 +160,16 @@ class UserSettings(Base, UUIDMixin):
     notifications_enabled: Mapped[bool] = mapped_column(
         Boolean, default=True, nullable=False
     )
+
+    # Do Not Disturb settings
+    dnd_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    dnd_start_time: Mapped[str | None] = mapped_column(
+        String(5), nullable=True
+    )  # HH:MM format (e.g., "22:00")
+    dnd_end_time: Mapped[str | None] = mapped_column(
+        String(5), nullable=True
+    )  # HH:MM format (e.g., "07:00")
+
     goal_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     target_calories: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

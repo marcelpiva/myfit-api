@@ -310,6 +310,92 @@ def get_payment_reminder_email_html(name: str, amount: float, due_date: str, tra
     """
 
 
+def get_verification_code_email_html(name: str, code: str) -> str:
+    """Generate HTML for email verification code."""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Código de Verificação</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .code-box {{ background: white; padding: 30px; border-radius: 8px; margin: 20px 0; text-align: center; border: 2px dashed #6366f1; }}
+            .code {{ font-size: 36px; font-weight: bold; letter-spacing: 8px; color: #6366f1; font-family: monospace; }}
+            .footer {{ text-align: center; color: #64748b; font-size: 14px; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>Verificação de Email 🔐</h1>
+            </div>
+            <div class="content">
+                <p>Olá <strong>{name}</strong>,</p>
+                <p>Use o código abaixo para verificar seu email no MyFit:</p>
+
+                <div class="code-box">
+                    <p class="code">{code}</p>
+                </div>
+
+                <p>⚠️ <strong>Importante:</strong></p>
+                <ul>
+                    <li>Este código expira em <strong>15 minutos</strong></li>
+                    <li>Não compartilhe este código com ninguém</li>
+                    <li>Se você não solicitou este código, ignore este email</li>
+                </ul>
+            </div>
+            <div class="footer">
+                <p>Este email foi enviado pelo MyFit.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+def get_verification_code_email_text(name: str, code: str) -> str:
+    """Generate plain text for email verification code."""
+    return f"""
+Verificação de Email - MyFit
+
+Olá {name},
+
+Use o código abaixo para verificar seu email no MyFit:
+
+{code}
+
+IMPORTANTE:
+- Este código expira em 15 minutos
+- Não compartilhe este código com ninguém
+- Se você não solicitou este código, ignore este email
+
+---
+Este email foi enviado pelo MyFit.
+    """.strip()
+
+
+async def send_verification_code_email(
+    to_email: str,
+    name: str,
+    code: str,
+) -> bool:
+    """Send email verification code."""
+    html_content = get_verification_code_email_html(name, code)
+    text_content = get_verification_code_email_text(name, code)
+
+    return await EmailService.send_email(
+        to_email=to_email,
+        subject=f"Seu código de verificação MyFit: {code}",
+        html_content=html_content,
+        text_content=text_content,
+    )
+
+
 async def send_welcome_email(
     to_email: str,
     name: str,

@@ -10,13 +10,26 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 
-from .models import DeviceToken, Notification, NotificationPriority, NotificationType
+from .models import (
+    DeviceToken,
+    Notification,
+    NotificationCategory,
+    NotificationPreference,
+    NotificationPriority,
+    NotificationType,
+    NOTIFICATION_TYPE_CATEGORIES,
+)
 from .schemas import (
+    BulkPreferenceUpdate,
+    CategoryPreferenceUpdate,
     DeviceRegisterRequest,
     DeviceTokenResponse,
     MarkReadRequest,
     NotificationCreate,
     NotificationListResponse,
+    NotificationPreferenceResponse,
+    NotificationPreferencesResponse,
+    NotificationPreferenceUpdate,
     NotificationResponse,
     UnreadCountResponse,
 )
@@ -720,3 +733,311 @@ async def send_test_push(
         "firebase_status": firebase_status,
         "message": "Notification sent! Check your device and notifications screen." if count > 0 else "Failed to send notification. Check server logs for details.",
     }
+
+
+# ==================== Notification Preferences Endpoints ====================
+
+
+def _get_default_preferences() -> list[NotificationPreferenceResponse]:
+    """Generate default preferences for all notification types."""
+    return [
+        NotificationPreferenceResponse(
+            notification_type=ntype,
+            category=NOTIFICATION_TYPE_CATEGORIES.get(ntype, NotificationCategory.SYSTEM),
+            enabled=True,
+            push_enabled=True,
+            email_enabled=False,
+        )
+        for ntype in NotificationType
+    ]
+
+
+@router.get("/preferences", response_model=NotificationPreferencesResponse)
+async def get_notification_preferences(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NotificationPreferencesResponse:
+    """Get all notification preferences for current user.
+
+    Returns preferences for all notification types, with defaults for
+    any types the user hasn't customized.
+    """
+    # Get user's saved preferences
+    query = select(NotificationPreference).where(
+        NotificationPreference.user_id == current_user.id
+    )
+    result = await db.execute(query)
+    saved_prefs = {p.notification_type: p for p in result.scalars().all()}
+
+    # Build full preferences list with defaults
+    preferences = []
+    for ntype in NotificationType:
+        if ntype in saved_prefs:
+            pref = saved_prefs[ntype]
+            preferences.append(NotificationPreferenceResponse(
+                notification_type=ntype,
+                category=NOTIFICATION_TYPE_CATEGORIES.get(ntype, NotificationCategory.SYSTEM),
+                enabled=pref.enabled,
+                push_enabled=pref.push_enabled,
+                email_enabled=pref.email_enabled,
+            ))
+        else:
+            # Default: enabled
+            preferences.append(NotificationPreferenceResponse(
+                notification_type=ntype,
+                category=NOTIFICATION_TYPE_CATEGORIES.get(ntype, NotificationCategory.SYSTEM),
+                enabled=True,
+                push_enabled=True,
+                email_enabled=False,
+            ))
+
+    # Calculate category summaries
+    categories = {}
+    for cat in NotificationCategory:
+        cat_prefs = [p for p in preferences if p.category == cat]
+        categories[cat.value] = all(p.enabled for p in cat_prefs) if cat_prefs else True
+
+    return NotificationPreferencesResponse(
+        preferences=preferences,
+        categories=categories,
+    )
+
+
+@router.put("/preferences", response_model=NotificationPreferenceResponse)
+async def update_notification_preference(
+    request: NotificationPreferenceUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NotificationPreferenceResponse:
+    """Update a single notification preference."""
+    # Find existing preference
+    query = select(NotificationPreference).where(
+        and_(
+            NotificationPreference.user_id == current_user.id,
+            NotificationPreference.notification_type == request.notification_type,
+        )
+    )
+    result = await db.execute(query)
+    pref = result.scalar_one_or_none()
+
+    if pref:
+        # Update existing
+        if request.enabled is not None:
+            pref.enabled = request.enabled
+        if request.push_enabled is not None:
+            pref.push_enabled = request.push_enabled
+        if request.email_enabled is not None:
+            pref.email_enabled = request.email_enabled
+    else:
+        # Create new preference
+        pref = NotificationPreference(
+            user_id=current_user.id,
+            notification_type=request.notification_type,
+            enabled=request.enabled if request.enabled is not None else True,
+            push_enabled=request.push_enabled if request.push_enabled is not None else True,
+            email_enabled=request.email_enabled if request.email_enabled is not None else False,
+        )
+        db.add(pref)
+
+    await db.commit()
+    await db.refresh(pref)
+
+    return NotificationPreferenceResponse(
+        notification_type=pref.notification_type,
+        category=NOTIFICATION_TYPE_CATEGORIES.get(pref.notification_type, NotificationCategory.SYSTEM),
+        enabled=pref.enabled,
+        push_enabled=pref.push_enabled,
+        email_enabled=pref.email_enabled,
+    )
+
+
+@router.put("/preferences/category", response_model=NotificationPreferencesResponse)
+async def update_category_preferences(
+    request: CategoryPreferenceUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NotificationPreferencesResponse:
+    """Update all notification preferences in a category."""
+    # Get notification types in this category
+    types_in_category = [
+        ntype for ntype, cat in NOTIFICATION_TYPE_CATEGORIES.items()
+        if cat == request.category
+    ]
+
+    for ntype in types_in_category:
+        # Find or create preference
+        query = select(NotificationPreference).where(
+            and_(
+                NotificationPreference.user_id == current_user.id,
+                NotificationPreference.notification_type == ntype,
+            )
+        )
+        result = await db.execute(query)
+        pref = result.scalar_one_or_none()
+
+        if pref:
+            pref.enabled = request.enabled
+            if request.push_enabled is not None:
+                pref.push_enabled = request.push_enabled
+            if request.email_enabled is not None:
+                pref.email_enabled = request.email_enabled
+        else:
+            pref = NotificationPreference(
+                user_id=current_user.id,
+                notification_type=ntype,
+                enabled=request.enabled,
+                push_enabled=request.push_enabled if request.push_enabled is not None else True,
+                email_enabled=request.email_enabled if request.email_enabled is not None else False,
+            )
+            db.add(pref)
+
+    await db.commit()
+
+    # Return updated preferences
+    return await get_notification_preferences(current_user, db)
+
+
+@router.put("/preferences/bulk", response_model=NotificationPreferencesResponse)
+async def update_bulk_preferences(
+    request: BulkPreferenceUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> NotificationPreferencesResponse:
+    """Update multiple notification preferences at once."""
+    for pref_update in request.preferences:
+        # Find or create preference
+        query = select(NotificationPreference).where(
+            and_(
+                NotificationPreference.user_id == current_user.id,
+                NotificationPreference.notification_type == pref_update.notification_type,
+            )
+        )
+        result = await db.execute(query)
+        pref = result.scalar_one_or_none()
+
+        if pref:
+            if pref_update.enabled is not None:
+                pref.enabled = pref_update.enabled
+            if pref_update.push_enabled is not None:
+                pref.push_enabled = pref_update.push_enabled
+            if pref_update.email_enabled is not None:
+                pref.email_enabled = pref_update.email_enabled
+        else:
+            pref = NotificationPreference(
+                user_id=current_user.id,
+                notification_type=pref_update.notification_type,
+                enabled=pref_update.enabled if pref_update.enabled is not None else True,
+                push_enabled=pref_update.push_enabled if pref_update.push_enabled is not None else True,
+                email_enabled=pref_update.email_enabled if pref_update.email_enabled is not None else False,
+            )
+            db.add(pref)
+
+    await db.commit()
+
+    # Return updated preferences
+    return await get_notification_preferences(current_user, db)
+
+
+# ==================== Helper function to check preferences ====================
+
+
+def is_dnd_active(dnd_start: str | None, dnd_end: str | None) -> bool:
+    """Check if Do Not Disturb is currently active based on time.
+
+    Args:
+        dnd_start: Start time in HH:MM format (e.g., "22:00")
+        dnd_end: End time in HH:MM format (e.g., "07:00")
+
+    Returns:
+        True if DND is active, False otherwise
+    """
+    if not dnd_start or not dnd_end:
+        return False
+
+    from datetime import datetime as dt
+
+    try:
+        now = dt.now().time()
+        start = dt.strptime(dnd_start, "%H:%M").time()
+        end = dt.strptime(dnd_end, "%H:%M").time()
+
+        # Handle overnight DND (e.g., 22:00 to 07:00)
+        if start > end:
+            # DND is active if current time is after start OR before end
+            return now >= start or now < end
+        else:
+            # DND is active if current time is between start and end
+            return start <= now < end
+    except ValueError:
+        return False
+
+
+async def is_user_in_dnd(db: AsyncSession, user_id: UUID) -> bool:
+    """Check if user is currently in Do Not Disturb mode.
+
+    Args:
+        db: Database session
+        user_id: User ID to check
+
+    Returns:
+        True if user is in DND mode, False otherwise
+    """
+    from src.domains.users.models import UserSettings
+
+    query = select(UserSettings).where(UserSettings.user_id == user_id)
+    result = await db.execute(query)
+    settings = result.scalar_one_or_none()
+
+    if not settings or not settings.dnd_enabled:
+        return False
+
+    return is_dnd_active(settings.dnd_start_time, settings.dnd_end_time)
+
+
+async def should_send_notification(
+    db: AsyncSession,
+    user_id: UUID,
+    notification_type: NotificationType,
+    channel: str = "push",  # "push", "email", or "in_app"
+    respect_dnd: bool = True,
+) -> bool:
+    """Check if a notification should be sent based on user preferences and DND.
+
+    Args:
+        db: Database session
+        user_id: User ID to check preferences for
+        notification_type: Type of notification
+        channel: Notification channel ("push", "email", or "in_app")
+        respect_dnd: Whether to check DND status (set to False for critical notifications)
+
+    Returns:
+        True if notification should be sent, False otherwise
+    """
+    # Check DND for push notifications (in-app and email are not affected)
+    if respect_dnd and channel == "push":
+        if await is_user_in_dnd(db, user_id):
+            return False
+
+    # Check notification preferences
+    query = select(NotificationPreference).where(
+        and_(
+            NotificationPreference.user_id == user_id,
+            NotificationPreference.notification_type == notification_type,
+        )
+    )
+    result = await db.execute(query)
+    pref = result.scalar_one_or_none()
+
+    if not pref:
+        # Default: enabled for push and in-app, disabled for email
+        return channel != "email"
+
+    if not pref.enabled:
+        return False
+
+    if channel == "push":
+        return pref.push_enabled
+    elif channel == "email":
+        return pref.email_enabled
+    else:  # in_app
+        return True

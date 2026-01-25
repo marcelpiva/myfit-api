@@ -1,0 +1,124 @@
+"""Add user_type field to users table.
+
+This migration adds the user_type field to distinguish between
+personal trainers and students during registration.
+
+For new installations, this field will be created automatically by create_all().
+For existing installations, run this script to add the field.
+"""
+import asyncio
+import logging
+
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import create_async_engine
+
+logger = logging.getLogger(__name__)
+
+
+async def migrate(database_url: str) -> None:
+    """Add user_type field to users table."""
+    engine = create_async_engine(database_url)
+
+    async with engine.begin() as conn:
+        # Check database type
+        is_postgres = "postgresql" in database_url or "postgres" in database_url
+
+        if is_postgres:
+            # Check if column already exists
+            result = await conn.execute(
+                text("""
+                    SELECT EXISTS (
+                        SELECT FROM information_schema.columns
+                        WHERE table_name = 'users' AND column_name = 'user_type'
+                    )
+                """)
+            )
+            column_exists = result.scalar()
+
+            if column_exists:
+                logger.info("Column user_type already exists, skipping")
+                return
+
+            # Create enum type
+            await conn.execute(
+                text("""
+                    DO $$ BEGIN
+                        CREATE TYPE user_type_enum AS ENUM ('personal', 'student');
+                    EXCEPTION
+                        WHEN duplicate_object THEN null;
+                    END $$;
+                """)
+            )
+
+            # Add user_type column with default 'student'
+            await conn.execute(
+                text("""
+                    ALTER TABLE users
+                    ADD COLUMN user_type user_type_enum NOT NULL DEFAULT 'student'
+                """)
+            )
+
+            # Create index for faster lookups
+            await conn.execute(
+                text("CREATE INDEX ix_users_user_type ON users(user_type)")
+            )
+
+        else:
+            # SQLite version
+            # Check if column exists
+            result = await conn.execute(
+                text("PRAGMA table_info(users)")
+            )
+            columns = [row[1] for row in result.fetchall()]
+
+            if "user_type" in columns:
+                logger.info("Column user_type already exists, skipping")
+                return
+
+            # Add user_type column
+            await conn.execute(
+                text("""
+                    ALTER TABLE users
+                    ADD COLUMN user_type TEXT NOT NULL DEFAULT 'student'
+                    CHECK(user_type IN ('personal', 'student'))
+                """)
+            )
+
+            # Create index
+            await conn.execute(
+                text("CREATE INDEX ix_users_user_type ON users(user_type)")
+            )
+
+        logger.info("Added user_type field to users table")
+
+
+async def main():
+    """Run migration with default database URL."""
+    import os
+    from pathlib import Path
+
+    # Load .env file if it exists
+    try:
+        from dotenv import load_dotenv
+        env_path = Path(__file__).parent.parent.parent / ".env"
+        load_dotenv(env_path)
+    except ImportError:
+        pass
+
+    database_url = os.getenv(
+        "DATABASE_URL",
+        "sqlite+aiosqlite:///./myfit.db"
+    )
+
+    # Convert postgres:// or postgresql:// to postgresql+asyncpg://
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    await migrate(database_url)
+
+
+if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
+    asyncio.run(main())

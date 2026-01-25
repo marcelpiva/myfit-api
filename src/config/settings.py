@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     APP_ENV: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
+    APP_URL: str = "https://app.myfitplatform.com"  # Frontend URL for invite links
 
     # Server
     HOST: str = "0.0.0.0"
@@ -50,11 +51,15 @@ class Settings(BaseSettings):
         "https://app.myfitplatform.com",
     ]
 
-    # Storage (S3)
+    # Storage (S3 / Cloudflare R2)
+    STORAGE_PROVIDER: Literal["s3", "r2", "local"] = "local"  # s3, r2, or local for development
     AWS_ACCESS_KEY_ID: str = ""
     AWS_SECRET_ACCESS_KEY: str = ""
     AWS_REGION: str = "us-east-1"
     S3_BUCKET_NAME: str = "myfit-uploads"
+    S3_ENDPOINT_URL: str = ""  # For R2: https://<account_id>.r2.cloudflarestorage.com
+    CDN_BASE_URL: str = ""  # CDN URL for serving files (e.g., https://cdn.myfit.app)
+    LOCAL_STORAGE_PATH: str = "./uploads"  # For local development
 
     # AI Services
     OPENAI_API_KEY: str = ""
@@ -69,6 +74,15 @@ class Settings(BaseSettings):
     RESEND_API_KEY: str = ""
     EMAIL_FROM: str = "MyFit <noreply@myfit.app>"
 
+    # Social Login - Google
+    GOOGLE_CLIENT_ID: str = ""
+    GOOGLE_CLIENT_ID_IOS: str = ""
+    GOOGLE_CLIENT_ID_ANDROID: str = ""
+
+    # Social Login - Apple
+    APPLE_CLIENT_ID: str = ""  # Bundle ID (e.g., com.myfit.app)
+    APPLE_TEAM_ID: str = ""
+
     # Rate Limiting
     RATE_LIMIT_ENABLED: bool = True
 
@@ -81,6 +95,13 @@ class Settings(BaseSettings):
     def email_enabled(self) -> bool:
         """Check if email is configured."""
         return bool(self.RESEND_API_KEY)
+
+    @property
+    def storage_enabled(self) -> bool:
+        """Check if cloud storage is configured."""
+        if self.STORAGE_PROVIDER == "local":
+            return True
+        return bool(self.AWS_ACCESS_KEY_ID and self.AWS_SECRET_ACCESS_KEY)
 
     @property
     def is_production(self) -> bool:

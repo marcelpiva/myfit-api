@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from src.domains.workouts.models import AssignmentStatus, Difficulty, ExerciseFeedbackType, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, SessionStatus, SplitType, TechniqueType, WorkoutGoal
+from src.domains.workouts.models import AssignmentStatus, Difficulty, ExerciseFeedbackType, ExerciseMode, MuscleGroup, NoteAuthorRole, NoteContextType, PlanStatus, PlanVersion, SessionStatus, SplitType, TechniqueType, WorkoutGoal
 
 
 # Exercise schemas
@@ -472,6 +472,7 @@ class PlanCreate(BaseModel):
     # Flags
     is_template: bool = False
     is_public: bool = False
+    status: PlanStatus = PlanStatus.DRAFT  # New plans start as drafts
     organization_id: UUID | None = None
     workouts: list[PlanWorkoutInput] | None = None
 
@@ -499,6 +500,7 @@ class PlanUpdate(BaseModel):
     # Flags
     is_template: bool | None = None
     is_public: bool | None = None
+    status: PlanStatus | None = None  # Allow changing plan status
     workouts: list[PlanWorkoutInput] | None = None
 
 
@@ -525,6 +527,7 @@ class PlanResponse(BaseModel):
     # Flags
     is_template: bool
     is_public: bool
+    status: PlanStatus = PlanStatus.PUBLISHED  # Draft/Published/Archived status
     created_by_id: UUID
     organization_id: UUID | None = None
     source_template_id: UUID | None = None
@@ -558,6 +561,7 @@ class PlanListResponse(BaseModel):
     duration_weeks: int | None = None
     is_template: bool
     is_public: bool
+    status: PlanStatus = PlanStatus.PUBLISHED  # Draft/Published/Archived status
     workout_count: int = 0
     created_by_id: UUID | None = None
     source_template_id: UUID | None = None
@@ -609,6 +613,38 @@ class PlanAssignmentCreate(BaseModel):
     organization_id: UUID | None = None
 
 
+class BatchPlanAssignmentCreate(BaseModel):
+    """Create batch plan assignment request (assign to multiple students)."""
+
+    plan_id: UUID
+    student_ids: list[UUID] = Field(..., min_length=1, max_length=50)
+    start_date: date
+    end_date: date | None = None
+    notes: str | None = None
+    organization_id: UUID | None = None
+
+
+class BatchPlanAssignmentResult(BaseModel):
+    """Result for a single student in batch assignment."""
+
+    student_id: UUID
+    student_name: str
+    success: bool
+    error: str | None = None
+    assignment_id: UUID | None = None
+
+
+class BatchPlanAssignmentResponse(BaseModel):
+    """Response for batch plan assignment."""
+
+    plan_id: UUID
+    plan_name: str
+    total_students: int
+    successful: int
+    failed: int
+    results: list[BatchPlanAssignmentResult]
+
+
 class PlanAssignmentUpdate(BaseModel):
     """Update plan assignment request."""
 
@@ -640,6 +676,10 @@ class PlanAssignmentResponse(BaseModel):
     plan_duration_weeks: int | None = None
     plan: PlanResponse | None = None  # Full plan data for client convenience
     plan_snapshot: dict | None = None  # Independent copy of plan data at assignment time
+    # Version tracking
+    version: int = 1
+    last_version_viewed: int | None = None
+    has_unviewed_updates: bool = False  # True if version > last_version_viewed
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -855,3 +895,42 @@ class PrescriptionNoteListResponse(BaseModel):
     unread_count: int = 0
 
     model_config = ConfigDict(alias_generator=to_camel, populate_by_name=True)
+
+
+# Plan Version History schemas
+
+class PlanVersionResponse(BaseModel):
+    """Single plan version response."""
+
+    id: UUID
+    assignment_id: UUID
+    version: int
+    snapshot: dict  # Complete plan data at this version
+    changed_at: datetime
+    changed_by_id: UUID | None = None
+    changed_by_name: str | None = None
+    change_description: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class PlanVersionListResponse(BaseModel):
+    """List of plan versions response."""
+
+    assignment_id: UUID
+    current_version: int
+    versions: list[PlanVersionResponse]
+    total: int
+
+
+class PlanVersionUpdateRequest(BaseModel):
+    """Request to update a prescribed plan (creates a new version)."""
+
+    plan_snapshot: dict  # New plan snapshot data
+    change_description: str | None = Field(None, max_length=500)
+
+
+class MarkVersionViewedRequest(BaseModel):
+    """Request to mark a version as viewed by student."""
+
+    version: int | None = None  # If None, marks current version as viewed

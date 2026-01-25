@@ -158,3 +158,11 @@ class InvitePreviewResponse(BaseModel):
     invited_by_name: str
     role: UserRole
     email: str
+
+
+class InviteShareLinksResponse(BaseModel):
+    """Shareable links for an invitation."""
+
+    invite_url: str  # Direct invite URL
+    whatsapp_url: str  # WhatsApp share URL
+    qr_code_url: str | None = None  # QR code image URL (if generated)

@@ -26,6 +26,7 @@ class NotificationType(str, enum.Enum):
     WORKOUT_REMINDER = "workout_reminder"
     WORKOUT_COMPLETED = "workout_completed"
     PLAN_ASSIGNED = "plan_assigned"
+    PLAN_UPDATED = "plan_updated"  # When a prescribed plan is modified
 
     # Nutrition related
     DIET_ASSIGNED = "diet_assigned"
@@ -173,3 +174,89 @@ class DeviceToken(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     user = relationship("User", lazy="selectin")
+
+
+class NotificationCategory(str, enum.Enum):
+    """Categories for grouping notification preferences."""
+
+    WORKOUTS = "workouts"  # Workout reminders, plan assignments
+    PROGRESS = "progress"  # Progress milestones, achievements
+    MESSAGES = "messages"  # Chat messages, mentions
+    ORGANIZATION = "organization"  # Invites, role changes
+    PAYMENTS = "payments"  # Payment reminders, receipts
+    APPOINTMENTS = "appointments"  # Appointment reminders
+    SYSTEM = "system"  # System announcements
+
+
+class NotificationPreference(Base, UUIDMixin, TimestampMixin):
+    """User preferences for granular notification control.
+
+    Each user can enable/disable notifications by type.
+    Default is enabled for all notification types.
+    """
+
+    __tablename__ = "notification_preferences"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    notification_type: Mapped[NotificationType] = mapped_column(
+        Enum(NotificationType),
+        nullable=False,
+    )
+    # Individual type settings
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    push_enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    email_enabled: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
+    # Relationships
+    user = relationship("User", lazy="selectin")
+
+    class Meta:
+        unique_together = ["user_id", "notification_type"]
+
+
+# Mapping of notification types to categories
+NOTIFICATION_TYPE_CATEGORIES = {
+    # Workouts
+    NotificationType.WORKOUT_ASSIGNED: NotificationCategory.WORKOUTS,
+    NotificationType.WORKOUT_REMINDER: NotificationCategory.WORKOUTS,
+    NotificationType.WORKOUT_COMPLETED: NotificationCategory.WORKOUTS,
+    NotificationType.PLAN_ASSIGNED: NotificationCategory.WORKOUTS,
+    NotificationType.PLAN_UPDATED: NotificationCategory.WORKOUTS,
+    NotificationType.DIET_ASSIGNED: NotificationCategory.WORKOUTS,
+    NotificationType.MEAL_REMINDER: NotificationCategory.WORKOUTS,
+    # Progress
+    NotificationType.PROGRESS_MILESTONE: NotificationCategory.PROGRESS,
+    NotificationType.WEIGHT_GOAL_REACHED: NotificationCategory.PROGRESS,
+    NotificationType.CHECKIN_REMINDER: NotificationCategory.PROGRESS,
+    NotificationType.CHECKIN_STREAK: NotificationCategory.PROGRESS,
+    NotificationType.ACHIEVEMENT_UNLOCKED: NotificationCategory.PROGRESS,
+    NotificationType.POINTS_EARNED: NotificationCategory.PROGRESS,
+    NotificationType.LEADERBOARD_CHANGE: NotificationCategory.PROGRESS,
+    # Messages
+    NotificationType.NEW_MESSAGE: NotificationCategory.MESSAGES,
+    NotificationType.NEW_FOLLOWER: NotificationCategory.MESSAGES,
+    NotificationType.MENTION: NotificationCategory.MESSAGES,
+    # Organization
+    NotificationType.INVITE_RECEIVED: NotificationCategory.ORGANIZATION,
+    NotificationType.MEMBER_JOINED: NotificationCategory.ORGANIZATION,
+    NotificationType.ROLE_CHANGED: NotificationCategory.ORGANIZATION,
+    NotificationType.STUDENT_INACTIVE: NotificationCategory.ORGANIZATION,
+    NotificationType.STUDENT_PROGRESS: NotificationCategory.ORGANIZATION,
+    # Payments
+    NotificationType.PAYMENT_DUE: NotificationCategory.PAYMENTS,
+    NotificationType.PAYMENT_RECEIVED: NotificationCategory.PAYMENTS,
+    NotificationType.PAYMENT_OVERDUE: NotificationCategory.PAYMENTS,
+    # Appointments
+    NotificationType.APPOINTMENT_CREATED: NotificationCategory.APPOINTMENTS,
+    NotificationType.APPOINTMENT_REMINDER: NotificationCategory.APPOINTMENTS,
+    NotificationType.APPOINTMENT_CANCELLED: NotificationCategory.APPOINTMENTS,
+    NotificationType.APPOINTMENT_CONFIRMED: NotificationCategory.APPOINTMENTS,
+    # System
+    NotificationType.SYSTEM_ANNOUNCEMENT: NotificationCategory.SYSTEM,
+    NotificationType.SYSTEM_MAINTENANCE: NotificationCategory.SYSTEM,
+}

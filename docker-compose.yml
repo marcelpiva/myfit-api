@@ -31,6 +31,37 @@ services:
       timeout: 5s
       retries: 5
 
+  # Celery worker for background tasks
+  celery-worker:
+    build: .
+    container_name: myfit-celery-worker
+    command: celery -A src.core.celery_app worker -l info --concurrency=2
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://myfit:myfit@postgres:5432/myfit
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
+  # Celery beat for scheduled tasks
+  celery-beat:
+    build: .
+    container_name: myfit-celery-beat
+    command: celery -A src.core.celery_app beat -l info
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://myfit:myfit@postgres:5432/myfit
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - celery-worker
+    volumes:
+      - .:/app
+    restart: unless-stopped
+
 volumes:
   postgres_data:
   redis_data:

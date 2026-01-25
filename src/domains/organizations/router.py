@@ -13,6 +13,7 @@ from src.domains.organizations.schemas import (
     InviteCreate,
     InvitePreviewResponse,
     InviteResponse,
+    InviteShareLinksResponse,
     MemberCreate,
     MemberResponse,
     MemberUpdate,
@@ -771,6 +772,78 @@ async def resend_invite(
         is_accepted=renewed.is_accepted,
         created_at=renewed.created_at,
         token=renewed.token,
+    )
+
+
+@router.get("/{org_id}/invites/{invite_id}/share-links", response_model=InviteShareLinksResponse)
+async def get_invite_share_links(
+    org_id: UUID,
+    invite_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    include_qr: bool = True,
+) -> InviteShareLinksResponse:
+    """Get shareable links for an invitation (WhatsApp, direct link, QR code).
+
+    Returns URLs that can be shared with the invited person to accept the invite.
+
+    Args:
+        org_id: Organization UUID
+        invite_id: Invite UUID
+        include_qr: If True, includes base64 QR code data URL (default: True)
+    """
+    from urllib.parse import quote
+
+    from src.config.settings import settings
+    from src.core.qrcode import generate_invite_qr_code
+
+    org_service = OrganizationService(db)
+
+    # Check professional permission
+    membership = await org_service.get_membership(org_id, current_user.id)
+    if not membership or not org_service.is_professional(membership):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Professional permission required",
+        )
+
+    invite = await org_service.get_invite_by_id(invite_id)
+    if not invite or invite.organization_id != org_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Invite not found",
+        )
+
+    if invite.is_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invite already accepted",
+        )
+
+    # Get organization details
+    org = await org_service.get_organization_by_id(org_id)
+    org_name = org.name if org else "MyFit"
+
+    # Generate invite URL
+    invite_url = f"{settings.APP_URL}/invite/{invite.token}"
+
+    # Generate WhatsApp share message
+    whatsapp_message = (
+        f"Olá! Você foi convidado(a) para treinar com {current_user.name} "
+        f"na {org_name} pelo MyFit! 💪\n\n"
+        f"Clique no link para aceitar o convite:\n{invite_url}"
+    )
+    whatsapp_url = f"https://wa.me/?text={quote(whatsapp_message)}"
+
+    # Generate QR code if requested
+    qr_code_url = None
+    if include_qr:
+        qr_code_url = generate_invite_qr_code(invite_url)
+
+    return InviteShareLinksResponse(
+        invite_url=invite_url,
+        whatsapp_url=whatsapp_url,
+        qr_code_url=qr_code_url,
     )
 
 

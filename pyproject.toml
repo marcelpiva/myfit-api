@@ -45,6 +45,8 @@ dependencies = [
 
     # File Storage
     "boto3>=1.35.0",
+    "aioboto3>=13.0.0",  # Async S3/R2 operations
+    "aiofiles>=24.1.0",  # Async file operations
 
     # i18n
     "babel>=2.16.0",
@@ -57,6 +59,7 @@ dependencies = [
     "orjson>=3.10.0",
     "tenacity>=9.0.0",
     "structlog>=24.4.0",
+    "qrcode[pil]>=8.0",
 
     # Observability (GlitchTip/Sentry compatible)
     "sentry-sdk[fastapi]>=2.0.0",

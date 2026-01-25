@@ -8,13 +8,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.auth.schemas import (
+    AppleLoginRequest,
     AuthResponse,
+    GoogleLoginRequest,
     LoginRequest,
     LogoutRequest,
     RefreshRequest,
     RegisterRequest,
+    ResendVerificationCodeRequest,
+    SendVerificationCodeRequest,
+    SocialAuthResponse,
     TokenResponse,
     UserResponse,
+    VerifyCodeRequest,
+    VerifyCodeResponse,
 )
 from src.domains.auth.service import AuthService
 
@@ -47,6 +54,7 @@ async def register(
         email=request.email,
         password=request.password,
         name=request.name,
+        user_type=request.user_type,
     )
 
     # Generate tokens
@@ -157,3 +165,206 @@ async def get_current_user_info(
 ) -> UserResponse:
     """Get current authenticated user information."""
     return UserResponse.model_validate(current_user)
+
+
+@router.post("/google", response_model=SocialAuthResponse)
+async def google_login(
+    request: GoogleLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SocialAuthResponse:
+    """Authenticate or register user via Google Sign-In.
+
+    Validates the Google ID token, creates a new user if needed,
+    and returns authentication tokens.
+    """
+    auth_service = AuthService(db)
+
+    result = await auth_service.authenticate_or_create_google_user(
+        id_token=request.id_token,
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token do Google inválido ou expirado",
+        )
+
+    user, is_new_user = result
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sua conta está desativada",
+        )
+
+    # Generate tokens
+    access_token, refresh_token = auth_service.generate_tokens(user.id)
+
+    return SocialAuthResponse(
+        user=UserResponse.model_validate(user),
+        tokens=TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+        ),
+        is_new_user=is_new_user,
+    )
+
+
+@router.post("/apple", response_model=SocialAuthResponse)
+async def apple_login(
+    request: AppleLoginRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SocialAuthResponse:
+    """Authenticate or register user via Apple Sign-In.
+
+    Validates the Apple ID token, creates a new user if needed,
+    and returns authentication tokens.
+
+    Note: Apple only provides the user's name on the first login.
+    Pass user_name on first login to capture the user's name.
+    """
+    auth_service = AuthService(db)
+
+    result = await auth_service.authenticate_or_create_apple_user(
+        id_token=request.id_token,
+        user_name=request.user_name,
+    )
+
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token da Apple inválido ou expirado",
+        )
+
+    user, is_new_user = result
+
+    if not user.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sua conta está desativada",
+        )
+
+    # Generate tokens
+    access_token, refresh_token = auth_service.generate_tokens(user.id)
+
+    return SocialAuthResponse(
+        user=UserResponse.model_validate(user),
+        tokens=TokenResponse(
+            access_token=access_token,
+            refresh_token=refresh_token,
+        ),
+        is_new_user=is_new_user,
+    )
+
+
+@router.post("/send-verification", status_code=status.HTTP_200_OK)
+async def send_verification_code(
+    request: SendVerificationCodeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Send a verification code to an email address.
+
+    This endpoint can be used:
+    - Before registration to verify the email
+    - For existing unverified users to request a new code
+    """
+    auth_service = AuthService(db)
+
+    # Check if user exists
+    user = await auth_service.get_user_by_email(request.email)
+
+    if user and user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este email já está verificado",
+        )
+
+    # Use the user's name if exists, otherwise use email prefix
+    name = user.name if user else request.email.split("@")[0]
+
+    # Send verification email
+    sent = await auth_service.send_verification_email(
+        email=request.email,
+        name=name,
+    )
+
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao enviar email de verificação",
+        )
+
+    return {"message": "Código de verificação enviado"}
+
+
+@router.post("/verify-code", response_model=VerifyCodeResponse)
+async def verify_email_code(
+    request: VerifyCodeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> VerifyCodeResponse:
+    """Verify an email verification code.
+
+    Returns whether the code was valid and marks the user's email as verified
+    if they already have an account.
+    """
+    auth_service = AuthService(db)
+
+    # Verify the code
+    is_valid = await auth_service.verify_code(
+        email=request.email,
+        code=request.code,
+        purpose="registration",
+    )
+
+    if not is_valid:
+        return VerifyCodeResponse(
+            verified=False,
+            message="Código inválido ou expirado",
+        )
+
+    # If user exists, mark as verified
+    user = await auth_service.get_user_by_email(request.email)
+    if user:
+        await auth_service.verify_user_email(user)
+
+    return VerifyCodeResponse(
+        verified=True,
+        message="Email verificado com sucesso",
+    )
+
+
+@router.post("/resend-verification", status_code=status.HTTP_200_OK)
+async def resend_verification_code(
+    request: ResendVerificationCodeRequest,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Resend verification code to an email address.
+
+    Rate limited to prevent abuse.
+    """
+    auth_service = AuthService(db)
+
+    # Check if user exists
+    user = await auth_service.get_user_by_email(request.email)
+
+    if user and user.is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este email já está verificado",
+        )
+
+    name = user.name if user else request.email.split("@")[0]
+
+    # Send verification email
+    sent = await auth_service.send_verification_email(
+        email=request.email,
+        name=name,
+    )
+
+    if not sent:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Erro ao enviar email de verificação",
+        )
+
+    return {"message": "Código de verificação reenviado"}

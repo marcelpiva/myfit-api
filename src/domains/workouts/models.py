@@ -70,6 +70,14 @@ class TrainingMode(str, enum.Enum):
     HIBRIDO = "hibrido"  # Hybrid - some sessions in-person, some online
 
 
+class PlanStatus(str, enum.Enum):
+    """Training plan status for draft/publish workflow."""
+
+    DRAFT = "draft"  # Work in progress, not visible to students
+    PUBLISHED = "published"  # Ready for assignment
+    ARCHIVED = "archived"  # No longer active, kept for history
+
+
 class MuscleGroup(str, enum.Enum):
     """Major muscle groups."""
 
@@ -617,6 +625,13 @@ class TrainingPlan(Base, UUIDMixin, TimestampMixin):
     is_template: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     is_public: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
+    # Draft/Publish workflow status
+    status: Mapped[PlanStatus] = mapped_column(
+        Enum(PlanStatus, name="plan_status_enum", values_callable=lambda x: [e.value for e in x]),
+        default=PlanStatus.PUBLISHED,  # Default to published for backwards compatibility
+        nullable=False,
+    )
+
     created_by_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -736,13 +751,62 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
     # This ensures student's prescription is isolated from later changes to the original plan
     plan_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
+    # Version tracking for plan updates
+    version: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    last_version_viewed: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
     # Relationships
     plan: Mapped["TrainingPlan"] = relationship("TrainingPlan")
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id])
     trainer: Mapped["User"] = relationship("User", foreign_keys=[trainer_id])
+    versions: Mapped[list["PlanVersion"]] = relationship(
+        "PlanVersion",
+        back_populates="assignment",
+        order_by="PlanVersion.version.desc()",
+        lazy="selectin",
+    )
 
     def __repr__(self) -> str:
         return f"<PlanAssignment plan={self.plan_id} student={self.student_id} status={self.status}>"
+
+
+class PlanVersion(Base, UUIDMixin):
+    """Version history for plan assignments.
+
+    Each time a prescribed plan is updated, a new version record is created
+    storing the previous snapshot before the update.
+    """
+
+    __tablename__ = "plan_versions"
+
+    assignment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("plan_assignments.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    version: Mapped[int] = mapped_column(Integer, nullable=False)
+    snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)  # Complete plan data at this version
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        nullable=False,
+    )
+    changed_by_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    change_description: Mapped[str | None] = mapped_column(String(500), nullable=True)
+
+    # Relationships
+    assignment: Mapped["PlanAssignment"] = relationship(
+        "PlanAssignment",
+        back_populates="versions",
+    )
+    changed_by: Mapped["User | None"] = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<PlanVersion assignment={self.assignment_id} v{self.version}>"
 
 
 class NoteContextType(str, enum.Enum):
