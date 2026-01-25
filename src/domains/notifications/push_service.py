@@ -214,7 +214,10 @@ async def send_push_notification(
             )
 
             response = messaging.send(message)
-            logger.info(f"🔔 [PUSH] ✅ Push notification sent successfully: {response}")
+            logger.info(f"🔔 [PUSH] ✅ Push notification sent successfully!")
+            logger.info(f"🔔 [PUSH] Firebase message ID: {response}")
+            logger.info(f"🔔 [PUSH] Token used: {device_token.token[:50]}...")
+            logger.info(f"🔔 [PUSH] Platform: {device_token.platform.value}")
             success_count += 1
 
         except messaging.UnregisteredError:
