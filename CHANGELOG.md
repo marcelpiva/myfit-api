@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-01-25
+
+### Fixed
+- **APNs Payload** - Fixed iOS push notifications not arriving
+  - Added explicit `ApsAlert` with title/body in APNs payload
+  - Notifications now display correctly on iOS devices
+
+- **Test Push Endpoint** - Test notifications now also create in-app notification
+  - `POST /notifications/debug/test-push` creates notification in database
+  - Test notifications appear in the notifications screen (bell icon)
+
+### Added
+- **Enhanced Push Logging** - Better debugging for push notification issues
+  - Logs Firebase message ID for delivery tracking
+  - Logs token and platform details
+
 ## [0.5.1] - 2026-01-24
 
 ### Added
