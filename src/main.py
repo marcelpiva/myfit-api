@@ -23,6 +23,31 @@ from src.domains.users.router import router as users_router
 from src.domains.workouts.router import router as workouts_router
 
 
+async def seed_exercises_if_empty():
+    """Seed exercises if none exist in the database."""
+    from sqlalchemy import func, select
+
+    from src.config.database import AsyncSessionLocal
+    from src.domains.workouts.models import Exercise
+
+    try:
+        async with AsyncSessionLocal() as session:
+            # Check if any exercises exist
+            result = await session.execute(select(func.count(Exercise.id)))
+            count = result.scalar()
+
+            if count == 0:
+                print("No exercises found in database, seeding...")
+                # Import and run the seed script
+                from src.scripts.seed_exercises import seed_exercises
+                seeded_count = await seed_exercises(session, clear_existing=False)
+                print(f"Exercises seeded successfully: {seeded_count} exercises added")
+            else:
+                print(f"Database has {count} exercises, skipping seed")
+    except Exception as e:
+        print(f"Error checking/seeding exercises: {type(e).__name__}: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan events."""
@@ -41,6 +66,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Re-raise in production to prevent unhealthy startup
         if settings.is_production:
             raise
+
+    # Auto-seed exercises if database is empty
+    try:
+        await seed_exercises_if_empty()
+    except Exception as e:
+        print(f"Warning: Could not seed exercises: {type(e).__name__}: {e}")
 
     yield
     # Shutdown
