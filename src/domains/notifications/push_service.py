@@ -202,9 +202,12 @@ async def send_push_notification(
                     },
                     payload=messaging.APNSPayload(
                         aps=messaging.Aps(
+                            alert=messaging.ApsAlert(
+                                title=title,
+                                body=body,
+                            ),
                             badge=1,
                             sound="default",
-                            content_available=True,
                         ),
                     ),
                 ),
