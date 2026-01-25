@@ -114,6 +114,7 @@ class ExerciseMode(str, enum.Enum):
     DURATION = "duration"  # Continuous cardio (esteira, bike)
     INTERVAL = "interval"  # HIIT, Tabata (work/rest intervals)
     DISTANCE = "distance"  # Distance-based (running)
+    STRETCHING = "stretching"  # Flexibility exercises with hold time (alongamento)
 
 
 class SessionStatus(str, enum.Enum):
