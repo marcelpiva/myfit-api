@@ -115,7 +115,7 @@ async def _run_pending_migrations() -> None:
         ("dnd_enabled", "user_settings", "BOOLEAN", "FALSE"),
         ("dnd_start_time", "user_settings", "TIME", None),
         ("dnd_end_time", "user_settings", "TIME", None),
-        ("status", "workout_plans", "VARCHAR(20)", "'active'"),
+        ("status", "training_plans", "VARCHAR(20)", "'active'"),
     ]
 
     # Create a separate engine for migrations to avoid connection state issues
