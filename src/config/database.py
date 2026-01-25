@@ -85,6 +85,22 @@ async def init_db() -> None:
     if not _is_sqlite:
         await _sync_enum_values()
 
+    # Run pending migrations (for columns added to existing tables)
+    await _run_pending_migrations()
+
+
+async def _run_pending_migrations() -> None:
+    """Run any pending migrations for existing tables.
+
+    SQLAlchemy's create_all() doesn't add columns to existing tables,
+    so we need to run migrations manually.
+    """
+    try:
+        from src.migrations.add_plan_snapshot import upgrade as add_plan_snapshot
+        await add_plan_snapshot()
+    except Exception as e:
+        print(f"Migration warning: {e}")
+
 
 async def _sync_enum_values() -> None:
     """Add missing enum values to PostgreSQL enums.
