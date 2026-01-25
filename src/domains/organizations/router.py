@@ -24,6 +24,9 @@ from src.domains.organizations.schemas import (
 from src.domains.organizations.service import OrganizationService
 from src.domains.users.service import UserService
 from src.domains.notifications.push_service import send_push_notification
+from src.domains.notifications.router import create_notification
+from src.domains.notifications.schemas import NotificationCreate
+from src.domains.notifications.models import NotificationType
 
 router = APIRouter()
 
@@ -523,8 +526,27 @@ async def create_invite(
         invited_by_id=current_user.id,
     )
 
-    # Send push notification if user exists
+    # Send notifications if user exists
     if user_by_email:
+        # Create in-app notification
+        await create_notification(
+            db=db,
+            notification_data=NotificationCreate(
+                user_id=user_by_email.id,
+                notification_type=NotificationType.INVITE_RECEIVED,
+                title="Novo Convite",
+                body=f"{current_user.name} convidou você para {org.name}",
+                icon="mail",
+                action_type="navigate",
+                action_data=f'{{"route": "/invites"}}',
+                reference_type="invite",
+                reference_id=invite.id,
+                organization_id=org_id,
+                sender_id=current_user.id,
+            ),
+        )
+
+        # Send push notification
         await send_push_notification(
             db=db,
             user_id=user_by_email.id,

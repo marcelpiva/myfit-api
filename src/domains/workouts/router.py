@@ -77,6 +77,9 @@ from src.domains.workouts.schemas import (
 )
 from src.domains.workouts.service import WorkoutService
 from src.domains.notifications.push_service import send_push_notification
+from src.domains.notifications.router import create_notification
+from src.domains.notifications.schemas import NotificationCreate
+from src.domains.notifications.models import NotificationType
 
 router = APIRouter()
 
@@ -631,9 +634,27 @@ async def start_session(
         if member:
             trainer_id = member.invited_by_id
 
-    # Send push notification to trainer when student starts a workout
+    # Send notifications to trainer when student starts a workout
     if trainer_id:
         try:
+            # Create in-app notification
+            await create_notification(
+                db=db,
+                notification_data=NotificationCreate(
+                    user_id=trainer_id,
+                    notification_type=NotificationType.WORKOUT_COMPLETED,  # Using WORKOUT_COMPLETED as closest match
+                    title="Aluno iniciou treino",
+                    body=f"{current_user.name or current_user.email} iniciou o treino '{workout.name}'",
+                    icon="dumbbell",
+                    action_type="navigate",
+                    action_data=f'{{"route": "/cotraining/{session.id}"}}' if request.is_shared else f'{{"route": "/students/{current_user.id}"}}',
+                    reference_type="workout_session",
+                    reference_id=session.id,
+                    sender_id=current_user.id,
+                ),
+            )
+
+            # Send push notification
             await send_push_notification(
                 db=db,
                 user_id=trainer_id,
@@ -650,7 +671,7 @@ async def start_session(
                 },
             )
         except Exception as e:
-            logger.warning(f"Failed to send push notification to trainer {trainer_id}: {e}")
+            logger.warning(f"Failed to send notifications to trainer {trainer_id}: {e}")
 
         # If co-training requested, also send SSE notification
         if request.is_shared:
@@ -1060,6 +1081,44 @@ async def create_plan_assignment(
         organization_id=org_id,
     )
 
+    # Send notifications to student about the new plan assignment
+    try:
+        # Create in-app notification
+        await create_notification(
+            db=db,
+            notification_data=NotificationCreate(
+                user_id=request.student_id,
+                notification_type=NotificationType.PLAN_ASSIGNED,
+                title="Novo plano de treino",
+                body=f"{current_user.name} atribuiu o plano '{plan.name}' para você",
+                icon="clipboard-list",
+                action_type="navigate",
+                action_data=f'{{"route": "/plans/{assignment.plan_id}"}}',
+                reference_type="plan_assignment",
+                reference_id=assignment.id,
+                organization_id=org_id,
+                sender_id=current_user.id,
+            ),
+        )
+
+        # Send push notification
+        await send_push_notification(
+            db=db,
+            user_id=request.student_id,
+            title="Novo plano de treino",
+            body=f"{current_user.name} atribuiu o plano '{plan.name}' para você",
+            data={
+                "type": "plan_assigned",
+                "assignment_id": str(assignment.id),
+                "plan_id": str(assignment.plan_id),
+                "plan_name": plan.name,
+                "trainer_id": str(current_user.id),
+                "trainer_name": current_user.name or current_user.email,
+            },
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send notifications to student {request.student_id}: {e}")
+
     return PlanAssignmentResponse(
         id=assignment.id,
         plan_id=assignment.plan_id,
@@ -1183,9 +1242,28 @@ async def acknowledge_plan_assignment(
     student = await user_service.get_user_by_id(acknowledged.student_id)
     plan = await workout_service.get_plan_by_id(acknowledged.plan_id)
 
-    # Send push notification to trainer that student viewed the plan
+    # Send notification to trainer that student viewed the plan
     if acknowledged.trainer_id:
         try:
+            # Create in-app notification
+            await create_notification(
+                db=db,
+                notification_data=NotificationCreate(
+                    user_id=acknowledged.trainer_id,
+                    notification_type=NotificationType.STUDENT_PROGRESS,
+                    title="Plano visualizado",
+                    body=f"{current_user.name or current_user.email} visualizou o plano '{plan.name if plan else 'atribuído'}'",
+                    icon="eye",
+                    action_type="navigate",
+                    action_data=f'{{"route": "/students/{acknowledged.student_id}"}}',
+                    reference_type="plan_assignment",
+                    reference_id=acknowledged.id,
+                    organization_id=acknowledged.organization_id,
+                    sender_id=current_user.id,
+                ),
+            )
+
+            # Send push notification
             await send_push_notification(
                 db=db,
                 user_id=acknowledged.trainer_id,
@@ -1201,7 +1279,7 @@ async def acknowledge_plan_assignment(
                 },
             )
         except Exception as e:
-            logger.warning(f"Failed to send push notification to trainer {acknowledged.trainer_id}: {e}")
+            logger.warning(f"Failed to send notification to trainer {acknowledged.trainer_id}: {e}")
 
     return PlanAssignmentResponse(
         id=acknowledged.id,
