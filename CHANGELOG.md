@@ -5,6 +5,44 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-01-25
+
+### Added
+- **Celery Scheduler for Automated Notifications** - Background task processing with Redis
+  - Workout reminders (hourly 6am-10pm) for users with active plans who haven't trained
+  - Inactive student notifications (daily) alerts trainers when students miss training
+  - Invite reminders (3, 7, 14 days) for pending organization invites
+  - Plan expiration warnings (7, 3, 1 day) before plan end dates
+  - Weekly cleanup of old notifications (90+ days)
+  - Configurable via `docker-compose.yml` with celery-worker and celery-beat services
+  - Railway deployment support via Procfile worker process
+
+- **Plan Version History** - Track changes to prescribed plans over time
+  - `PlanVersion` model stores snapshots when plans are modified
+  - `GET /plans/assignments/{id}/versions` - List all versions
+  - `GET /plans/assignments/{id}/versions/{version}` - Get specific version
+  - `PUT /plans/assignments/{id}/versions/{version}` - Update version description
+  - `POST /plans/assignments/{id}/versions/mark-viewed` - Mark version as viewed
+  - Automatic version creation on plan updates
+  - `PLAN_UPDATED` notification type for students
+
+- **S3/R2 Media Upload** - Cloud storage for avatars and exercise media
+  - `StorageService` supporting AWS S3, Cloudflare R2, and local filesystem
+  - Avatar upload endpoint with automatic resizing
+  - Exercise media upload endpoint with validation
+  - Presigned URL generation for direct uploads
+  - Configurable via `STORAGE_PROVIDER`, `S3_*`, `CDN_BASE_URL` settings
+
+- **Plan Assignment Response** - Students can accept or decline plan assignments
+  - `PUT /plans/assignments/{id}/respond` endpoint
+  - `requires_acceptance` field on assignments
+  - `declined_reason` field for rejection feedback
+  - Notifications to trainer on accept/decline
+
+### Changed
+- Updated `requirements.txt` with `celery[redis]`, `aioboto3`, `aiofiles`
+- Added `REDIS_URL` configuration for Celery broker
+
 ## [0.5.3] - 2026-01-25
 
 ### Added
