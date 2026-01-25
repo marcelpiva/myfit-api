@@ -101,6 +101,7 @@ async def _run_pending_migrations() -> None:
 
     migrations = [
         # (column_name, table_name, column_definition, default_value)
+        # Users table
         ("user_type", "users", "VARCHAR(20)", "'student'"),
         ("auth_provider", "users", "VARCHAR(20)", "'email'"),
         ("google_id", "users", "VARCHAR(255)", None),
@@ -109,12 +110,20 @@ async def _run_pending_migrations() -> None:
         ("cref_verified", "users", "BOOLEAN", "FALSE"),
         ("cref_verified_at", "users", "TIMESTAMP", None),
         ("is_verified", "users", "BOOLEAN", "FALSE"),
-        ("training_mode", "plan_assignments", "VARCHAR(20)", "'online'"),
+        # Plan assignments table
+        ("training_mode", "plan_assignments", "VARCHAR(20)", "'presencial'"),
         ("acknowledged_at", "plan_assignments", "TIMESTAMP", None),
-        ("auto_accept", "trainers", "BOOLEAN", "FALSE"),
+        ("plan_snapshot", "plan_assignments", "JSONB", None),
+        ("version", "plan_assignments", "INTEGER", "1"),
+        ("last_version_viewed", "plan_assignments", "INTEGER", None),
+        ("status", "plan_assignments", "VARCHAR(20)", "'accepted'"),
+        ("accepted_at", "plan_assignments", "TIMESTAMP", None),
+        ("declined_reason", "plan_assignments", "TEXT", None),
+        # User settings table
         ("dnd_enabled", "user_settings", "BOOLEAN", "FALSE"),
         ("dnd_start_time", "user_settings", "TIME", None),
         ("dnd_end_time", "user_settings", "TIME", None),
+        # Training plans table
         ("status", "training_plans", "VARCHAR(20)", "'active'"),
     ]
 
