@@ -15,7 +15,7 @@ class Settings(BaseSettings):
 
     # Application
     APP_NAME: str = "MyFit API"
-    APP_VERSION: str = "0.5.1"
+    APP_VERSION: str = "0.5.3"
     APP_ENV: Literal["development", "staging", "production"] = "development"
     DEBUG: bool = True
     API_V1_PREFIX: str = "/api/v1"
