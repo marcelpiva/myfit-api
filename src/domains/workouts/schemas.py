@@ -639,6 +639,7 @@ class PlanAssignmentResponse(BaseModel):
     student_name: str
     plan_duration_weeks: int | None = None
     plan: PlanResponse | None = None  # Full plan data for client convenience
+    plan_snapshot: dict | None = None  # Independent copy of plan data at assignment time
 
     model_config = ConfigDict(from_attributes=True)
 

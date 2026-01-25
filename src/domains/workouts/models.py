@@ -732,6 +732,10 @@ class PlanAssignment(Base, UUIDMixin, TimestampMixin):
     # Acknowledgment tracking (when student viewed the assignment)
     acknowledged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Independent copy: stores complete plan data at assignment time
+    # This ensures student's prescription is isolated from later changes to the original plan
+    plan_snapshot: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+
     # Relationships
     plan: Mapped["TrainingPlan"] = relationship("TrainingPlan")
     student: Mapped["User"] = relationship("User", foreign_keys=[student_id])

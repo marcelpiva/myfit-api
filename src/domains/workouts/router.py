@@ -1003,6 +1003,7 @@ async def list_plan_assignments(
                 student_name=student.name if student else "",
                 plan_duration_weeks=a.plan.duration_weeks if a.plan else None,
                 plan=plan_response,
+                plan_snapshot=a.plan_snapshot,
             )
         )
 
@@ -1136,6 +1137,7 @@ async def create_plan_assignment(
         plan_name=plan.name,
         student_name=student.name,
         plan_duration_weeks=plan.duration_weeks,
+        plan_snapshot=assignment.plan_snapshot,
     )
 
 
@@ -1208,6 +1210,7 @@ async def respond_to_plan_assignment(
         plan_name=plan.name if plan else "",
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
+        plan_snapshot=assignment.plan_snapshot,
     )
 
 
@@ -1299,6 +1302,7 @@ async def acknowledge_plan_assignment(
         plan_name=plan.name if plan else "",
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
+        plan_snapshot=acknowledged.plan_snapshot,
     )
 
 
@@ -1355,6 +1359,7 @@ async def update_plan_assignment(
         plan_name=updated.plan.name if updated.plan else "",
         student_name=student.name if student else "",
         plan_duration_weeks=plan.duration_weeks if plan else None,
+        plan_snapshot=updated.plan_snapshot,
     )
 
 

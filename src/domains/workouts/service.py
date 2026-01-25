@@ -1416,6 +1416,100 @@ class WorkoutService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    def _create_plan_snapshot(self, plan: TrainingPlan) -> dict:
+        """Create a complete snapshot of a plan for independent prescription.
+
+        This creates an isolated copy of all plan data so that later changes
+        to the original plan don't affect students who already have this prescription.
+        """
+        snapshot = {
+            "id": str(plan.id),
+            "name": plan.name,
+            "description": plan.description,
+            "goal": plan.goal.value if plan.goal else None,
+            "difficulty": plan.difficulty.value if plan.difficulty else None,
+            "split_type": plan.split_type.value if plan.split_type else None,
+            "duration_weeks": plan.duration_weeks,
+            "target_workout_minutes": plan.target_workout_minutes,
+            # Diet configuration
+            "include_diet": plan.include_diet,
+            "diet_type": plan.diet_type,
+            "daily_calories": plan.daily_calories,
+            "protein_grams": plan.protein_grams,
+            "carbs_grams": plan.carbs_grams,
+            "fat_grams": plan.fat_grams,
+            "meals_per_day": plan.meals_per_day,
+            "diet_notes": plan.diet_notes,
+            # Snapshot metadata
+            "snapshot_created_at": datetime.now(timezone.utc).isoformat(),
+            # Workouts with exercises
+            "workouts": [],
+        }
+
+        for pw in plan.plan_workouts:
+            workout = pw.workout
+            workout_snapshot = {
+                "id": str(workout.id),
+                "name": workout.name,
+                "description": workout.description,
+                "difficulty": workout.difficulty.value if workout.difficulty else None,
+                "estimated_duration_min": workout.estimated_duration_min,
+                "target_muscles": workout.target_muscles,
+                "tags": workout.tags,
+                "label": pw.label,
+                "order": pw.order,
+                "day_of_week": pw.day_of_week,
+                "exercises": [],
+            }
+
+            for we in workout.exercises:
+                exercise_snapshot = {
+                    "id": str(we.id),
+                    "exercise_id": str(we.exercise_id),
+                    "order": we.order,
+                    "sets": we.sets,
+                    "reps": we.reps,
+                    "rest_seconds": we.rest_seconds,
+                    "notes": we.notes,
+                    # Advanced technique fields
+                    "technique_type": we.technique_type.value if we.technique_type else None,
+                    "exercise_group_id": str(we.exercise_group_id) if we.exercise_group_id else None,
+                    "exercise_group_order": we.exercise_group_order,
+                    "execution_instructions": we.execution_instructions,
+                    "drop_set_drops": we.drop_set_drops,
+                    "rest_pause_rests": we.rest_pause_rests,
+                    "cluster_reps": we.cluster_reps,
+                    "cluster_rest": we.cluster_rest,
+                    "isometric_seconds": we.isometric_seconds,
+                    # Exercise mode and aerobic fields
+                    "exercise_mode": we.exercise_mode.value if we.exercise_mode else None,
+                    "duration_minutes": we.duration_minutes,
+                    "distance_meters": we.distance_meters,
+                    "work_seconds": we.work_seconds,
+                    "rest_interval_seconds": we.rest_interval_seconds,
+                    "intervals": we.intervals,
+                    "target_calories": we.target_calories,
+                    "target_heart_rate_min": we.target_heart_rate_min,
+                    "target_heart_rate_max": we.target_heart_rate_max,
+                    "target_pace_min_per_km": we.target_pace_min_per_km,
+                    "intensity_level": we.intensity_level,
+                    "hold_seconds": we.hold_seconds,
+                    # Exercise info (denormalized for offline/display)
+                    "exercise": {
+                        "id": str(we.exercise.id),
+                        "name": we.exercise.name,
+                        "muscle_group": we.exercise.muscle_group.value if we.exercise.muscle_group else None,
+                        "equipment": we.exercise.equipment,
+                        "video_url": we.exercise.video_url,
+                        "image_url": we.exercise.image_url,
+                    } if we.exercise else None,
+                }
+                workout_snapshot["exercises"].append(exercise_snapshot)
+
+            snapshot["workouts"].append(workout_snapshot)
+
+        return snapshot
+
     async def create_plan_assignment(
         self,
         plan_id: uuid.UUID,
@@ -1426,11 +1520,22 @@ class WorkoutService:
         notes: str | None = None,
         organization_id: uuid.UUID | None = None,
     ) -> PlanAssignment:
-        """Create a plan assignment.
+        """Create a plan assignment with independent copy.
 
         Plans are auto-accepted (no approval workflow). The student will
         receive a notification and can acknowledge they've seen it.
+
+        Creates an independent snapshot of the plan data so that later
+        modifications to the original plan don't affect this prescription.
         """
+        # Load plan with full data for snapshot
+        plan = await self.get_plan_by_id(plan_id)
+        if not plan:
+            raise ValueError(f"Plan {plan_id} not found")
+
+        # Create independent snapshot
+        plan_snapshot = self._create_plan_snapshot(plan)
+
         assignment = PlanAssignment(
             plan_id=plan_id,
             student_id=student_id,
@@ -1442,6 +1547,8 @@ class WorkoutService:
             # Auto-accept: no approval workflow needed
             status=AssignmentStatus.ACCEPTED,
             accepted_at=datetime.now(timezone.utc),
+            # Store independent copy of plan data
+            plan_snapshot=plan_snapshot,
         )
         self.db.add(assignment)
         await self.db.commit()
