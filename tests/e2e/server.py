@@ -282,6 +282,57 @@ def create_e2e_app() -> FastAPI:
             "trainer_id": trainer_id,
         }
 
+    @app.post("/test/sessions/create")
+    async def create_test_session(
+        workout_id: str,
+        user_id: str,
+        assignment_id: str | None = None,
+        is_shared: bool = False,
+        db: AsyncSession = Depends(get_e2e_db),
+    ):
+        """
+        Create a workout session for testing (bypasses auth).
+
+        Args:
+            workout_id: Workout UUID
+            user_id: User UUID (student)
+            assignment_id: Optional assignment UUID
+            is_shared: Whether this is a co-training session
+        """
+        import uuid
+        import traceback
+        from datetime import datetime, timezone
+        from src.domains.workouts.models import WorkoutSession, SessionStatus
+
+        try:
+            session_id = uuid.uuid4()
+            session = WorkoutSession(
+                id=session_id,
+                workout_id=uuid.UUID(workout_id),
+                user_id=uuid.UUID(user_id),
+                assignment_id=uuid.UUID(assignment_id) if assignment_id else None,
+                is_shared=is_shared,
+                status=SessionStatus.WAITING if is_shared else SessionStatus.ACTIVE,
+                started_at=datetime.now(timezone.utc),
+            )
+            db.add(session)
+            await db.commit()
+            await db.refresh(session)
+
+            return {
+                "id": str(session.id),
+                "workout_id": str(session.workout_id),
+                "user_id": str(session.user_id),
+                "status": session.status.value,
+                "is_shared": session.is_shared,
+            }
+        except Exception as e:
+            traceback.print_exc()
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to create session: {str(e)}",
+            )
+
     return app
 
 
