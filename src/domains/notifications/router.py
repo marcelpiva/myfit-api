@@ -454,20 +454,35 @@ async def register_device(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> DeviceTokenResponse:
-    """Register a device token for push notifications."""
+    """Register a device token for push notifications.
+
+    This endpoint is called by the mobile app after obtaining an FCM token.
+    The token is stored and associated with the current user for sending push notifications.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    logger.info(f"🔔 [DEVICE] Registering device for user {current_user.id} ({current_user.email})")
+    logger.info(f"🔔 [DEVICE] Platform: {request.platform}")
+    logger.info(f"🔔 [DEVICE] Token prefix: {request.token[:30]}...")
+    logger.info(f"🔔 [DEVICE] Token length: {len(request.token)}")
+
     # Check if token already exists
     existing_query = select(DeviceToken).where(DeviceToken.token == request.token)
     result = await db.execute(existing_query)
     existing_token = result.scalar_one_or_none()
 
     if existing_token:
+        logger.info(f"🔔 [DEVICE] Token already exists (ID: {existing_token.id})")
         # Update existing token to current user if different
         if existing_token.user_id != current_user.id:
+            logger.info(f"🔔 [DEVICE] Transferring token from user {existing_token.user_id} to {current_user.id}")
             existing_token.user_id = current_user.id
         existing_token.is_active = True
         existing_token.last_used_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(existing_token)
+        logger.info(f"🔔 [DEVICE] ✅ Token updated successfully")
         return DeviceTokenResponse(
             id=existing_token.id,
             token=existing_token.token,
@@ -487,6 +502,8 @@ async def register_device(
     db.add(device_token)
     await db.commit()
     await db.refresh(device_token)
+
+    logger.info(f"🔔 [DEVICE] ✅ New device token created (ID: {device_token.id})")
 
     return DeviceTokenResponse(
         id=device_token.id,
@@ -557,11 +574,101 @@ async def get_push_status(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> dict:
-    """Debug endpoint to check push notification status for current user."""
-    from .push_service import _init_firebase
+    """Debug endpoint to check push notification status for current user.
 
-    firebase_app = _init_firebase()
+    Use this endpoint to diagnose push notification issues:
+    1. Check if Firebase is configured and initialized
+    2. Check if user has registered device tokens
+    3. Verify device token details
 
+    Returns detailed status information for debugging.
+    """
+    from .push_service import get_firebase_status
+
+    firebase_status = get_firebase_status()
+
+    # Get all device tokens for user (including inactive)
+    query = select(DeviceToken).where(DeviceToken.user_id == current_user.id)
+    result = await db.execute(query)
+    all_tokens = list(result.scalars().all())
+
+    active_tokens = [t for t in all_tokens if t.is_active]
+    inactive_tokens = [t for t in all_tokens if not t.is_active]
+
+    return {
+        "user_id": str(current_user.id),
+        "user_email": current_user.email,
+        "firebase": firebase_status,
+        "device_tokens": {
+            "total": len(all_tokens),
+            "active": len(active_tokens),
+            "inactive": len(inactive_tokens),
+        },
+        "active_devices": [
+            {
+                "id": str(t.id),
+                "platform": t.platform.value,
+                "token_prefix": t.token[:30] + "..." if t.token else None,
+                "token_length": len(t.token) if t.token else 0,
+                "last_used": t.last_used_at.isoformat() if t.last_used_at else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+            }
+            for t in active_tokens
+        ],
+        "inactive_devices": [
+            {
+                "id": str(t.id),
+                "platform": t.platform.value,
+                "token_prefix": t.token[:30] + "..." if t.token else None,
+                "created_at": t.created_at.isoformat() if t.created_at else None,
+                "reason": "Token was deactivated (expired or unregistered)",
+            }
+            for t in inactive_tokens
+        ],
+        "troubleshooting": {
+            "step_1": "Check firebase.firebase_configured - should be True",
+            "step_2": "Check firebase.firebase_initialized - should be True",
+            "step_3": "Check device_tokens.active - should be >= 1",
+            "step_4": "If all OK, use /debug/test-push to send a test notification",
+        },
+    }
+
+
+@router.post("/debug/test-push")
+async def send_test_push(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Send a test push notification to current user's devices.
+
+    Use this endpoint to test if push notifications are working:
+    1. First call /debug/push-status to verify setup
+    2. Then call this endpoint to send a test notification
+    3. You should receive a push notification on your device
+
+    If notification doesn't arrive, check:
+    - Firebase credentials configured in backend .env
+    - APNs key configured in Firebase Console (for iOS)
+    - Device has granted notification permission
+    - Device token is correctly registered
+    """
+    from .push_service import send_push_notification, get_firebase_status
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Get status first
+    firebase_status = get_firebase_status()
+
+    if not firebase_status.get("firebase_configured"):
+        return {
+            "success": False,
+            "error": "Firebase not configured",
+            "message": "Set FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON in .env",
+            "firebase_status": firebase_status,
+        }
+
+    # Count active tokens
     query = select(DeviceToken).where(
         and_(
             DeviceToken.user_id == current_user.id,
@@ -571,35 +678,29 @@ async def get_push_status(
     result = await db.execute(query)
     tokens = list(result.scalars().all())
 
-    return {
-        "firebase_configured": firebase_app is not None,
-        "active_device_tokens": len(tokens),
-        "devices": [
-            {
-                "platform": t.platform.value,
-                "token_prefix": t.token[:20] + "..." if t.token else None,
-                "last_used": t.last_used_at.isoformat() if t.last_used_at else None,
-                "created_at": t.created_at.isoformat() if t.created_at else None,
-            }
-            for t in tokens
-        ],
-    }
+    if not tokens:
+        return {
+            "success": False,
+            "error": "No active device tokens",
+            "message": "User has no registered device tokens. Make sure the app has called the device registration endpoint.",
+            "firebase_status": firebase_status,
+        }
 
-
-@router.post("/debug/test-push")
-async def send_test_push(
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> dict:
-    """Send a test push notification to current user's devices."""
-    from .push_service import send_push_notification
+    logger.info(f"🔔 Sending test push to user {current_user.id} ({current_user.email})")
+    logger.info(f"🔔 Found {len(tokens)} active device token(s)")
 
     count = await send_push_notification(
         db=db,
         user_id=current_user.id,
-        title="Teste de Notificação",
+        title="Teste de Notificação 🔔",
         body="Se você vê isso, push notifications estão funcionando!",
-        data={"type": "test"},
+        data={"type": "test", "timestamp": str(datetime.now(timezone.utc).isoformat())},
     )
 
-    return {"success": count > 0, "notifications_sent": count}
+    return {
+        "success": count > 0,
+        "notifications_sent": count,
+        "total_devices": len(tokens),
+        "firebase_status": firebase_status,
+        "message": "Notification sent! Check your device." if count > 0 else "Failed to send notification. Check server logs for details.",
+    }

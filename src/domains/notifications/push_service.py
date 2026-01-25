@@ -21,6 +21,7 @@ def _init_firebase():
     """Initialize Firebase Admin SDK."""
     global _firebase_app
     if _firebase_app is not None:
+        logger.debug("🔔 Firebase already initialized, reusing existing app")
         return _firebase_app
 
     try:
@@ -31,6 +32,7 @@ def _init_firebase():
         # Check if already initialized
         try:
             _firebase_app = firebase_admin.get_app()
+            logger.debug("🔔 Firebase app already exists, reusing")
             return _firebase_app
         except ValueError:
             pass
@@ -39,27 +41,74 @@ def _init_firebase():
         cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
         cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
 
+        logger.info(f"🔔 Firebase config - FIREBASE_CREDENTIALS_PATH: {'SET' if cred_path else 'NOT SET'}")
+        logger.info(f"🔔 Firebase config - FIREBASE_CREDENTIALS_JSON: {'SET' if cred_json else 'NOT SET'}")
+
         if cred_json:
             # Parse JSON from environment variable
+            logger.info("🔔 Loading Firebase credentials from FIREBASE_CREDENTIALS_JSON")
             cred_dict = json.loads(cred_json)
             cred = credentials.Certificate(cred_dict)
+            logger.info(f"🔔 Firebase project_id: {cred_dict.get('project_id', 'unknown')}")
         elif cred_path:
             # Load from file
+            logger.info(f"🔔 Loading Firebase credentials from file: {cred_path}")
             cred = credentials.Certificate(cred_path)
         else:
-            logger.warning("Firebase credentials not configured. Push notifications will be disabled.")
+            logger.warning("🔔 ❌ Firebase credentials not configured. Push notifications will be disabled.")
+            logger.warning("🔔 Set FIREBASE_CREDENTIALS_PATH or FIREBASE_CREDENTIALS_JSON in .env")
             return None
 
         _firebase_app = firebase_admin.initialize_app(cred)
-        logger.info("Firebase Admin SDK initialized successfully")
+        logger.info("🔔 ✅ Firebase Admin SDK initialized successfully")
         return _firebase_app
 
-    except ImportError:
-        logger.warning("firebase-admin package not installed. Push notifications will be disabled.")
+    except ImportError as e:
+        logger.warning(f"🔔 ❌ firebase-admin package not installed: {e}")
+        logger.warning("🔔 Run: pip install firebase-admin")
         return None
     except Exception as e:
-        logger.error(f"Failed to initialize Firebase Admin SDK: {e}")
+        logger.error(f"🔔 ❌ Failed to initialize Firebase Admin SDK: {e}")
+        import traceback
+        logger.error(f"🔔 Traceback: {traceback.format_exc()}")
         return None
+
+
+def get_firebase_status() -> dict:
+    """Get Firebase initialization status for debugging."""
+    import os
+
+    cred_path = os.getenv("FIREBASE_CREDENTIALS_PATH")
+    cred_json = os.getenv("FIREBASE_CREDENTIALS_JSON")
+
+    status = {
+        "firebase_configured": False,
+        "firebase_initialized": _firebase_app is not None,
+        "credentials_path_set": bool(cred_path),
+        "credentials_json_set": bool(cred_json),
+        "firebase_admin_installed": False,
+    }
+
+    try:
+        import firebase_admin
+        status["firebase_admin_installed"] = True
+        status["firebase_admin_version"] = firebase_admin.__version__
+    except ImportError:
+        pass
+
+    if cred_path or cred_json:
+        status["firebase_configured"] = True
+
+    # Try to init and get project info
+    app = _init_firebase()
+    if app:
+        status["firebase_initialized"] = True
+        try:
+            status["project_id"] = app.project_id
+        except Exception:
+            pass
+
+    return status
 
 
 async def send_push_notification(
@@ -85,16 +134,20 @@ async def send_push_notification(
     """
     from .models import DeviceToken
 
+    logger.info(f"🔔 [PUSH] Starting send_push_notification for user {user_id}")
+    logger.info(f"🔔 [PUSH] Title: {title}")
+    logger.info(f"🔔 [PUSH] Body: {body[:50]}...")
+
     # Initialize Firebase if needed
     app = _init_firebase()
     if app is None:
-        logger.warning(f"Firebase not initialized. Skipping push notification for user {user_id}")
+        logger.warning(f"🔔 [PUSH] ❌ Firebase not initialized. Skipping push notification for user {user_id}")
         return 0
 
     try:
         from firebase_admin import messaging
     except ImportError:
-        logger.warning("firebase-admin not installed. Skipping push notification.")
+        logger.warning("🔔 [PUSH] ❌ firebase-admin not installed. Skipping push notification.")
         return 0
 
     # Get active device tokens for user
@@ -106,8 +159,10 @@ async def send_push_notification(
     tokens = list(result.scalars().all())
 
     if not tokens:
-        logger.debug(f"No active device tokens for user {user_id}")
+        logger.warning(f"🔔 [PUSH] ❌ No active device tokens for user {user_id}")
         return 0
+
+    logger.info(f"🔔 [PUSH] Found {len(tokens)} active device token(s)")
 
     # Prepare message
     notification = messaging.Notification(
@@ -122,7 +177,10 @@ async def send_push_notification(
     success_count = 0
     failed_tokens = []
 
-    for device_token in tokens:
+    for i, device_token in enumerate(tokens):
+        logger.info(f"🔔 [PUSH] Sending to device {i+1}/{len(tokens)} ({device_token.platform.value})")
+        logger.debug(f"🔔 [PUSH] Token prefix: {device_token.token[:30]}...")
+
         try:
             message = messaging.Message(
                 notification=notification,
@@ -138,40 +196,53 @@ async def send_push_notification(
                     ),
                 ),
                 apns=messaging.APNSConfig(
+                    headers={
+                        "apns-priority": "10",  # High priority
+                        "apns-push-type": "alert",
+                    },
                     payload=messaging.APNSPayload(
                         aps=messaging.Aps(
                             badge=1,
                             sound="default",
+                            content_available=True,
                         ),
                     ),
                 ),
             )
 
             response = messaging.send(message)
-            logger.debug(f"Push notification sent: {response}")
+            logger.info(f"🔔 [PUSH] ✅ Push notification sent successfully: {response}")
             success_count += 1
 
         except messaging.UnregisteredError:
             # Token is no longer valid
-            logger.info(f"Device token unregistered: {device_token.token[:20]}...")
+            logger.warning(f"🔔 [PUSH] ❌ Device token unregistered (expired): {device_token.token[:30]}...")
             failed_tokens.append(device_token)
 
         except messaging.SenderIdMismatchError:
             # Token belongs to a different Firebase project
-            logger.warning(f"Sender ID mismatch for token: {device_token.token[:20]}...")
+            logger.error(f"🔔 [PUSH] ❌ Sender ID mismatch - token from different Firebase project: {device_token.token[:30]}...")
+            logger.error("🔔 [PUSH] This usually means the app was built with different Firebase config than the server")
             failed_tokens.append(device_token)
 
+        except messaging.InvalidArgumentError as e:
+            logger.error(f"🔔 [PUSH] ❌ Invalid argument error: {e}")
+            logger.error("🔔 [PUSH] This might indicate an invalid token format")
+
         except Exception as e:
-            logger.error(f"Failed to send push notification: {e}")
+            logger.error(f"🔔 [PUSH] ❌ Failed to send push notification: {e}")
+            import traceback
+            logger.error(f"🔔 [PUSH] Traceback: {traceback.format_exc()}")
 
     # Deactivate failed tokens
     for token in failed_tokens:
         token.is_active = False
+        logger.info(f"🔔 [PUSH] Deactivating failed token: {token.token[:30]}...")
 
     if failed_tokens:
         await db.commit()
 
-    logger.info(f"Push notifications sent: {success_count}/{len(tokens)} for user {user_id}")
+    logger.info(f"🔔 [PUSH] Push notifications completed: {success_count}/{len(tokens)} sent for user {user_id}")
     return success_count
 
 

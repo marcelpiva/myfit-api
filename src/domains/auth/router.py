@@ -87,7 +87,7 @@ async def login(
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account is disabled",
+            detail="Sua conta está desativada",
         )
 
     # Generate tokens
