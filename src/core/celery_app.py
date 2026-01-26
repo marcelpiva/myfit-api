@@ -70,46 +70,32 @@ celery_app.conf.beat_schedule = {
     "send-workout-reminders-hourly": {
         "task": "src.tasks.reminders.send_workout_reminders",
         "schedule": crontab(minute=0, hour="6-22"),
-        "options": {"queue": "reminders"},
     },
 
     # Check inactive students - daily at 10am
     "check-inactive-students-daily": {
         "task": "src.tasks.notifications.check_inactive_students",
         "schedule": crontab(minute=0, hour=10),
-        "options": {"queue": "notifications"},
     },
 
     # Send invite reminders - daily at 9am
     "send-invite-reminders-daily": {
         "task": "src.tasks.notifications.send_invite_reminders",
         "schedule": crontab(minute=0, hour=9),
-        "options": {"queue": "notifications"},
     },
 
     # Plan expiration warnings - daily at 8am
     "check-expiring-plans-daily": {
         "task": "src.tasks.notifications.check_expiring_plans",
         "schedule": crontab(minute=0, hour=8),
-        "options": {"queue": "notifications"},
     },
 
     # Cleanup old notifications - weekly on Sunday at 3am
     "cleanup-old-notifications-weekly": {
         "task": "src.tasks.notifications.cleanup_old_notifications",
         "schedule": crontab(minute=0, hour=3, day_of_week=0),
-        "options": {"queue": "maintenance"},
     },
 }
-
-# Task routing
-celery_app.conf.task_routes = {
-    "src.tasks.reminders.*": {"queue": "reminders"},
-    "src.tasks.notifications.*": {"queue": "notifications"},
-}
-
-# Default queue
-celery_app.conf.task_default_queue = "default"
 
 
 # Optional: Configure for Railway
