@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-01-25
+
+### Fixed
+- **Stretching Exercises** - Added missing stretching exercises to database seed
+  - Added `stretching` value to PostgreSQL `muscle_group_enum`
+  - Seeded 18 stretching/flexibility exercises
+
 ## [0.6.1] - 2026-01-25
 
 ### Added
