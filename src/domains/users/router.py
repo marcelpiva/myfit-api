@@ -48,12 +48,59 @@ from src.domains.progress.models import WeightLog
 router = APIRouter()
 
 
+def _user_to_response(user) -> UserProfileResponse:
+    """Convert User model to UserProfileResponse with JSON parsing."""
+    import json
+
+    specialties = None
+    if user.specialties:
+        try:
+            specialties = json.loads(user.specialties)
+        except (json.JSONDecodeError, TypeError):
+            specialties = None
+
+    injuries = None
+    if user.injuries:
+        try:
+            injuries = json.loads(user.injuries)
+        except (json.JSONDecodeError, TypeError):
+            injuries = None
+
+    return UserProfileResponse(
+        id=user.id,
+        email=user.email,
+        name=user.name,
+        phone=user.phone,
+        avatar_url=user.avatar_url,
+        birth_date=user.birth_date,
+        gender=user.gender,
+        height_cm=user.height_cm,
+        bio=user.bio,
+        is_active=user.is_active,
+        is_verified=user.is_verified,
+        user_type=user.user_type.value if user.user_type else "student",
+        cref=user.cref,
+        cref_verified=user.cref_verified,
+        specialties=specialties,
+        years_of_experience=user.years_of_experience,
+        fitness_goal=user.fitness_goal,
+        fitness_goal_other=user.fitness_goal_other,
+        experience_level=user.experience_level,
+        weight_kg=user.weight_kg,
+        age=user.age,
+        weekly_frequency=user.weekly_frequency,
+        injuries=injuries,
+        injuries_other=user.injuries_other,
+        onboarding_completed=user.onboarding_completed,
+    )
+
+
 @router.get("/profile", response_model=UserProfileResponse)
 async def get_profile(
     current_user: CurrentUser,
 ) -> UserProfileResponse:
     """Get current user's profile."""
-    return UserProfileResponse.model_validate(current_user)
+    return _user_to_response(current_user)
 
 
 @router.put("/profile", response_model=UserProfileResponse)
@@ -73,9 +120,21 @@ async def update_profile(
         gender=request.gender,
         height_cm=request.height_cm,
         bio=request.bio,
+        cref=request.cref,
+        specialties=request.specialties,
+        years_of_experience=request.years_of_experience,
+        fitness_goal=request.fitness_goal,
+        fitness_goal_other=request.fitness_goal_other,
+        experience_level=request.experience_level,
+        weight_kg=request.weight_kg,
+        age=request.age,
+        weekly_frequency=request.weekly_frequency,
+        injuries=request.injuries,
+        injuries_other=request.injuries_other,
+        onboarding_completed=request.onboarding_completed,
     )
 
-    return UserProfileResponse.model_validate(updated_user)
+    return _user_to_response(updated_user)
 
 
 @router.post("/avatar", response_model=AvatarUploadResponse)

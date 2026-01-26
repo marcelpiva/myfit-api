@@ -25,6 +25,20 @@ class UserProfileResponse(BaseModel):
     # Professional credentials
     cref: str | None = None
     cref_verified: bool = False
+    # Trainer onboarding fields
+    specialties: list[str] | None = None
+    years_of_experience: int | None = None
+    # Student onboarding fields
+    fitness_goal: str | None = None
+    fitness_goal_other: str | None = None
+    experience_level: str | None = None
+    weight_kg: float | None = None
+    age: int | None = None
+    weekly_frequency: int | None = None
+    injuries: list[str] | None = None
+    injuries_other: str | None = None
+    # Onboarding tracking
+    onboarding_completed: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -40,6 +54,20 @@ class UserProfileUpdate(BaseModel):
     bio: str | None = Field(None, max_length=1000)
     # Professional credentials (for trainers)
     cref: str | None = Field(None, max_length=20, description="CREF registration number")
+    # Trainer onboarding fields
+    specialties: list[str] | None = None
+    years_of_experience: int | None = Field(None, ge=0, le=60)
+    # Student onboarding fields
+    fitness_goal: str | None = Field(None, max_length=50)
+    fitness_goal_other: str | None = Field(None, max_length=200)
+    experience_level: str | None = Field(None, max_length=20)
+    weight_kg: float | None = Field(None, ge=20, le=500)
+    age: int | None = Field(None, ge=10, le=120)
+    weekly_frequency: int | None = Field(None, ge=1, le=7)
+    injuries: list[str] | None = None
+    injuries_other: str | None = Field(None, max_length=200)
+    # Onboarding tracking
+    onboarding_completed: bool | None = None
 
 
 class UserSettingsResponse(BaseModel):

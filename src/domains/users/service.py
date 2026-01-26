@@ -52,6 +52,18 @@ class UserService:
         gender: Gender | None = None,
         height_cm: float | None = None,
         bio: str | None = None,
+        cref: str | None = None,
+        specialties: list[str] | None = None,
+        years_of_experience: int | None = None,
+        fitness_goal: str | None = None,
+        fitness_goal_other: str | None = None,
+        experience_level: str | None = None,
+        weight_kg: float | None = None,
+        age: int | None = None,
+        weekly_frequency: int | None = None,
+        injuries: list[str] | None = None,
+        injuries_other: str | None = None,
+        onboarding_completed: bool | None = None,
     ) -> User:
         """Update user profile.
 
@@ -63,10 +75,24 @@ class UserService:
             gender: New gender (optional)
             height_cm: New height in cm (optional)
             bio: New bio (optional)
+            cref: CREF registration number (optional)
+            specialties: List of specialties for trainers (optional)
+            years_of_experience: Years of experience for trainers (optional)
+            fitness_goal: Fitness goal for students (optional)
+            fitness_goal_other: Custom fitness goal (optional)
+            experience_level: Experience level for students (optional)
+            weight_kg: Weight in kg (optional)
+            age: Age (optional)
+            weekly_frequency: Weekly workout frequency (optional)
+            injuries: List of injuries (optional)
+            injuries_other: Custom injuries description (optional)
+            onboarding_completed: Whether onboarding is completed (optional)
 
         Returns:
             The updated User object
         """
+        import json
+
         if name is not None:
             user.name = name
         if phone is not None:
@@ -79,6 +105,30 @@ class UserService:
             user.height_cm = height_cm
         if bio is not None:
             user.bio = bio
+        if cref is not None:
+            user.cref = cref
+        if specialties is not None:
+            user.specialties = json.dumps(specialties)
+        if years_of_experience is not None:
+            user.years_of_experience = years_of_experience
+        if fitness_goal is not None:
+            user.fitness_goal = fitness_goal
+        if fitness_goal_other is not None:
+            user.fitness_goal_other = fitness_goal_other
+        if experience_level is not None:
+            user.experience_level = experience_level
+        if weight_kg is not None:
+            user.weight_kg = weight_kg
+        if age is not None:
+            user.age = age
+        if weekly_frequency is not None:
+            user.weekly_frequency = weekly_frequency
+        if injuries is not None:
+            user.injuries = json.dumps(injuries)
+        if injuries_other is not None:
+            user.injuries_other = injuries_other
+        if onboarding_completed is not None:
+            user.onboarding_completed = onboarding_completed
 
         await self.db.commit()
         await self.db.refresh(user)

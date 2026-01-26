@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.4] - 2026-01-26
+
+### Added
+- **Onboarding Profile Fields** - New fields for storing onboarding data
+  - Trainer fields: `specialties` (JSON), `years_of_experience`
+  - Student fields: `fitness_goal`, `fitness_goal_other`, `experience_level`, `weight_kg`, `age`, `weekly_frequency`, `injuries` (JSON), `injuries_other`
+  - Tracking flag: `onboarding_completed`
+  - Migration: `add_onboarding_fields.py`
+
+- **Profile Endpoint Updates** - GET/PUT `/users/profile` now handle onboarding data
+  - `UserProfileResponse` includes all onboarding fields
+  - `UserProfileUpdate` accepts all onboarding fields
+  - JSON fields (specialties, injuries) automatically serialized/deserialized
+
+### Changed
+- `UserService.update_profile()` handles all new onboarding fields
+- Added `_user_to_response()` helper for JSON field parsing in router
+
 ## [0.6.3] - 2026-01-26
 
 ### Fixed

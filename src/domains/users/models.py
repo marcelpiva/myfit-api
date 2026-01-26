@@ -96,6 +96,23 @@ class User(Base, UUIDMixin, TimestampMixin):
     cref_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
     cref_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    # Trainer onboarding fields
+    specialties: Mapped[str | None] = mapped_column(String(500), nullable=True)  # JSON array as string
+    years_of_experience: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Student onboarding fields
+    fitness_goal: Mapped[str | None] = mapped_column(String(50), nullable=True)  # loseWeight, gainMuscle, etc
+    fitness_goal_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    experience_level: Mapped[str | None] = mapped_column(String(20), nullable=True)  # beginner, intermediate, advanced
+    weight_kg: Mapped[float | None] = mapped_column(Float, nullable=True)
+    age: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    weekly_frequency: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    injuries: Mapped[str | None] = mapped_column(String(500), nullable=True)  # JSON array as string
+    injuries_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+    # Onboarding completion tracking
+    onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+
     # Relationships
     settings: Mapped["UserSettings"] = relationship(
         "UserSettings",
