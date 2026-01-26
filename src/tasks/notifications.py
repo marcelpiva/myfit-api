@@ -210,12 +210,13 @@ async def _send_invite_reminders_async():
     from sqlalchemy.orm import sessionmaker
     import os
 
-    from src.domains.organizations.models import OrganizationInvite, InviteStatus
+    from src.domains.organizations.models import OrganizationInvite
     from src.domains.users.models import User
     from src.domains.notifications.models import NotificationType
     from src.domains.notifications.schemas import NotificationCreate
     from src.domains.notifications.router import create_notification
     from src.domains.notifications.push_service import send_push_notification
+    from src.core.email import send_invite_reminder_email
 
     database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./myfit.db")
     if database_url.startswith("postgres://"):
@@ -227,17 +228,18 @@ async def _send_invite_reminders_async():
     async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
     sent_count = 0
+    expired_count = 0
 
     async with async_session() as db:
         try:
             now = datetime.now(timezone.utc)
             today = now.date()
 
-            # Get pending invites
+            # Get pending invites (accepted_at is NULL and not expired)
             invites_query = (
                 select(OrganizationInvite)
                 .where(
-                    OrganizationInvite.status == InviteStatus.PENDING,
+                    OrganizationInvite.accepted_at.is_(None),
                     OrganizationInvite.expires_at > now,
                 )
             )
@@ -253,13 +255,14 @@ async def _send_invite_reminders_async():
                     result = await db.execute(inviter_query)
                     inviter_name = result.scalar() or "Um personal"
 
-                    # 3-day reminder to invitee (if they have an account)
+                    # 3-day reminder to invitee
                     if days_pending == 3 and invite.email:
                         # Check if user exists with this email
                         user_query = select(User).where(User.email == invite.email)
                         result = await db.execute(user_query)
                         user = result.scalar_one_or_none()
 
+                        # Send push if user exists
                         if user:
                             await send_push_notification(
                                 db=db,
@@ -271,7 +274,20 @@ async def _send_invite_reminders_async():
                                     "invite_id": str(invite.id),
                                 },
                             )
-                            sent_count += 1
+
+                        # Always send email reminder
+                        try:
+                            await send_invite_reminder_email(
+                                to_email=invite.email,
+                                inviter_name=inviter_name,
+                                org_name=invite.organization.name if invite.organization else "MyFit",
+                                invite_token=invite.token,
+                                is_final=False,
+                            )
+                        except Exception as email_error:
+                            logger.warning(f"Failed to send reminder email to {invite.email}: {email_error}")
+
+                        sent_count += 1
 
                     # 7-day reminder to inviter
                     elif days_pending == 7:
@@ -321,16 +337,62 @@ async def _send_invite_reminders_async():
                             )
                             sent_count += 1
 
+                        # Also send email reminder
+                        try:
+                            await send_invite_reminder_email(
+                                to_email=invite.email,
+                                inviter_name=inviter_name,
+                                org_name=invite.organization.name if invite.organization else "MyFit",
+                                invite_token=invite.token,
+                                is_final=True,
+                            )
+                        except Exception as email_error:
+                            logger.warning(f"Failed to send reminder email to {invite.email}: {email_error}")
+
                 except Exception as e:
                     logger.error(f"Error processing invite {invite.id}: {e}")
                     continue
+
+            # Also check for expired invites and notify inviters
+            expired_query = (
+                select(OrganizationInvite)
+                .where(
+                    OrganizationInvite.accepted_at.is_(None),
+                    OrganizationInvite.expires_at <= now,
+                )
+            )
+            result = await db.execute(expired_query)
+            expired_invites = result.scalars().all()
+
+            for invite in expired_invites:
+                try:
+                    # Notify inviter that invite expired
+                    await create_notification(
+                        db=db,
+                        notification_data=NotificationCreate(
+                            user_id=invite.invited_by_id,
+                            notification_type=NotificationType.INVITE_RECEIVED,
+                            title="Convite expirado",
+                            body=f"O convite para {invite.email} expirou",
+                            icon="mail-x",
+                            action_type="navigate",
+                            action_data='{"route": "/students"}',
+                            reference_type="invite",
+                            reference_id=invite.id,
+                        ),
+                    )
+                    expired_count += 1
+                except Exception as e:
+                    logger.error(f"Error notifying about expired invite {invite.id}: {e}")
+
+            await db.commit()
 
         except Exception as e:
             logger.error(f"Error in invite reminders task: {e}")
             raise
 
-    logger.info(f"Invite reminders: sent={sent_count}")
-    return {"sent": sent_count}
+    logger.info(f"Invite reminders: sent={sent_count}, expired_notified={expired_count}")
+    return {"sent": sent_count, "expired_notified": expired_count}
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)

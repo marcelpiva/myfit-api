@@ -433,6 +433,91 @@ async def send_invite_email(
     )
 
 
+async def send_invite_reminder_email(
+    to_email: str,
+    inviter_name: str,
+    org_name: str,
+    invite_token: str,
+    is_final: bool = False,
+) -> bool:
+    """Send invite reminder email.
+
+    Args:
+        to_email: Recipient email
+        inviter_name: Name of the person who sent the invite
+        org_name: Organization name
+        invite_token: Invite token for the link
+        is_final: True if this is the final reminder (14 days)
+    """
+    invite_url = f"https://myfit.app/invite/{invite_token}"
+
+    if is_final:
+        subject = f"Último lembrete: {inviter_name} ainda está esperando sua resposta!"
+        urgency_text = "Este é seu último lembrete. O convite expira em breve!"
+    else:
+        subject = f"Lembrete: {inviter_name} convidou você para o MyFit"
+        urgency_text = "Não deixe seu personal esperando!"
+
+    html_content = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Lembrete de Convite</title>
+        <style>
+            body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; }}
+            .header {{ background: linear-gradient(135deg, #f59e0b 0%, #f97316 100%); color: white; padding: 30px; text-align: center; border-radius: 8px 8px 0 0; }}
+            .content {{ background: #f8fafc; padding: 30px; border-radius: 0 0 8px 8px; }}
+            .button {{ display: inline-block; background: #6366f1; color: white; padding: 14px 28px; text-decoration: none; border-radius: 6px; margin: 20px 0; font-weight: 600; }}
+            .urgency {{ background: #fef3c7; border-left: 4px solid #f59e0b; padding: 12px 16px; margin: 20px 0; }}
+            .footer {{ text-align: center; color: #64748b; font-size: 14px; margin-top: 20px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="header">
+                <h1>{"⚠️ Último Lembrete!" if is_final else "📬 Lembrete de Convite"}</h1>
+            </div>
+            <div class="content">
+                <p>Olá!</p>
+                <p><strong>{inviter_name}</strong> de <strong>{org_name}</strong> ainda está aguardando você aceitar o convite para o MyFit.</p>
+
+                <div class="urgency">
+                    <p style="margin: 0;"><strong>{urgency_text}</strong></p>
+                </div>
+
+                <p>Com o MyFit você pode:</p>
+                <ul>
+                    <li>Acompanhar seus treinos personalizados</li>
+                    <li>Registrar seu progresso</li>
+                    <li>Comunicar-se com seu personal</li>
+                </ul>
+
+                <p style="text-align: center;">
+                    <a href="{invite_url}" class="button">Aceitar Convite</a>
+                </p>
+
+                <p style="font-size: 14px; color: #64748b;">
+                    Se você não solicitou este convite, pode ignorar este email.
+                </p>
+            </div>
+            <div class="footer">
+                <p>MyFit - Sua jornada fitness começa aqui</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+    return await EmailService.send_email(
+        to_email=to_email,
+        subject=subject,
+        html_content=html_content,
+    )
+
+
 async def send_workout_reminder_email(
     to_email: str,
     name: str,

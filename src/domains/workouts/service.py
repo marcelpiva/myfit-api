@@ -18,6 +18,7 @@ from src.domains.workouts.models import (
     NoteAuthorRole,
     NoteContextType,
     PlanAssignment,
+    PlanVersion,
     PlanWorkout,
     PrescriptionNote,
     SessionMessage,
@@ -2178,3 +2179,224 @@ class WorkoutService:
         await self.db.commit()
         await self.db.refresh(feedback)
         return feedback
+
+    # Plan Versioning operations
+
+    async def create_plan_version(
+        self,
+        assignment: PlanAssignment,
+        changed_by_id: uuid.UUID,
+        change_description: str | None = None,
+    ) -> PlanVersion:
+        """Create a new version record for a plan assignment.
+
+        This should be called BEFORE updating the plan_snapshot to preserve
+        the previous state.
+
+        Args:
+            assignment: The plan assignment to version
+            changed_by_id: The user making the change
+            change_description: Optional description of what changed
+
+        Returns:
+            The created PlanVersion record
+        """
+        if not assignment.plan_snapshot:
+            # If no snapshot exists, nothing to version
+            return None
+
+        version = PlanVersion(
+            assignment_id=assignment.id,
+            version=assignment.version,
+            snapshot=assignment.plan_snapshot,
+            changed_by_id=changed_by_id,
+            change_description=change_description,
+        )
+        self.db.add(version)
+
+        # Increment the version number on the assignment
+        assignment.version += 1
+
+        await self.db.commit()
+        await self.db.refresh(version)
+        return version
+
+    async def get_plan_versions(
+        self,
+        assignment_id: uuid.UUID,
+    ) -> list[PlanVersion]:
+        """Get all version history for a plan assignment."""
+        result = await self.db.execute(
+            select(PlanVersion)
+            .where(PlanVersion.assignment_id == assignment_id)
+            .options(selectinload(PlanVersion.changed_by))
+            .order_by(PlanVersion.version.desc())
+        )
+        return list(result.scalars().all())
+
+    async def get_plan_version(
+        self,
+        assignment_id: uuid.UUID,
+        version: int,
+    ) -> PlanVersion | None:
+        """Get a specific version of a plan assignment."""
+        result = await self.db.execute(
+            select(PlanVersion)
+            .where(
+                PlanVersion.assignment_id == assignment_id,
+                PlanVersion.version == version,
+            )
+            .options(selectinload(PlanVersion.changed_by))
+        )
+        return result.scalar_one_or_none()
+
+    async def mark_version_viewed(
+        self,
+        assignment: PlanAssignment,
+        version: int,
+    ) -> PlanAssignment:
+        """Mark that the student has viewed a specific version."""
+        assignment.last_version_viewed = version
+        await self.db.commit()
+        await self.db.refresh(assignment)
+        return assignment
+
+    async def update_plan_snapshot(
+        self,
+        assignment: PlanAssignment,
+        new_snapshot: dict,
+        changed_by_id: uuid.UUID,
+        change_description: str | None = None,
+    ) -> PlanAssignment:
+        """Update the plan snapshot and create a version record.
+
+        This method:
+        1. Creates a version record with the current snapshot
+        2. Updates the assignment with the new snapshot
+        3. Increments the version number
+
+        Args:
+            assignment: The plan assignment to update
+            new_snapshot: The new snapshot data
+            changed_by_id: User making the change
+            change_description: Optional description
+
+        Returns:
+            The updated assignment
+        """
+        # Create version record with current state (if exists)
+        if assignment.plan_snapshot:
+            await self.create_plan_version(
+                assignment=assignment,
+                changed_by_id=changed_by_id,
+                change_description=change_description,
+            )
+
+        # Update to new snapshot
+        assignment.plan_snapshot = new_snapshot
+
+        await self.db.commit()
+        await self.db.refresh(assignment)
+        return assignment
+
+    def compute_snapshot_diff(
+        self,
+        old_snapshot: dict,
+        new_snapshot: dict,
+    ) -> dict:
+        """Compute the differences between two plan snapshots.
+
+        Returns a dict with added, removed, and modified items.
+        """
+        diff = {
+            "plan_changes": [],
+            "workout_changes": [],
+            "exercise_changes": [],
+        }
+
+        if not old_snapshot or not new_snapshot:
+            return diff
+
+        # Compare plan-level fields
+        plan_fields = ["name", "description", "goal", "difficulty", "split_type"]
+        for field in plan_fields:
+            old_val = old_snapshot.get(field)
+            new_val = new_snapshot.get(field)
+            if old_val != new_val:
+                diff["plan_changes"].append({
+                    "field": field,
+                    "old": old_val,
+                    "new": new_val,
+                })
+
+        # Compare workouts
+        old_workouts = {w.get("id"): w for w in old_snapshot.get("workouts", [])}
+        new_workouts = {w.get("id"): w for w in new_snapshot.get("workouts", [])}
+
+        # Check for added workouts
+        for workout_id, workout in new_workouts.items():
+            if workout_id not in old_workouts:
+                diff["workout_changes"].append({
+                    "type": "added",
+                    "workout_id": workout_id,
+                    "label": workout.get("label"),
+                    "name": workout.get("name"),
+                })
+
+        # Check for removed workouts
+        for workout_id, workout in old_workouts.items():
+            if workout_id not in new_workouts:
+                diff["workout_changes"].append({
+                    "type": "removed",
+                    "workout_id": workout_id,
+                    "label": workout.get("label"),
+                    "name": workout.get("name"),
+                })
+
+        # Check for modified workouts
+        for workout_id in set(old_workouts.keys()) & set(new_workouts.keys()):
+            old_w = old_workouts[workout_id]
+            new_w = new_workouts[workout_id]
+
+            old_exercises = {e.get("id"): e for e in old_w.get("exercises", [])}
+            new_exercises = {e.get("id"): e for e in new_w.get("exercises", [])}
+
+            for ex_id, ex in new_exercises.items():
+                if ex_id not in old_exercises:
+                    diff["exercise_changes"].append({
+                        "type": "added",
+                        "workout_label": new_w.get("label"),
+                        "exercise_name": ex.get("name"),
+                    })
+
+            for ex_id, ex in old_exercises.items():
+                if ex_id not in new_exercises:
+                    diff["exercise_changes"].append({
+                        "type": "removed",
+                        "workout_label": old_w.get("label"),
+                        "exercise_name": ex.get("name"),
+                    })
+
+            # Check for modified exercises
+            for ex_id in set(old_exercises.keys()) & set(new_exercises.keys()):
+                old_ex = old_exercises[ex_id]
+                new_ex = new_exercises[ex_id]
+
+                changes = []
+                for field in ["sets", "reps", "rest_seconds", "notes"]:
+                    if old_ex.get(field) != new_ex.get(field):
+                        changes.append({
+                            "field": field,
+                            "old": old_ex.get(field),
+                            "new": new_ex.get(field),
+                        })
+
+                if changes:
+                    diff["exercise_changes"].append({
+                        "type": "modified",
+                        "workout_label": new_w.get("label"),
+                        "exercise_name": new_ex.get("name"),
+                        "changes": changes,
+                    })
+
+        return diff

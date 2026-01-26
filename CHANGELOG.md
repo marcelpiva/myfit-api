@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1] - 2026-01-25
+
+### Added
+- **Smart Workout Reminders** - Intelligent reminder system with personalization
+  - Varied reminder messages for better engagement
+  - Time-based reminder selection (preferred hour, gentle nudges, evening streak protection)
+  - Personalized messages based on days since last workout
+  - Three message categories: regular, streak protection, and comeback messages
+
+### Fixed
+- **Invite Reminders Task** - Fixed query using non-existent `InviteStatus.PENDING`
+  - Changed to use `accepted_at IS NULL` for pending invites
+  - Added email reminders at 3-day and 14-day marks
+  - Added expiration notifications to trainers when invites expire
+  - Improved logging with expired invite count
+
+### Changed
+- Added `send_invite_reminder_email()` function for automated invite reminders
+- Enhanced `send_workout_reminders` task with streak protection logic
+
 ## [0.6.0] - 2026-01-25
 
 ### Added
