@@ -158,6 +158,23 @@ async def _run_pending_migrations() -> None:
                 err_str = str(e)
                 if "already exists" not in err_str.lower():
                     print(f"Migration note ({table_name}.{column_name}): {e}")
+
+        # Data fixes: correct invalid enum values
+        data_fixes = [
+            # Fix 'active' -> 'published' for training_plans.status
+            ("UPDATE training_plans SET status = 'published' WHERE status = 'active'", "training_plans.status active->published"),
+        ]
+
+        for sql, description in data_fixes:
+            try:
+                async with migration_engine.connect() as conn:
+                    result = await conn.execute(text(sql))
+                    await conn.commit()
+                    if result.rowcount > 0:
+                        print(f"Data fix ({description}): {result.rowcount} rows updated")
+            except Exception as e:
+                print(f"Data fix note ({description}): {e}")
+
     finally:
         await migration_engine.dispose()
 
