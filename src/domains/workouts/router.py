@@ -1039,6 +1039,7 @@ async def list_plan_assignments(
         assignments = await workout_service.list_student_plan_assignments(
             student_id=current_user.id,
             active_only=active_only,
+            prescribed_only=False,  # Allow trainers to follow their own plans
             organization_id=organization_id,
         )
 
