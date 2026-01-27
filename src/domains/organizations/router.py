@@ -145,6 +145,7 @@ async def create_organization(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> OrganizationResponse:
     """Create a new organization."""
+    from src.domains.organizations.schemas import MembershipInOrganization, OrganizationInMembershipCreate
     import traceback
     try:
         print(f"[CREATE_ORG] Request: name={request.name}, type={request.type}")
@@ -163,8 +164,22 @@ async def create_organization(
             website=request.website,
         )
 
-        print(f"[CREATE_ORG] Success! org_id={org.id}")
-        return OrganizationResponse.model_validate(org)
+        # Get the owner's membership to include in response
+        membership = await org_service.get_membership(org.id, current_user.id)
+        print(f"[CREATE_ORG] Success! org_id={org.id}, membership_role={membership.role if membership else 'None'}")
+
+        response = OrganizationResponse.model_validate(org)
+        if membership:
+            # Build membership with organization included (Flutter expects this structure)
+            response.membership = MembershipInOrganization(
+                id=membership.id,
+                organization=OrganizationInMembershipCreate.model_validate(org),
+                role=membership.role,
+                joined_at=membership.joined_at,
+                is_active=membership.is_active,
+                invited_by=None,
+            )
+        return response
     except Exception as e:
         print(f"[CREATE_ORG] ERROR: {type(e).__name__}: {e}")
         traceback.print_exc()
@@ -520,15 +535,8 @@ async def create_invite(
             detail="Professional permission required",
         )
 
-    # Prevent self-invite
-    if request.email.lower() == current_user.email.lower():
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={
-                "code": "SELF_INVITE",
-                "message": "Você não pode enviar um convite para si mesmo",
-            },
-        )
+    # Self-invite is allowed - trainer can add themselves as a student
+    # to follow their own training plans
 
     org = await org_service.get_organization_by_id(org_id)
     if not org:
@@ -547,11 +555,20 @@ async def create_invite(
         )
         if existing_with_role:
             if existing_with_role.is_active:
+                role_names = {
+                    "student": "aluno",
+                    "trainer": "personal trainer",
+                    "coach": "coach",
+                    "nutritionist": "nutricionista",
+                    "gym_admin": "administrador",
+                    "gym_owner": "proprietário",
+                }
+                role_name = role_names.get(request.role.value, request.role.value)
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "code": "ALREADY_MEMBER",
-                        "message": f"Este usuário já é {request.role.value} nesta organização",
+                        "message": f"Este usuário já é {role_name} nesta organização",
                     },
                 )
             else:

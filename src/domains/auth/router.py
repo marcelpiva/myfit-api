@@ -54,7 +54,6 @@ async def register(
         email=request.email,
         password=request.password,
         name=request.name,
-        user_type=request.user_type,
     )
 
     # Generate tokens

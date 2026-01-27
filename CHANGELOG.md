@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2026-01-27
+
+### Added
+- **Membership in Organization Creation Response** - Organization creation now returns membership data
+  - Enables proper client-side context setup immediately after organization creation
+
+### Changed
+- **Self-Invite Allowed** - Trainers can now invite themselves as students
+  - Enables trainers to follow their own training plans
+  - Previously blocked with "Cannot invite yourself" error
+
+### Fixed
+- **Portuguese Role Translations** - Fixed role names in error messages
+  - `student` → `aluno`
+  - `trainer` → `personal trainer`
+  - Improved localization for Portuguese-speaking users
+
 ## [0.6.4] - 2026-01-26
 
 ### Added

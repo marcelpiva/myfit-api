@@ -59,7 +59,6 @@ class AuthService:
         email: str,
         password: str,
         name: str,
-        user_type: str = "student",
     ) -> User:
         """Create a new user with default settings.
 
@@ -67,22 +66,15 @@ class AuthService:
             email: User's email
             password: Plain text password
             name: User's full name
-            user_type: User type ('personal' or 'student')
 
         Returns:
             The created User object
         """
-        from src.domains.users.models import UserType
-
-        # Map string to enum
-        user_type_enum = UserType.PERSONAL if user_type == "personal" else UserType.STUDENT
-
         # Create user
         user = User(
             email=email.lower(),
             password_hash=hash_password(password),
             name=name,
-            user_type=user_type_enum,
             is_active=True,
             is_verified=False,
         )
@@ -115,6 +107,10 @@ class AuthService:
         """
         user = await self.get_user_by_email(email)
         if not user:
+            return None
+
+        # User registered via social login (no password)
+        if not user.password_hash:
             return None
 
         if not verify_password(password, user.password_hash):

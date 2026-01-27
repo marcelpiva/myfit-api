@@ -23,6 +23,29 @@ from src.domains.users.router import router as users_router
 from src.domains.workouts.router import router as workouts_router
 
 
+async def run_pending_migrations():
+    """Run any pending database migrations."""
+    import os
+    from src.migrations.remove_user_type import migrate
+
+    database_url = os.getenv("DATABASE_URL", "")
+    if not database_url:
+        print("No DATABASE_URL, skipping migrations")
+        return
+
+    # Convert to asyncpg format
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    try:
+        await migrate(database_url)
+        print("Migration remove_user_type completed")
+    except Exception as e:
+        print(f"Migration remove_user_type error (may already be applied): {type(e).__name__}: {e}")
+
+
 async def seed_exercises_if_empty():
     """Seed exercises if none exist in the database."""
     from sqlalchemy import func, select
@@ -66,6 +89,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         # Re-raise in production to prevent unhealthy startup
         if settings.is_production:
             raise
+
+    # Run pending migrations
+    try:
+        await run_pending_migrations()
+    except Exception as e:
+        print(f"Warning: Could not run migrations: {type(e).__name__}: {e}")
 
     # Auto-seed exercises if database is empty
     try:

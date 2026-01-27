@@ -78,7 +78,6 @@ def _user_to_response(user) -> UserProfileResponse:
         bio=user.bio,
         is_active=user.is_active,
         is_verified=user.is_verified,
-        user_type=user.user_type.value if user.user_type else "student",
         cref=user.cref,
         cref_verified=user.cref_verified,
         specialties=specialties,

@@ -21,7 +21,6 @@ class UserProfileResponse(BaseModel):
     bio: str | None = None
     is_active: bool
     is_verified: bool
-    user_type: str = "student"  # "personal" or "student"
     # Professional credentials
     cref: str | None = None
     cref_verified: bool = False

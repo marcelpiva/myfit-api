@@ -30,6 +30,32 @@ class OrganizationUpdate(BaseModel):
     website: str | None = Field(None, max_length=255)
 
 
+class OrganizationInMembershipCreate(BaseModel):
+    """Organization data for membership in create response."""
+
+    id: UUID
+    name: str
+    type: OrganizationType
+    logo_url: str | None = None
+    member_count: int = 0
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class MembershipInOrganization(BaseModel):
+    """Membership data included in organization creation response."""
+
+    id: UUID
+    organization: OrganizationInMembershipCreate
+    role: UserRole
+    joined_at: datetime
+    is_active: bool
+    invited_by: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class OrganizationResponse(BaseModel):
     """Organization response."""
 
@@ -47,6 +73,7 @@ class OrganizationResponse(BaseModel):
     created_at: datetime
     member_count: int = 0
     trainer_count: int = 0
+    membership: MembershipInOrganization | None = None  # Owner's membership when creating
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -140,6 +167,7 @@ class InviteResponse(BaseModel):
     is_accepted: bool
     created_at: datetime
     token: str | None = None  # Token for invite link (only returned to admins)
+    short_code: str | None = None  # Short code for manual entry (e.g., MFP-A1B2C)
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -148,6 +176,12 @@ class AcceptInviteRequest(BaseModel):
     """Accept invitation request."""
 
     token: str
+
+
+class AcceptInviteByCodeRequest(BaseModel):
+    """Accept invitation by short code request."""
+
+    short_code: str = Field(min_length=9, max_length=9, pattern=r"^MFP-[A-Fa-f0-9]{5}$")
 
 
 class InvitePreviewResponse(BaseModel):
@@ -166,3 +200,4 @@ class InviteShareLinksResponse(BaseModel):
     invite_url: str  # Direct invite URL
     whatsapp_url: str  # WhatsApp share URL
     qr_code_url: str | None = None  # QR code image URL (if generated)
+    short_code: str | None = None  # Short code for manual entry (e.g., MFP-A1B2C)

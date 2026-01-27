@@ -42,13 +42,6 @@ class Units(str, enum.Enum):
     IMPERIAL = "imperial"
 
 
-class UserType(str, enum.Enum):
-    """User type indicating primary role in the platform."""
-
-    PERSONAL = "personal"  # Personal trainer / Professional
-    STUDENT = "student"  # Student / Client
-
-
 class User(Base, UUIDMixin, TimestampMixin):
     """User model representing a platform user."""
 
@@ -74,13 +67,6 @@ class User(Base, UUIDMixin, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     is_verified: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
-
-    # User type (personal trainer or student)
-    user_type: Mapped[UserType] = mapped_column(
-        Enum(UserType, name="user_type_enum", values_callable=lambda x: [e.value for e in x]),
-        default=UserType.STUDENT,
-        nullable=False,
-    )
 
     # Social login fields
     auth_provider: Mapped[AuthProvider] = mapped_column(

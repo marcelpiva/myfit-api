@@ -1,4 +1,4 @@
-from typing import Literal
+from datetime import date
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field
@@ -10,10 +10,6 @@ class RegisterRequest(BaseModel):
     email: EmailStr
     password: str = Field(min_length=6, max_length=128)
     name: str = Field(min_length=2, max_length=100)
-    user_type: Literal["personal", "student"] = Field(
-        default="student",
-        description="User type: 'personal' for trainers, 'student' for clients",
-    )
 
 
 class LoginRequest(BaseModel):
@@ -51,14 +47,13 @@ class UserResponse(BaseModel):
     name: str
     phone: str | None = None
     avatar_url: str | None = None
-    birth_date: str | None = None
+    birth_date: date | None = None
     gender: str | None = None
     height_cm: float | None = None
     bio: str | None = None
     is_active: bool
     is_verified: bool
     auth_provider: str = "email"
-    user_type: str = "student"  # "personal" or "student"
     # Professional credentials
     cref: str | None = None
     cref_verified: bool = False
