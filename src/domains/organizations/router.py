@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.organizations.schemas import (
+    AcceptInviteByCodeRequest,
     AcceptInviteRequest,
     InviteCreate,
     InvitePreviewResponse,
@@ -64,6 +65,51 @@ async def preview_invite(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invite already accepted",
+        )
+
+    # Get organization and inviter details
+    org = await org_service.get_organization_by_id(invite.organization_id)
+    inviter = await user_service.get_user_by_id(invite.invited_by_id)
+
+    return InvitePreviewResponse(
+        organization_id=invite.organization_id,
+        organization_name=org.name if org else "Unknown",
+        invited_by_name=inviter.name if inviter else "Unknown",
+        role=invite.role,
+        email=invite.email,
+    )
+
+
+@router.get("/invite/code/{short_code}", response_model=InvitePreviewResponse)
+async def preview_invite_by_code(
+    short_code: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> InvitePreviewResponse:
+    """Get invite details by short code (public, no auth required).
+
+    This endpoint allows users to preview invite details using the short code
+    (e.g., MFP-A1B2C) before logging in or creating an account.
+    """
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    invite = await org_service.get_invite_by_short_code(short_code)
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Código de convite não encontrado",
+        )
+
+    if invite.is_expired:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Convite expirado",
+        )
+
+    if invite.is_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Convite já aceito",
         )
 
     # Get organization and inviter details
@@ -474,6 +520,16 @@ async def create_invite(
             detail="Professional permission required",
         )
 
+    # Prevent self-invite
+    if request.email.lower() == current_user.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "code": "SELF_INVITE",
+                "message": "Você não pode enviar um convite para si mesmo",
+            },
+        )
+
     org = await org_service.get_organization_by_id(org_id)
     if not org:
         raise HTTPException(
@@ -572,6 +628,7 @@ async def create_invite(
         is_accepted=invite.is_accepted,
         created_at=invite.created_at,
         token=invite.token,
+        short_code=invite.short_code,
     )
 
 
@@ -612,6 +669,7 @@ async def list_invites(
                 is_accepted=invite.is_accepted,
                 created_at=invite.created_at,
                 token=invite.token,
+                short_code=invite.short_code,
             )
         )
 
@@ -662,6 +720,75 @@ async def accept_invite(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"You are already a {invite.role.value} in this organization",
+            )
+        else:
+            # Reactivate inactive membership with same role
+            existing_with_role.is_active = True
+            invite.accepted_at = datetime.now(timezone.utc)
+            await db.commit()
+            await db.refresh(existing_with_role)
+            membership = existing_with_role
+    else:
+        # Create new membership (allows multiple roles for same user)
+        membership = await org_service.accept_invite(invite, current_user)
+
+    return MemberResponse(
+        id=membership.id,
+        user_id=membership.user_id,
+        organization_id=membership.organization_id,
+        role=membership.role,
+        joined_at=membership.joined_at,
+        is_active=membership.is_active,
+        user_name=current_user.name,
+        user_email=current_user.email,
+        user_avatar=current_user.avatar_url,
+    )
+
+
+@router.post("/accept-invite-by-code", response_model=MemberResponse)
+async def accept_invite_by_code(
+    request: AcceptInviteByCodeRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> MemberResponse:
+    """Accept an invitation using the short code (e.g., MFP-A1B2C)."""
+    org_service = OrganizationService(db)
+
+    invite = await org_service.get_invite_by_short_code(request.short_code)
+    if not invite:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Código de convite não encontrado",
+        )
+
+    if invite.is_expired:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Convite expirado",
+        )
+
+    if invite.is_accepted:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Convite já aceito",
+        )
+
+    # Validate email matches the invite
+    if invite.email.lower() != current_user.email.lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Este convite foi enviado para outro email",
+        )
+
+    # Check if already a member with the same role
+    existing_with_role = await org_service.get_membership_by_role(
+        invite.organization_id, current_user.id, invite.role
+    )
+    if existing_with_role:
+        if existing_with_role.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Você já é {invite.role.value} nesta organização",
             )
         else:
             # Reactivate inactive membership with same role
@@ -772,6 +899,7 @@ async def resend_invite(
         is_accepted=renewed.is_accepted,
         created_at=renewed.created_at,
         token=renewed.token,
+        short_code=renewed.short_code,
     )
 
 
@@ -844,6 +972,7 @@ async def get_invite_share_links(
         invite_url=invite_url,
         whatsapp_url=whatsapp_url,
         qr_code_url=qr_code_url,
+        short_code=invite.short_code,
     )
 
 
