@@ -73,24 +73,6 @@ async def migrate(database_url: str) -> None:
 
         logger.info("Removed user_type field from users table")
 
-        # Also delete test user for clean testing
-        await conn.execute(
-            text("""
-                DELETE FROM organization_members
-                WHERE user_id IN (SELECT id FROM users WHERE email = 'marcelpiva@gmail.com')
-            """)
-        )
-        await conn.execute(
-            text("""
-                DELETE FROM organizations
-                WHERE owner_id IN (SELECT id FROM users WHERE email = 'marcelpiva@gmail.com')
-            """)
-        )
-        await conn.execute(
-            text("DELETE FROM users WHERE email = 'marcelpiva@gmail.com'")
-        )
-        logger.info("Deleted test user marcelpiva@gmail.com")
-
 
 async def main():
     """Run migration with default database URL."""
