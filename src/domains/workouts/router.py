@@ -2945,7 +2945,8 @@ async def get_workout(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> WorkoutResponse:
     """Get workout details with exercises."""
-    from sqlalchemy import select
+    from sqlalchemy import and_, select
+    from src.domains.organizations.models import OrganizationMembership
     from src.domains.workouts.models import AssignmentStatus, PlanAssignment, PlanWorkout
 
     workout_service = WorkoutService(db)
@@ -2957,12 +2958,20 @@ async def get_workout(
             detail="Workout not found",
         )
 
-    # Check access
-    has_access = (
-        workout.is_public
-        or workout.created_by_id == current_user.id
-        or workout.organization_id is not None
-    )
+    # Check access: public, owner, or member of the workout's organization
+    has_access = workout.is_public or workout.created_by_id == current_user.id
+
+    # Check organization membership if workout belongs to an organization
+    if not has_access and workout.organization_id is not None:
+        membership_query = select(OrganizationMembership).where(
+            and_(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.organization_id == workout.organization_id,
+                OrganizationMembership.is_active == True,
+            )
+        )
+        membership_result = await db.execute(membership_query)
+        has_access = membership_result.scalar_one_or_none() is not None
 
     # If no direct access, check if user has a plan assignment that includes this workout
     if not has_access:
@@ -2997,7 +3006,8 @@ async def get_workout_exercises(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[WorkoutExerciseResponse]:
     """Get exercises for a workout."""
-    from sqlalchemy import select
+    from sqlalchemy import and_, select
+    from src.domains.organizations.models import OrganizationMembership
     from src.domains.workouts.models import AssignmentStatus, PlanAssignment, PlanWorkout
 
     workout_service = WorkoutService(db)
@@ -3009,12 +3019,20 @@ async def get_workout_exercises(
             detail="Workout not found",
         )
 
-    # Check access
-    has_access = (
-        workout.is_public
-        or workout.created_by_id == current_user.id
-        or workout.organization_id is not None
-    )
+    # Check access: public, owner, or member of the workout's organization
+    has_access = workout.is_public or workout.created_by_id == current_user.id
+
+    # Check organization membership if workout belongs to an organization
+    if not has_access and workout.organization_id is not None:
+        membership_query = select(OrganizationMembership).where(
+            and_(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.organization_id == workout.organization_id,
+                OrganizationMembership.is_active == True,
+            )
+        )
+        membership_result = await db.execute(membership_query)
+        has_access = membership_result.scalar_one_or_none() is not None
 
     # If no direct access, check if user has an assignment that includes this workout
     if not has_access:
@@ -3050,9 +3068,18 @@ async def create_workout(
     request: WorkoutCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> WorkoutResponse:
     """Create a new workout."""
     workout_service = WorkoutService(db)
+
+    # Use request.organization_id if provided, otherwise fallback to header
+    organization_id = request.organization_id
+    if organization_id is None and x_organization_id:
+        try:
+            organization_id = UUID(x_organization_id)
+        except ValueError:
+            pass  # Invalid UUID in header, ignore
 
     workout = await workout_service.create_workout(
         created_by_id=current_user.id,
@@ -3064,7 +3091,7 @@ async def create_workout(
         tags=request.tags,
         is_template=request.is_template,
         is_public=request.is_public,
-        organization_id=request.organization_id,
+        organization_id=organization_id,
     )
 
     # Add exercises if provided
