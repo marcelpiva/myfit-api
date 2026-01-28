@@ -146,6 +146,9 @@ def create_app() -> FastAPI:
     app.include_router(chat_router, prefix=f"{settings.API_V1_PREFIX}/chat", tags=["Chat"])
     app.include_router(notifications_router, prefix=f"{settings.API_V1_PREFIX}/notifications", tags=["Notifications"])
 
+    # Legacy routes without /api/v1 prefix (for backwards compatibility)
+    app.include_router(organizations_router, prefix="/organizations", tags=["Organizations (Legacy)"])
+
     # Health check endpoint
     @app.get("/health")
     async def health_check() -> dict[str, str]:

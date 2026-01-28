@@ -57,6 +57,8 @@ class UserResponse(BaseModel):
     # Professional credentials
     cref: str | None = None
     cref_verified: bool = False
+    # Onboarding status
+    onboarding_completed: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -79,6 +81,7 @@ class GoogleLoginRequest(BaseModel):
     """Google Sign-In request."""
 
     id_token: str = Field(..., description="Google ID token from client")
+    user_type: str | None = Field(None, description="User type: 'student' or 'trainer'")
 
 
 class AppleLoginRequest(BaseModel):

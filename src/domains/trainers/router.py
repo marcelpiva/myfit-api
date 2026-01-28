@@ -64,6 +64,43 @@ async def _get_trainer_organization(
     )
 
 
+async def _find_student_member(
+    student_id: UUID,
+    org_id: UUID,
+    db: AsyncSession,
+) -> OrganizationMembership:
+    """Find a student member by membership_id or user_id.
+
+    The API accepts either:
+    - membership_id: The ID of the membership record
+    - user_id: The ID of the user (will find their membership in the org)
+
+    This provides flexibility for clients that may have either ID available.
+    """
+    # First try to find by membership ID
+    member = await db.get(OrganizationMembership, student_id)
+    if member and member.organization_id == org_id:
+        return member
+
+    # Fallback: try to find by user_id in the organization
+    result = await db.execute(
+        select(OrganizationMembership)
+        .where(
+            OrganizationMembership.user_id == student_id,
+            OrganizationMembership.organization_id == org_id,
+            OrganizationMembership.role == UserRole.STUDENT,
+        )
+    )
+    member = result.scalar_one_or_none()
+    if member:
+        return member
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Aluno não encontrado",
+    )
+
+
 # ==================== Students ====================
 
 @router.get("/students", response_model=list[StudentResponse])
@@ -180,13 +217,8 @@ async def get_student(
     org_id = await _get_trainer_organization(current_user, db)
     user_service = UserService(db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     user = await user_service.get_user_by_id(member.user_id)
     if not user:
@@ -232,13 +264,8 @@ async def get_student_stats(
     """Get student statistics."""
     org_id = await _get_trainer_organization(current_user, db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     now = datetime.now(timezone.utc)
     start_of_week = now - timedelta(days=now.weekday())
@@ -308,13 +335,8 @@ async def get_student_workouts(
     """Get student's workouts."""
     org_id = await _get_trainer_organization(current_user, db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     # Get recent workout sessions
     result = await db.execute(
@@ -347,13 +369,8 @@ async def get_student_progress(
     """Get student's progress summary."""
     org_id = await _get_trainer_organization(current_user, db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     # Get recent notes for this student
     notes_result = await db.execute(
@@ -406,13 +423,8 @@ async def add_progress_note(
     """Add a progress note for a student."""
     org_id = await _get_trainer_organization(current_user, db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     # Create the note
     note = StudentNote(
@@ -447,13 +459,8 @@ async def list_progress_notes(
     """List progress notes for a student."""
     org_id = await _get_trainer_organization(current_user, db)
 
-    # Find member by ID
-    member = await db.get(OrganizationMembership, student_id)
-    if not member or member.organization_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Aluno não encontrado",
-        )
+    # Find member by ID or user_id
+    member = await _find_student_member(student_id, org_id, db)
 
     # Get notes
     result = await db.execute(

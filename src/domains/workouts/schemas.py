@@ -689,6 +689,7 @@ class AssignmentAcceptRequest(BaseModel):
 
     accept: bool = True
     declined_reason: str | None = Field(None, max_length=500)
+    acknowledge: bool = False  # Also mark as acknowledged when accepting
 
 
 # AI Suggestion schemas

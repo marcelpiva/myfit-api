@@ -292,6 +292,12 @@ async def get_my_memberships(
     result = []
     for membership in memberships:
         org = membership.organization
+        # Use owner's avatar as fallback when org has no logo
+        # This is especially useful for personal trainers
+        logo_url = org.logo_url
+        if not logo_url and org.owner:
+            logo_url = org.owner.avatar_url
+
         result.append(
             UserMembershipResponse(
                 id=membership.id,
@@ -299,9 +305,11 @@ async def get_my_memberships(
                     id=org.id,
                     name=org.name,
                     type=org.type,
-                    logo_url=org.logo_url,
+                    logo_url=logo_url,
                     member_count=org.member_count,
                     created_at=org.created_at,
+                    archived_at=org.archived_at,
+                    is_archived=org.is_archived,
                 ),
                 role=membership.role,
                 joined_at=membership.joined_at,

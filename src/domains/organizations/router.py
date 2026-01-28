@@ -23,6 +23,7 @@ from src.domains.organizations.schemas import (
     OrganizationResponse,
     OrganizationUpdate,
 )
+from src.domains.organizations.models import UserRole
 from src.domains.organizations.service import OrganizationService
 from src.domains.users.service import UserService
 from src.domains.notifications.push_service import send_push_notification
@@ -186,6 +187,52 @@ async def create_organization(
         raise
 
 
+@router.post("/autonomous", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+async def create_autonomous_organization(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    name: str = "Meus Treinos",
+) -> OrganizationResponse:
+    """Create an autonomous organization for self-training.
+
+    This creates a personal training profile where the user is both owner and student.
+    The user can create and manage their own workouts independently, without a trainer.
+    """
+    from src.domains.organizations.schemas import MembershipInOrganization, OrganizationInMembershipCreate
+    import traceback
+
+    try:
+        print(f"[CREATE_AUTONOMOUS] Request: name={name}, user={current_user.id}")
+
+        org_service = OrganizationService(db)
+
+        org = await org_service.create_autonomous_organization(
+            user=current_user,
+            name=name,
+        )
+        print(f"[CREATE_AUTONOMOUS] Created org: {org.id}")
+
+        # Get the user's membership to include in response
+        membership = await org_service.get_membership(org.id, current_user.id)
+        print(f"[CREATE_AUTONOMOUS] Got membership: {membership.id if membership else 'None'}")
+
+        response = OrganizationResponse.model_validate(org)
+        if membership:
+            response.membership = MembershipInOrganization(
+                id=membership.id,
+                organization=OrganizationInMembershipCreate.model_validate(org),
+                role=membership.role,
+                joined_at=membership.joined_at,
+                is_active=membership.is_active,
+                invited_by=None,
+            )
+        return response
+    except Exception as e:
+        print(f"[CREATE_AUTONOMOUS] ERROR: {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise
+
+
 @router.get("/{org_id}", response_model=OrganizationResponse)
 async def get_organization(
     org_id: UUID,
@@ -277,6 +324,78 @@ async def delete_organization(
     await org_service.delete_organization(org)
 
 
+@router.post("/{org_id}/reactivate", response_model=OrganizationResponse)
+async def reactivate_organization(
+    org_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> OrganizationResponse:
+    """Reactivate an archived organization (owner only).
+
+    When a personal trainer who previously removed their profile wants to
+    return, this endpoint clears the archived_at timestamp and sends
+    notifications to all members.
+    """
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    org = await org_service.get_organization_by_id(org_id)
+    if not org or not org.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organization not found",
+        )
+
+    # Only owner can reactivate
+    if org.owner_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner can reactivate the organization",
+        )
+
+    # Check if organization is archived
+    if not org.is_archived:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Organization is not archived",
+        )
+
+    # Reactivate the organization
+    reactivated_org = await org_service.reactivate_organization(org)
+
+    # Send push notifications to all active members (except owner)
+    members = await org_service.get_organization_members(org_id, active_only=True)
+    for member in members:
+        if member.user_id != current_user.id:
+            user = await user_service.get_user_by_id(member.user_id)
+            if user:
+                # Create in-app notification
+                await create_notification(
+                    db=db,
+                    notification=NotificationCreate(
+                        user_id=member.user_id,
+                        type=NotificationType.GENERAL,
+                        title="Personal de volta!",
+                        message=f"{org.name} retomou as atividades.",
+                        data={"organization_id": str(org_id), "type": "organization_reactivated"},
+                    ),
+                )
+                # Send push notification
+                try:
+                    await send_push_notification(
+                        db=db,
+                        user_id=member.user_id,
+                        title="Personal de volta!",
+                        body=f"{org.name} retomou as atividades.",
+                        data={"organization_id": str(org_id), "type": "organization_reactivated"},
+                    )
+                except Exception:
+                    # Don't fail if push notification fails
+                    pass
+
+    return OrganizationResponse.model_validate(reactivated_org)
+
+
 # Member management
 
 @router.get("/{org_id}/members", response_model=list[MemberResponse])
@@ -285,14 +404,14 @@ async def list_members(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     role: str | None = None,
-    active_only: bool = False,
+    active_only: bool = True,
 ) -> list[MemberResponse]:
     """Get all members of an organization.
 
     Args:
         org_id: Organization UUID
         role: Optional role filter (e.g., 'student', 'trainer')
-        active_only: If True, only return active members (default: False)
+        active_only: If True, only return active members (default: True)
     """
     org_service = OrganizationService(db)
 
@@ -463,6 +582,35 @@ async def remove_member(
     await org_service.remove_member(membership)
 
 
+@router.post("/{org_id}/leave", status_code=status.HTTP_204_NO_CONTENT)
+async def leave_organization(
+    org_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Leave an organization as a student.
+
+    This specifically removes the student membership, even if the user
+    has other roles (like trainer) in the same organization.
+    Use this endpoint for students leaving, not for owners archiving.
+    """
+    org_service = OrganizationService(db)
+
+    # Get specifically the STUDENT membership
+    membership = await org_service.get_membership_by_role(
+        org_id, current_user.id, UserRole.STUDENT
+    )
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Você não é aluno desta organização",
+        )
+
+    # Deactivate only the student membership
+    membership.is_active = False
+    await db.commit()
+
+
 @router.post("/{org_id}/members/{membership_id}/reactivate", response_model=MemberResponse)
 async def reactivate_member(
     org_id: UUID,
@@ -576,8 +724,9 @@ async def create_invite(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "code": "INACTIVE_MEMBER",
-                        "message": "Este aluno já está em seus alunos, inativo. Deseja ativá-lo?",
+                        "message": "Este aluno já está em seus alunos, inativo. Deseja enviar um convite de reativação?",
                         "membership_id": str(existing_with_role.id),
+                        "user_id": str(user_by_email.id),
                     },
                 )
 

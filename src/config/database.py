@@ -119,6 +119,8 @@ async def _run_pending_migrations() -> None:
         ("status", "plan_assignments", "VARCHAR(20)", "'accepted'"),
         ("accepted_at", "plan_assignments", "TIMESTAMP", None),
         ("declined_reason", "plan_assignments", "TEXT", None),
+        # Organization invites table
+        ("short_code", "organization_invites", "VARCHAR(10)", None),
         # User settings table
         ("dnd_enabled", "user_settings", "BOOLEAN", "FALSE"),
         ("dnd_start_time", "user_settings", "TIME", None),

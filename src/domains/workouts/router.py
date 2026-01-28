@@ -741,7 +741,8 @@ async def start_session(
             trainer_id = member.invited_by_id
 
     # Send notifications to trainer when student starts a workout
-    if trainer_id:
+    # Don't send if trainer_id is the same as current_user (same person with both profiles)
+    if trainer_id and trainer_id != current_user.id:
         try:
             # Create in-app notification
             await create_notification(
@@ -1108,6 +1109,7 @@ async def list_plan_assignments(
                 notes=a.notes,
                 status=a.status,
                 accepted_at=a.accepted_at,
+                acknowledged_at=a.acknowledged_at,
                 declined_reason=a.declined_reason,
                 created_at=a.created_at,
                 plan_name=a.plan.name if a.plan else "",
@@ -1457,6 +1459,9 @@ async def respond_to_plan_assignment(
         assignment.status = AssignmentStatus.ACCEPTED
         assignment.accepted_at = datetime.now(timezone.utc)
         assignment.declined_reason = None
+        # Also acknowledge if requested (avoids double notification)
+        if request.acknowledge:
+            assignment.acknowledged_at = datetime.now(timezone.utc)
     else:
         assignment.status = AssignmentStatus.DECLINED
         assignment.declined_reason = request.declined_reason
@@ -1468,6 +1473,46 @@ async def respond_to_plan_assignment(
     # Get student and plan info for response
     student = await user_service.get_user_by_id(assignment.student_id)
     plan = await workout_service.get_plan_by_id(assignment.plan_id)
+
+    # Send notification to trainer if acknowledging
+    # Don't send if trainer_id is the same as current_user (same person with both profiles)
+    if request.accept and request.acknowledge and assignment.trainer_id and assignment.trainer_id != current_user.id:
+        try:
+            # Create in-app notification
+            await create_notification(
+                db=db,
+                notification_data=NotificationCreate(
+                    user_id=assignment.trainer_id,
+                    notification_type=NotificationType.STUDENT_PROGRESS,
+                    title="Plano aceito",
+                    body=f"{current_user.name or current_user.email} aceitou e visualizou o plano '{plan.name if plan else 'atribuído'}'",
+                    icon="check-circle",
+                    action_type="navigate",
+                    action_data=f'{{"route": "/students/{assignment.student_id}"}}',
+                    reference_type="plan_assignment",
+                    reference_id=assignment.id,
+                    organization_id=assignment.organization_id,
+                    sender_id=current_user.id,
+                ),
+            )
+
+            # Send push notification
+            await send_push_notification(
+                db=db,
+                user_id=assignment.trainer_id,
+                title="Plano aceito",
+                body=f"{current_user.name or current_user.email} aceitou e visualizou o plano '{plan.name if plan else 'atribuído'}'",
+                data={
+                    "type": "plan_accepted_and_acknowledged",
+                    "assignment_id": str(assignment.id),
+                    "plan_id": str(assignment.plan_id),
+                    "student_id": str(assignment.student_id),
+                    "student_name": current_user.name or current_user.email,
+                    "plan_name": plan.name if plan else "",
+                },
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send notification to trainer {assignment.trainer_id}: {e}")
 
     version = getattr(assignment, 'version', 1)
     last_version_viewed = getattr(assignment, 'last_version_viewed', None)
@@ -1530,7 +1575,8 @@ async def acknowledge_plan_assignment(
     plan = await workout_service.get_plan_by_id(acknowledged.plan_id)
 
     # Send notification to trainer that student viewed the plan
-    if acknowledged.trainer_id:
+    # Don't send if trainer_id is the same as current_user (same person with both profiles)
+    if acknowledged.trainer_id and acknowledged.trainer_id != current_user.id:
         try:
             # Create in-app notification
             await create_notification(

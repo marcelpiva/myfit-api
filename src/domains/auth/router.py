@@ -180,6 +180,7 @@ async def google_login(
 
     result = await auth_service.authenticate_or_create_google_user(
         id_token=request.id_token,
+        user_type=request.user_type,
     )
 
     if not result:

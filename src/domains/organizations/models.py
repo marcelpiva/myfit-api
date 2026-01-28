@@ -18,6 +18,7 @@ class OrganizationType(str, enum.Enum):
     PERSONAL = "personal"
     NUTRITIONIST = "nutritionist"
     CLINIC = "clinic"
+    AUTONOMOUS = "autonomous"  # Self-training student profile
 
 
 class UserRole(str, enum.Enum):
@@ -56,6 +57,7 @@ class Organization(Base, UUIDMixin, TimestampMixin):
     )
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    archived_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     owner: Mapped["User"] = relationship(
@@ -84,6 +86,11 @@ class Organization(Base, UUIDMixin, TimestampMixin):
                 if m.is_active and m.role in [UserRole.TRAINER, UserRole.COACH]
             ]
         )
+
+    @property
+    def is_archived(self) -> bool:
+        """Check if organization is archived (trainer left)."""
+        return self.archived_at is not None
 
     def __repr__(self) -> str:
         return f"<Organization {self.name}>"
@@ -165,6 +172,8 @@ class OrganizationInvite(Base, UUIDMixin, TimestampMixin):
         nullable=False,
     )
     token: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
+    # Short code for manual entry (format: MFP-XXXXX where X is hex)
+    short_code: Mapped[str | None] = mapped_column(String(10), unique=True, nullable=True, index=True)
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,

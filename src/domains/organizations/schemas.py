@@ -39,6 +39,8 @@ class OrganizationInMembershipCreate(BaseModel):
     logo_url: str | None = None
     member_count: int = 0
     created_at: datetime
+    archived_at: datetime | None = None
+    is_archived: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -70,6 +72,8 @@ class OrganizationResponse(BaseModel):
     website: str | None = None
     owner_id: UUID | None = None
     is_active: bool
+    archived_at: datetime | None = None
+    is_archived: bool = False
     created_at: datetime
     member_count: int = 0
     trainer_count: int = 0
@@ -100,6 +104,8 @@ class OrganizationInMembership(BaseModel):
     logo_url: str | None = None
     member_count: int = 0
     created_at: datetime
+    archived_at: datetime | None = None
+    is_archived: bool = False
 
     model_config = ConfigDict(from_attributes=True)
 

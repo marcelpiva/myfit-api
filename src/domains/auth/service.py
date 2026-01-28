@@ -323,11 +323,13 @@ class AuthService:
     async def authenticate_or_create_google_user(
         self,
         id_token: str,
+        user_type: str | None = None,
     ) -> tuple[User, bool] | None:
         """Authenticate or create user via Google Sign-In.
 
         Args:
             id_token: The Google ID token
+            user_type: Optional user type ('student' or 'trainer')
 
         Returns:
             Tuple of (User, is_new_user) or None if token is invalid
@@ -383,6 +385,19 @@ class AuthService:
         # Create default settings
         user_settings = UserSettings(user_id=user.id)
         self.db.add(user_settings)
+
+        # If user_type is trainer, create a personal organization
+        if user_type == "trainer":
+            # Import here to avoid circular import
+            from src.domains.organizations.models import OrganizationType
+            from src.domains.organizations.service import OrganizationService
+            org_service = OrganizationService(self.db)
+            await org_service.create_organization(
+                owner=user,
+                name=f"Personal {name or email.split('@')[0]}",
+                org_type=OrganizationType.PERSONAL,
+            )
+
         await self.db.commit()
         await self.db.refresh(user)
 

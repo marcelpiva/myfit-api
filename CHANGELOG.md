@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2026-01-27
+
+### Added
+- **Autonomous Organization Support** - Users can now create personal training profiles
+  - New endpoint `POST /organizations/autonomous` for self-training mode
+  - User becomes both owner and student of their own organization
+  - Enables independent workout management without a trainer
+
+- **Organization Reactivation** - Archived organizations can be restored
+  - New endpoint `POST /organizations/{org_id}/reactivate`
+  - Sends push notifications to all members when organization is reactivated
+  - Owner-only operation
+
+### Fixed
+- **Former Student Reinvite Flow** - Fixed critical bug in student reactivation
+  - `INACTIVE_MEMBER` error now includes `user_id` for proper reinvite flow
+  - Students must now accept reinvite before membership is reactivated
+  - Previously, membership was reactivated immediately bypassing invite system
+  - Updated error message to indicate invite will be sent
+
+- **Student Endpoints 404 Error** - Fixed endpoints accepting both membership_id and user_id
+  - Added `_find_student_member` helper that searches by membership_id first, then user_id
+  - Affects: `/students/{id}`, `/students/{id}/stats`, `/students/{id}/workouts`, `/students/{id}/progress`, `/students/{id}/progress/notes`
+  - Provides flexibility for clients that may have either ID available
+
 ## [0.6.5] - 2026-01-27
 
 ### Added
