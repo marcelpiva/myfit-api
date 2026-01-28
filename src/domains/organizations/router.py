@@ -128,7 +128,7 @@ async def preview_invite_by_code(
 
 # Organization CRUD
 
-@router.get("/", response_model=list[OrganizationListResponse])
+@router.get("", response_model=list[OrganizationListResponse])
 async def list_organizations(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -139,7 +139,7 @@ async def list_organizations(
     return [OrganizationListResponse.model_validate(org) for org in organizations]
 
 
-@router.post("/", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=OrganizationResponse, status_code=status.HTTP_201_CREATED)
 async def create_organization(
     request: OrganizationCreate,
     current_user: CurrentUser,

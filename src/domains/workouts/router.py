@@ -394,7 +394,7 @@ async def suggest_exercises(
 
 # Workout endpoints
 
-@router.get("/", response_model=list[WorkoutListResponse])
+@router.get("", response_model=list[WorkoutListResponse])
 async def list_workouts(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -3045,7 +3045,7 @@ async def get_workout_exercises(
 
 # ==================== Workouts ====================
 
-@router.post("/", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
 async def create_workout(
     request: WorkoutCreate,
     current_user: CurrentUser,
