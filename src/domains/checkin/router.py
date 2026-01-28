@@ -116,7 +116,7 @@ async def update_gym(
 
 # Check-in endpoints
 
-@router.get("/", response_model=list[CheckInResponse])
+@router.get("", response_model=list[CheckInResponse])
 async def list_checkins(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -152,7 +152,7 @@ async def get_active_checkin(
     return None
 
 
-@router.post("/", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
 async def create_checkin(
     request: CheckInCreate,
     current_user: CurrentUser,
