@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.7] - 2026-01-28
+
+### Fixed
+- **307 Redirect Losing Authorization Header** - Critical fix for API authentication
+  - Added `redirect_slashes=False` to FastAPI app initialization
+  - Prevents automatic 307 redirects that strip the Authorization header
+  - Fixes authentication failures when client requests URLs without trailing slash
+
+- **404 Error on Root Endpoints** - Fixed endpoints returning 404 after redirect_slashes fix
+  - Changed `"/"` to `""` for root endpoints in checkin router
+  - Changed `"/"` to `""` for root endpoints in workouts router
+  - Changed `"/"` to `""` for root endpoints in organizations router
+  - Autonomous student "Meus Treinos" screen now works correctly
+
 ## [0.6.6] - 2026-01-27
 
 ### Added

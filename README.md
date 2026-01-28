@@ -1,6 +1,6 @@
 # MyFit API
 
-[![Version](https://img.shields.io/badge/version-0.6.3-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.6.7-blue.svg)](./CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 
 FastAPI backend for the MyFit fitness platform.
