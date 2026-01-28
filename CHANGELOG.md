@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.8] - 2026-01-28
+
+### Fixed
+- **Workout Organization Isolation** - Critical security fixes for multi-organization access
+  - `create_workout` now uses `X-Organization-ID` header as fallback when `organization_id` not in request body
+  - Ensures workouts are created in the correct organization context when header is set
+
+- **Workout Access Control** - Fixed unauthorized cross-organization workout access
+  - `get_workout` and `get_workout_exercises` now verify organization membership
+  - Previously allowed access to any workout if `organization_id` was set (security vulnerability)
+  - Users can now only access workouts they created, public workouts, or workouts in organizations they belong to
+
+### Added
+- **Workout Isolation Tests** - 13 integration tests covering organization isolation
+  - Solo student sees only their own workouts
+  - Student with trainer sees only assigned plans
+  - Multiple trainers context switching
+  - Trainer workout isolation
+  - Cross-organization access control
+
 ## [0.6.7] - 2026-01-28
 
 ### Fixed
