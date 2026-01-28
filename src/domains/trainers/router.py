@@ -553,15 +553,33 @@ async def register_student(
             detail="Organization not found",
         )
 
-    # Check if user is already a member
+    # Check if user is already a member or former student
     existing_user = await user_service.get_user_by_email(request.email)
     if existing_user:
-        existing_member = await org_service.get_membership(org_id, existing_user.id)
-        if existing_member and existing_member.is_active:
-            raise HTTPException(
-                status_code=status.HTTP_409_CONFLICT,
-                detail="Email já cadastrado como aluno",
-            )
+        # Use get_membership_by_role to specifically check for student membership
+        existing_member = await org_service.get_membership_by_role(
+            org_id, existing_user.id, UserRole.STUDENT
+        )
+        if existing_member:
+            if existing_member.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "ALREADY_MEMBER",
+                        "message": "Este aluno já está ativo na sua lista",
+                    },
+                )
+            else:
+                # Former student - return specific error with user_id for reinvite
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail={
+                        "code": "FORMER_STUDENT",
+                        "message": "Este aluno é um ex-aluno seu. Deseja convidá-lo novamente?",
+                        "membership_id": str(existing_member.id),
+                        "user_id": str(existing_user.id),
+                    },
+                )
 
     # Check for existing pending invite
     pending_invites = await org_service.get_pending_invites_for_email(request.email)
@@ -626,6 +644,120 @@ async def register_student(
     )
 
 
+@router.post("/students/{user_id}/reinvite", response_model=InviteResponse, status_code=status.HTTP_201_CREATED)
+async def reinvite_former_student(
+    user_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    background_tasks: BackgroundTasks,
+) -> InviteResponse:
+    """Reinvite a former student who left the organization.
+
+    This endpoint is used when the trainer wants to invite back a student
+    who previously left. It creates a new invite that the student must accept.
+    """
+    org_id = await _get_trainer_organization(current_user, db)
+    org_service = OrganizationService(db)
+    user_service = UserService(db)
+
+    # Verify the user exists
+    student = await user_service.get_user_by_id(user_id)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuário não encontrado",
+        )
+
+    # Verify they were a former student (inactive membership)
+    membership = await org_service.get_membership_by_role(
+        org_id, user_id, UserRole.STUDENT
+    )
+    if not membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este usuário nunca foi seu aluno",
+        )
+    if membership.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este aluno já está ativo",
+        )
+
+    # Check for existing pending invite
+    existing_invite = await org_service.get_pending_invite_by_email(org_id, student.email)
+    if existing_invite:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PENDING_INVITE",
+                "message": "Já existe um convite pendente para este aluno",
+                "invite_id": str(existing_invite.id),
+            },
+        )
+
+    # Get organization for response and notification
+    org = await org_service.get_organization_by_id(org_id)
+    if not org:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Organização não encontrada",
+        )
+
+    # Create reinvite
+    try:
+        invite = await org_service.create_invite(
+            org_id=org_id,
+            email=student.email,
+            role=UserRole.STUDENT,
+            invited_by_id=current_user.id,
+        )
+    except IntegrityError:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "PENDING_INVITE",
+                "message": "Já existe um convite pendente para este aluno",
+            },
+        )
+
+    # Send push notification
+    from src.domains.notifications.push_service import send_push_notification
+    try:
+        await send_push_notification(
+            user_id=user_id,
+            title="Convite para retornar",
+            body=f"{current_user.name} quer que você volte para {org.name}",
+            data={"type": "reinvite", "invite_id": str(invite.id)},
+            db=db,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to send push notification for reinvite: {e}")
+
+    # Send invite email in background
+    background_tasks.add_task(
+        send_invite_email_task,
+        to_email=student.email,
+        trainer_name=current_user.name,
+        org_name=org.name,
+        invite_token=invite.token,
+    )
+    logger.info(f"Reinvite sent to former student {student.email}")
+
+    return InviteResponse(
+        id=invite.id,
+        email=invite.email,
+        role=invite.role,
+        organization_id=invite.organization_id,
+        organization_name=org.name,
+        invited_by_name=current_user.name,
+        expires_at=invite.expires_at,
+        created_at=invite.created_at,
+        is_expired=False,
+        is_accepted=False,
+        token=invite.token,
+    )
+
+
 # ==================== Student Status ====================
 
 @router.patch("/students/{student_user_id}/status")
@@ -649,9 +781,11 @@ async def update_student_status(
         if trainer_membership and trainer_membership.role in [
             UserRole.GYM_OWNER, UserRole.GYM_ADMIN, UserRole.TRAINER, UserRole.COACH
         ]:
-            # Try to find the student in this org
-            student_member = await org_service.get_membership(org.id, student_user_id)
-            if student_member and student_member.role == UserRole.STUDENT:
+            # Try to find the student in this org (specifically with STUDENT role)
+            student_member = await org_service.get_membership_by_role(
+                org.id, student_user_id, UserRole.STUDENT
+            )
+            if student_member:
                 member = student_member
                 break
 
@@ -661,20 +795,54 @@ async def update_student_status(
             detail="Aluno não encontrado",
         )
 
-    # Update membership status
-    member.is_active = is_active
-    await db.commit()
-    await db.refresh(member)
-
-    # Get user info
-    user = await user_service.get_user_by_id(student_user_id)
-    if not user:
+    # Get student's user info for email
+    student_user = await user_service.get_user_by_id(student_user_id)
+    if not student_user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuário não encontrado",
         )
 
-    # Get workout stats
+    # Handle activation vs deactivation differently
+    if is_active and not member.is_active:
+        # Reactivating an inactive student - create invite instead of direct activation
+        # This requires student consent to return
+        org = await org_service.get_organization_by_id(member.organization_id)
+        if not org:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Organização não encontrada",
+            )
+
+        # Create a reactivation invite
+        invite = await org_service.create_invite(
+            org_id=member.organization_id,
+            email=student_user.email,
+            role=UserRole.STUDENT,
+            invited_by_id=current_user.id,
+            expires_in_days=7,
+        )
+
+        # Send notification to student about reactivation invite
+        from src.domains.notifications.push_service import send_push_notification
+        await send_push_notification(
+            user_id=student_user_id,
+            title="Convite para retornar",
+            body=f"{current_user.name} quer que você volte para {org.name}",
+            data={"type": "reactivation_invite", "invite_id": str(invite.id)},
+            db=db,
+        )
+
+        # Don't activate yet - student needs to accept the invite
+        # Return current (inactive) status
+    elif not is_active and member.is_active:
+        # Deactivating - do it directly
+        member.is_active = False
+        await db.commit()
+        await db.refresh(member)
+    # else: already in desired state, do nothing
+
+    # Get workout stats (user info already fetched as student_user)
     session_result = await db.execute(
         select(func.count(WorkoutSession.id))
         .where(WorkoutSession.user_id == student_user_id)
@@ -692,11 +860,11 @@ async def update_student_status(
 
     return StudentResponse(
         id=member.id,
-        user_id=user.id,
-        email=user.email,
-        name=user.name,
-        phone=user.phone,
-        avatar_url=user.avatar_url,
+        user_id=student_user.id,
+        email=student_user.email,
+        name=student_user.name,
+        phone=student_user.phone,
+        avatar_url=student_user.avatar_url,
         joined_at=member.joined_at,
         is_active=member.is_active,
         goal=None,
