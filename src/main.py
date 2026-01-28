@@ -26,7 +26,6 @@ from src.domains.workouts.router import router as workouts_router
 async def run_pending_migrations():
     """Run any pending database migrations."""
     import os
-    from src.migrations.remove_user_type import migrate
 
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
@@ -39,11 +38,20 @@ async def run_pending_migrations():
     elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    try:
-        await migrate(database_url)
-        print("Migration remove_user_type completed")
-    except Exception as e:
-        print(f"Migration remove_user_type error (may already be applied): {type(e).__name__}: {e}")
+    # List of migrations to run in order
+    migrations = [
+        ("remove_user_type", "src.migrations.remove_user_type"),
+        ("add_archived_at", "src.migrations.add_archived_at"),
+        ("add_autonomous_org_type", "src.migrations.add_autonomous_org_type"),
+    ]
+
+    for name, module_path in migrations:
+        try:
+            module = __import__(module_path, fromlist=["migrate"])
+            await module.migrate(database_url)
+            print(f"Migration {name} completed")
+        except Exception as e:
+            print(f"Migration {name} error (may already be applied): {type(e).__name__}: {e}")
 
 
 async def seed_exercises_if_empty():
