@@ -224,13 +224,26 @@ class WorkoutService:
             selectinload(Workout.exercises)
         )
 
-        # Filter by user's workouts or organization or public templates
-        conditions = [Workout.created_by_id == user_id]
+        # Filter by user's workouts within the organization, or public templates
         if organization_id:
-            conditions.append(Workout.organization_id == organization_id)
-        conditions.append(and_(Workout.is_template == True, Workout.is_public == True))
-
-        query = query.where(or_(*conditions))
+            # When organization_id is set, only show workouts from that organization
+            query = query.where(
+                or_(
+                    and_(
+                        Workout.created_by_id == user_id,
+                        Workout.organization_id == organization_id,
+                    ),
+                    and_(Workout.is_template == True, Workout.is_public == True),
+                )
+            )
+        else:
+            # No organization filter: show user's workouts without org + public templates
+            query = query.where(
+                or_(
+                    Workout.created_by_id == user_id,
+                    and_(Workout.is_template == True, Workout.is_public == True),
+                )
+            )
 
         if templates_only:
             query = query.where(Workout.is_template == True)

@@ -403,12 +403,21 @@ async def list_workouts(
     search: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> list[WorkoutListResponse]:
     """List workouts for the current user."""
+    # Use query param if provided, otherwise fallback to header
+    org_id = organization_id
+    if org_id is None and x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
     workout_service = WorkoutService(db)
     workouts = await workout_service.list_workouts(
         user_id=current_user.id,
-        organization_id=organization_id,
+        organization_id=org_id,
         templates_only=templates_only,
         search=search,
         limit=limit,
