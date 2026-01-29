@@ -179,21 +179,41 @@ def create_app() -> FastAPI:
             "all_headers": dict(request.headers),
         }
 
-    # Temporary debug endpoint - query workouts for a user
+    # Temporary debug endpoint - query workouts and org data
     @app.get("/debug/workouts")
     async def debug_workouts() -> dict:
         from sqlalchemy import text
         from src.config.database import AsyncSessionLocal
         async with AsyncSessionLocal() as session:
+            # All workouts
             result = await session.execute(
                 text("""
-                    SELECT w.id, w.name, w.organization_id, w.created_by_id, w.is_template, w.is_public
+                    SELECT w.id, w.name, w.organization_id, w.created_by_id,
+                           w.is_template, w.is_public,
+                           u.name as creator_name, u.email as creator_email,
+                           o.name as org_name
                     FROM workouts w
+                    LEFT JOIN users u ON u.id = w.created_by_id
+                    LEFT JOIN organizations o ON o.id = w.organization_id
                     ORDER BY w.created_at DESC
-                    LIMIT 20
+                    LIMIT 50
                 """)
             )
             rows = result.fetchall()
+
+            # Also get org memberships for marcelpiva
+            memberships = await session.execute(
+                text("""
+                    SELECT u.name, u.email, om.organization_id, o.name as org_name,
+                           om.role, o.type as org_type
+                    FROM organization_memberships om
+                    JOIN users u ON u.id = om.user_id
+                    JOIN organizations o ON o.id = om.organization_id
+                    WHERE u.email = 'marcelpiva@gmail.com' AND om.is_active = true
+                """)
+            )
+            membership_rows = memberships.fetchall()
+
             return {
                 "workouts": [
                     {
@@ -203,9 +223,23 @@ def create_app() -> FastAPI:
                         "created_by_id": str(r[3]),
                         "is_template": r[4],
                         "is_public": r[5],
+                        "creator_name": r[6],
+                        "creator_email": r[7],
+                        "org_name": r[8],
                     }
                     for r in rows
-                ]
+                ],
+                "marcel_memberships": [
+                    {
+                        "user_name": r[0],
+                        "email": r[1],
+                        "organization_id": str(r[2]),
+                        "org_name": r[3],
+                        "role": r[4],
+                        "org_type": r[5],
+                    }
+                    for r in membership_rows
+                ],
             }
 
     # Scalar API Reference - Modern API documentation
