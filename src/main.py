@@ -179,6 +179,35 @@ def create_app() -> FastAPI:
             "all_headers": dict(request.headers),
         }
 
+    # Temporary debug endpoint - query workouts for a user
+    @app.get("/debug/workouts")
+    async def debug_workouts() -> dict:
+        from sqlalchemy import text
+        from src.config.database import AsyncSessionLocal
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                text("""
+                    SELECT w.id, w.name, w.organization_id, w.created_by_id, w.is_template, w.is_public
+                    FROM workouts w
+                    ORDER BY w.created_at DESC
+                    LIMIT 20
+                """)
+            )
+            rows = result.fetchall()
+            return {
+                "workouts": [
+                    {
+                        "id": str(r[0]),
+                        "name": r[1],
+                        "organization_id": str(r[2]) if r[2] else None,
+                        "created_by_id": str(r[3]),
+                        "is_template": r[4],
+                        "is_public": r[5],
+                    }
+                    for r in rows
+                ]
+            }
+
     # Scalar API Reference - Modern API documentation
     @app.get("/reference", include_in_schema=False)
     async def scalar_html():
