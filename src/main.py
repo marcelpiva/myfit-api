@@ -169,6 +169,15 @@ def create_app() -> FastAPI:
             "environment": settings.APP_ENV,
         }
 
+    # Temporary debug endpoint - remove after fixing org isolation
+    from fastapi import Request as DebugRequest
+    @app.get("/debug/headers")
+    async def debug_headers(request: DebugRequest) -> dict:
+        return {
+            "x_organization_id": request.headers.get("x-organization-id"),
+            "all_headers": dict(request.headers),
+        }
+
     # Scalar API Reference - Modern API documentation
     @app.get("/reference", include_in_schema=False)
     async def scalar_html():
