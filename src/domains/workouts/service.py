@@ -237,10 +237,13 @@ class WorkoutService:
                 )
             )
         else:
-            # No organization filter: show user's workouts without org + public templates
+            # No organization filter: only show user's workouts that have no org assigned
             query = query.where(
                 or_(
-                    Workout.created_by_id == user_id,
+                    and_(
+                        Workout.created_by_id == user_id,
+                        Workout.organization_id.is_(None),
+                    ),
                     and_(Workout.is_template == True, Workout.is_public == True),
                 )
             )
