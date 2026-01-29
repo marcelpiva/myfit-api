@@ -3,7 +3,7 @@ import logging
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Header, HTTPException, Query, Request, UploadFile, status
 
 logger = logging.getLogger(__name__)
 
@@ -396,6 +396,7 @@ async def suggest_exercises(
 
 @router.get("", response_model=list[WorkoutListResponse])
 async def list_workouts(
+    request: Request,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: Annotated[UUID | None, Query()] = None,
@@ -403,20 +404,21 @@ async def list_workouts(
     search: Annotated[str | None, Query(max_length=100)] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,
-    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> list[WorkoutListResponse]:
     """List workouts for the current user."""
-    # Use query param if provided, otherwise fallback to header
+    # Use query param if provided, otherwise fallback to X-Organization-ID header
     org_id = organization_id
-    if org_id is None and x_organization_id:
-        try:
-            org_id = UUID(x_organization_id)
-        except ValueError:
-            pass
+    if org_id is None:
+        header_org = request.headers.get("x-organization-id")
+        if header_org:
+            try:
+                org_id = UUID(header_org)
+            except ValueError:
+                pass
 
     logger.warning(
         "[DEBUG] list_workouts: user=%s, query_org=%s, header_org=%s, resolved_org=%s",
-        current_user.id, organization_id, x_organization_id, org_id,
+        current_user.id, organization_id, request.headers.get("x-organization-id"), org_id,
     )
 
     workout_service = WorkoutService(db)
@@ -3085,21 +3087,23 @@ async def get_workout_exercises(
 
 @router.post("", response_model=WorkoutResponse, status_code=status.HTTP_201_CREATED)
 async def create_workout(
+    raw_request: Request,
     request: WorkoutCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> WorkoutResponse:
     """Create a new workout."""
     workout_service = WorkoutService(db)
 
-    # Use request.organization_id if provided, otherwise fallback to header
+    # Use request.organization_id if provided, otherwise fallback to X-Organization-ID header
     organization_id = request.organization_id
-    if organization_id is None and x_organization_id:
-        try:
-            organization_id = UUID(x_organization_id)
-        except ValueError:
-            pass  # Invalid UUID in header, ignore
+    if organization_id is None:
+        header_org = raw_request.headers.get("x-organization-id")
+        if header_org:
+            try:
+                organization_id = UUID(header_org)
+            except ValueError:
+                pass
 
     workout = await workout_service.create_workout(
         created_by_id=current_user.id,
