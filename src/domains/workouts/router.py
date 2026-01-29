@@ -414,6 +414,11 @@ async def list_workouts(
         except ValueError:
             pass
 
+    logger.warning(
+        "[DEBUG] list_workouts: user=%s, query_org=%s, header_org=%s, resolved_org=%s",
+        current_user.id, organization_id, x_organization_id, org_id,
+    )
+
     workout_service = WorkoutService(db)
     workouts = await workout_service.list_workouts(
         user_id=current_user.id,
@@ -422,6 +427,12 @@ async def list_workouts(
         search=search,
         limit=limit,
         offset=offset,
+    )
+
+    logger.warning(
+        "[DEBUG] list_workouts: returning %d workouts: %s",
+        len(workouts),
+        [(str(w.id)[:8], w.name, str(w.organization_id)[:8] if w.organization_id else None) for w in workouts],
     )
 
     return [
