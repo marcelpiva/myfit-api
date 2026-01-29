@@ -59,9 +59,10 @@ async def migrate(database_url: str) -> None:
                     WHERE om.user_id = :user_id AND om.is_active = true
                     ORDER BY
                         CASE om.role
-                            WHEN 'owner' THEN 1
+                            WHEN 'gym_owner' THEN 1
                             WHEN 'trainer' THEN 2
-                            ELSE 3
+                            WHEN 'coach' THEN 3
+                            ELSE 4
                         END
                 """),
                 {"user_id": created_by_id},
