@@ -123,8 +123,8 @@ async def _run_pending_migrations() -> None:
         ("short_code", "organization_invites", "VARCHAR(10)", None),
         # User settings table
         ("dnd_enabled", "user_settings", "BOOLEAN", "FALSE"),
-        ("dnd_start_time", "user_settings", "TIME", None),
-        ("dnd_end_time", "user_settings", "TIME", None),
+        ("dnd_start_time", "user_settings", "VARCHAR(5)", None),
+        ("dnd_end_time", "user_settings", "VARCHAR(5)", None),
         # Training plans table
         ("status", "training_plans", "VARCHAR(20)", "'published'"),
     ]
@@ -160,6 +160,24 @@ async def _run_pending_migrations() -> None:
                 err_str = str(e)
                 if "already exists" not in err_str.lower():
                     print(f"Migration note ({table_name}.{column_name}): {e}")
+
+        # Schema fixes: correct column types
+        schema_fixes = [
+            # Fix dnd_start_time/dnd_end_time from TIME to VARCHAR(5)
+            ("ALTER TABLE user_settings ALTER COLUMN dnd_start_time TYPE VARCHAR(5) USING dnd_start_time::VARCHAR(5)", "user_settings.dnd_start_time TIME->VARCHAR(5)"),
+            ("ALTER TABLE user_settings ALTER COLUMN dnd_end_time TYPE VARCHAR(5) USING dnd_end_time::VARCHAR(5)", "user_settings.dnd_end_time TIME->VARCHAR(5)"),
+        ]
+
+        for sql, description in schema_fixes:
+            try:
+                async with migration_engine.connect() as conn:
+                    await conn.execute(text(sql))
+                    await conn.commit()
+                    print(f"Schema fix ({description}): done")
+            except Exception as e:
+                err_str = str(e).lower()
+                if "does not exist" not in err_str and "already" not in err_str:
+                    print(f"Schema fix note ({description}): {e}")
 
         # Data fixes: correct invalid enum values
         data_fixes = [
