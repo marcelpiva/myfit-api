@@ -226,21 +226,18 @@ class WorkoutService:
 
         # Filter by user's workouts within the organization, or public templates
         if organization_id:
-            # When organization_id is set, show workouts from that org + legacy (NULL org_id)
+            # Strict org isolation: only show workouts scoped to this org
             query = query.where(
                 or_(
                     and_(
                         Workout.created_by_id == user_id,
-                        or_(
-                            Workout.organization_id == organization_id,
-                            Workout.organization_id.is_(None),  # Backward compat
-                        ),
+                        Workout.organization_id == organization_id,
                     ),
                     and_(Workout.is_template == True, Workout.is_public == True),
                 )
             )
         else:
-            # No organization filter: only show user's workouts that have no org assigned
+            # No organization filter: only show user's workouts with NULL org_id + public templates
             query = query.where(
                 or_(
                     and_(
@@ -424,12 +421,18 @@ class WorkoutService:
         workout: Workout,
         new_owner_id: uuid.UUID,
         new_name: str | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> Workout:
-        """Duplicate a workout for another user."""
+        """Duplicate a workout for another user.
+
+        Args:
+            organization_id: Organization to scope the new workout to.
+        """
         # Generate a numbered name if no custom name provided
         if not new_name:
             existing_workouts = await self.list_workouts(
                 user_id=new_owner_id,
+                organization_id=organization_id,
                 limit=500,
             )
             existing_names = [w.name for w in existing_workouts]
@@ -445,6 +448,7 @@ class WorkoutService:
             is_template=False,
             is_public=False,
             created_by_id=new_owner_id,
+            organization_id=organization_id,
         )
         self.db.add(new_workout)
         await self.db.flush()
@@ -730,10 +734,7 @@ class WorkoutService:
                     and_(
                         TrainingPlan.created_by_id == user_id,
                         TrainingPlan.is_template == True,
-                        or_(
-                            TrainingPlan.organization_id == organization_id,
-                            TrainingPlan.organization_id.is_(None),  # Backward compat
-                        ),
+                        TrainingPlan.organization_id == organization_id,
                     ),
                 ]
             else:
@@ -747,15 +748,12 @@ class WorkoutService:
                 ]
             query = query.where(or_(*conditions))
         else:
-            # Show only user's own plans scoped to org
+            # Show only user's own plans scoped to org (strict isolation)
             if organization_id:
                 query = query.where(
                     and_(
                         TrainingPlan.created_by_id == user_id,
-                        or_(
-                            TrainingPlan.organization_id == organization_id,
-                            TrainingPlan.organization_id.is_(None),  # Backward compat
-                        ),
+                        TrainingPlan.organization_id == organization_id,
                     )
                 )
             else:
@@ -1349,6 +1347,7 @@ class WorkoutService:
                     pw.workout,
                     new_owner_id,
                     new_name=pw.workout.name,
+                    organization_id=organization_id,
                 )
                 workout_id = new_workout.id
             else:

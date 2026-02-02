@@ -2500,12 +2500,13 @@ async def add_workout_to_plan(
             day_of_week=request.day_of_week,
         )
     elif request.workout_name:
-        # Create new workout inline
+        # Create new workout inline (inherit organization_id from the plan)
         new_workout = await workout_service.create_workout(
             created_by_id=current_user.id,
             name=request.workout_name,
             difficulty=plan.difficulty,
             target_muscles=request.muscle_groups,
+            organization_id=plan.organization_id,
         )
         if request.workout_exercises:
             for ex in request.workout_exercises:
@@ -3303,6 +3304,7 @@ async def duplicate_workout(
     workout_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> WorkoutResponse:
     """Duplicate a workout for the current user."""
     workout_service = WorkoutService(db)
@@ -3321,9 +3323,18 @@ async def duplicate_workout(
             detail="Access denied",
         )
 
+    # Resolve organization_id from header
+    org_id = None
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
     new_workout = await workout_service.duplicate_workout(
         workout=workout,
         new_owner_id=current_user.id,
+        organization_id=org_id,
     )
 
     return WorkoutResponse.model_validate(new_workout)
