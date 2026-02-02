@@ -63,6 +63,10 @@ class UserService:
         weekly_frequency: int | None = None,
         injuries: list[str] | None = None,
         injuries_other: str | None = None,
+        preferred_duration: str | None = None,
+        training_location: list[str] | None = None,
+        preferred_activities: list[str] | None = None,
+        can_do_impact: bool | None = None,
         onboarding_completed: bool | None = None,
     ) -> User:
         """Update user profile.
@@ -127,6 +131,14 @@ class UserService:
             user.injuries = json.dumps(injuries)
         if injuries_other is not None:
             user.injuries_other = injuries_other
+        if preferred_duration is not None:
+            user.preferred_duration = preferred_duration
+        if training_location is not None:
+            user.training_location = json.dumps(training_location)
+        if preferred_activities is not None:
+            user.preferred_activities = json.dumps(preferred_activities)
+        if can_do_impact is not None:
+            user.can_do_impact = can_do_impact
         if onboarding_completed is not None:
             user.onboarding_completed = onboarding_completed
 

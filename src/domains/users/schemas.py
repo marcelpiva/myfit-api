@@ -36,6 +36,11 @@ class UserProfileResponse(BaseModel):
     weekly_frequency: int | None = None
     injuries: list[str] | None = None
     injuries_other: str | None = None
+    # Extended student onboarding fields
+    preferred_duration: str | None = None
+    training_location: list[str] | None = None
+    preferred_activities: list[str] | None = None
+    can_do_impact: bool | None = None
     # Onboarding tracking
     onboarding_completed: bool = False
 
@@ -65,6 +70,11 @@ class UserProfileUpdate(BaseModel):
     weekly_frequency: int | None = Field(None, ge=1, le=7)
     injuries: list[str] | None = None
     injuries_other: str | None = Field(None, max_length=200)
+    # Extended student onboarding fields
+    preferred_duration: str | None = Field(None, max_length=10)
+    training_location: list[str] | None = None
+    preferred_activities: list[str] | None = None
+    can_do_impact: bool | None = None
     # Onboarding tracking
     onboarding_completed: bool | None = None
 

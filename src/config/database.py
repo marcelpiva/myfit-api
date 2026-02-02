@@ -127,6 +127,11 @@ async def _run_pending_migrations() -> None:
         ("dnd_end_time", "user_settings", "VARCHAR(5)", None),
         # Training plans table
         ("status", "training_plans", "VARCHAR(20)", "'published'"),
+        # Extended student onboarding fields
+        ("preferred_duration", "users", "VARCHAR(10)", None),
+        ("training_location", "users", "VARCHAR(500)", None),
+        ("preferred_activities", "users", "VARCHAR(500)", None),
+        ("can_do_impact", "users", "BOOLEAN", None),
     ]
 
     # Create a separate engine for migrations to avoid connection state issues

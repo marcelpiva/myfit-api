@@ -66,6 +66,20 @@ def _user_to_response(user) -> UserProfileResponse:
         except (json.JSONDecodeError, TypeError):
             injuries = None
 
+    training_location = None
+    if user.training_location:
+        try:
+            training_location = json.loads(user.training_location)
+        except (json.JSONDecodeError, TypeError):
+            training_location = None
+
+    preferred_activities = None
+    if user.preferred_activities:
+        try:
+            preferred_activities = json.loads(user.preferred_activities)
+        except (json.JSONDecodeError, TypeError):
+            preferred_activities = None
+
     return UserProfileResponse(
         id=user.id,
         email=user.email,
@@ -90,6 +104,10 @@ def _user_to_response(user) -> UserProfileResponse:
         weekly_frequency=user.weekly_frequency,
         injuries=injuries,
         injuries_other=user.injuries_other,
+        preferred_duration=user.preferred_duration,
+        training_location=training_location,
+        preferred_activities=preferred_activities,
+        can_do_impact=user.can_do_impact,
         onboarding_completed=user.onboarding_completed,
     )
 
@@ -130,6 +148,10 @@ async def update_profile(
         weekly_frequency=request.weekly_frequency,
         injuries=request.injuries,
         injuries_other=request.injuries_other,
+        preferred_duration=request.preferred_duration,
+        training_location=request.training_location,
+        preferred_activities=request.preferred_activities,
+        can_do_impact=request.can_do_impact,
         onboarding_completed=request.onboarding_completed,
     )
 

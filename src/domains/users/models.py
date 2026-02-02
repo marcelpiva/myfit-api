@@ -96,6 +96,12 @@ class User(Base, UUIDMixin, TimestampMixin):
     injuries: Mapped[str | None] = mapped_column(String(500), nullable=True)  # JSON array as string
     injuries_other: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
+    # Extended student onboarding fields
+    preferred_duration: Mapped[str | None] = mapped_column(String(10), nullable=True)  # "30", "45", "60", "90"
+    training_location: Mapped[str | None] = mapped_column(String(500), nullable=True)  # JSON array as string
+    preferred_activities: Mapped[str | None] = mapped_column(String(500), nullable=True)  # JSON array as string
+    can_do_impact: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
     # Onboarding completion tracking
     onboarding_completed: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
