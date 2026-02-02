@@ -720,22 +720,42 @@ class WorkoutService:
         )
 
         if templates_only:
-            # Show public templates + user's own templates
-            conditions = [
-                and_(TrainingPlan.is_template == True, TrainingPlan.is_public == True),
-                and_(TrainingPlan.created_by_id == user_id, TrainingPlan.is_template == True),
-            ]
+            # Show public templates + user's own templates scoped to org
             if organization_id:
-                conditions.append(
-                    and_(TrainingPlan.organization_id == organization_id, TrainingPlan.is_template == True)
-                )
+                conditions = [
+                    and_(TrainingPlan.is_template == True, TrainingPlan.is_public == True),
+                    and_(
+                        TrainingPlan.created_by_id == user_id,
+                        TrainingPlan.is_template == True,
+                        TrainingPlan.organization_id == organization_id,
+                    ),
+                ]
+            else:
+                conditions = [
+                    and_(TrainingPlan.is_template == True, TrainingPlan.is_public == True),
+                    and_(
+                        TrainingPlan.created_by_id == user_id,
+                        TrainingPlan.is_template == True,
+                        TrainingPlan.organization_id.is_(None),
+                    ),
+                ]
             query = query.where(or_(*conditions))
         else:
-            # Show only user's own plans (not templates from others)
-            conditions = [TrainingPlan.created_by_id == user_id]
+            # Show only user's own plans scoped to org
             if organization_id:
-                conditions.append(TrainingPlan.organization_id == organization_id)
-            query = query.where(or_(*conditions))
+                query = query.where(
+                    and_(
+                        TrainingPlan.created_by_id == user_id,
+                        TrainingPlan.organization_id == organization_id,
+                    )
+                )
+            else:
+                query = query.where(
+                    and_(
+                        TrainingPlan.created_by_id == user_id,
+                        TrainingPlan.organization_id.is_(None),
+                    )
+                )
 
         if search:
             query = query.where(TrainingPlan.name.ilike(f"%{search}%"))

@@ -2079,7 +2079,7 @@ async def get_plan(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlanResponse:
     """Get plan details with workouts."""
-    from sqlalchemy import select
+    from sqlalchemy import and_, select
     from src.domains.workouts.models import AssignmentStatus, PlanAssignment
 
     workout_service = WorkoutService(db)
@@ -2095,8 +2095,20 @@ async def get_plan(
     has_access = (
         plan.is_public
         or plan.created_by_id == current_user.id
-        or plan.organization_id is not None
     )
+
+    # Check organization membership if plan belongs to an organization
+    if not has_access and plan.organization_id is not None:
+        from src.domains.organizations.models import OrganizationMembership
+        membership_query = select(OrganizationMembership).where(
+            and_(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.organization_id == plan.organization_id,
+                OrganizationMembership.is_active == True,
+            )
+        )
+        membership_result = await db.execute(membership_query)
+        has_access = membership_result.scalar_one_or_none() is not None
 
     # If no direct access, check if user has a plan assignment (pending or accepted)
     if not has_access:
