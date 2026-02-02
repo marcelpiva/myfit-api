@@ -226,12 +226,15 @@ class WorkoutService:
 
         # Filter by user's workouts within the organization, or public templates
         if organization_id:
-            # When organization_id is set, only show workouts from that organization
+            # When organization_id is set, show workouts from that org + legacy (NULL org_id)
             query = query.where(
                 or_(
                     and_(
                         Workout.created_by_id == user_id,
-                        Workout.organization_id == organization_id,
+                        or_(
+                            Workout.organization_id == organization_id,
+                            Workout.organization_id.is_(None),  # Backward compat
+                        ),
                     ),
                     and_(Workout.is_template == True, Workout.is_public == True),
                 )
@@ -727,7 +730,10 @@ class WorkoutService:
                     and_(
                         TrainingPlan.created_by_id == user_id,
                         TrainingPlan.is_template == True,
-                        TrainingPlan.organization_id == organization_id,
+                        or_(
+                            TrainingPlan.organization_id == organization_id,
+                            TrainingPlan.organization_id.is_(None),  # Backward compat
+                        ),
                     ),
                 ]
             else:
@@ -746,7 +752,10 @@ class WorkoutService:
                 query = query.where(
                     and_(
                         TrainingPlan.created_by_id == user_id,
-                        TrainingPlan.organization_id == organization_id,
+                        or_(
+                            TrainingPlan.organization_id == organization_id,
+                            TrainingPlan.organization_id.is_(None),  # Backward compat
+                        ),
                     )
                 )
             else:
@@ -1288,12 +1297,14 @@ class WorkoutService:
         new_name: str | None = None,
         duplicate_workouts: bool = True,
         source_template_id: uuid.UUID | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> TrainingPlan:
         """Duplicate a plan for another user.
 
         Args:
             source_template_id: If provided, marks this as an import from catalog.
                                Pass the original plan's ID to track the import origin.
+            organization_id: Organization to scope the new plan to.
         """
         # Generate a numbered name if no custom name provided
         if not new_name:
@@ -1324,6 +1335,7 @@ class WorkoutService:
             is_template=False,
             is_public=False,
             created_by_id=new_owner_id,
+            organization_id=organization_id,
             source_template_id=source_template_id,  # Track import origin if provided
         )
         self.db.add(new_plan)

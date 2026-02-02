@@ -2149,12 +2149,23 @@ async def get_plan(
 
 @router.post("/plans", response_model=PlanResponse, status_code=status.HTTP_201_CREATED)
 async def create_plan(
+    raw_request: Request,
     request: PlanCreate,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PlanResponse:
     """Create a new training plan."""
     workout_service = WorkoutService(db)
+
+    # Use request.organization_id if provided, otherwise fallback to X-Organization-ID header
+    organization_id = request.organization_id
+    if organization_id is None:
+        header_org = raw_request.headers.get("x-organization-id")
+        if header_org:
+            try:
+                organization_id = UUID(header_org)
+            except ValueError:
+                pass
 
     plan = await workout_service.create_plan(
         created_by_id=current_user.id,
@@ -2167,7 +2178,7 @@ async def create_plan(
         target_workout_minutes=request.target_workout_minutes,
         is_template=request.is_template,
         is_public=request.is_public,
-        organization_id=request.organization_id,
+        organization_id=organization_id,
     )
 
     # Add workouts if provided
@@ -2189,6 +2200,7 @@ async def create_plan(
                     name=pw.workout_name,
                     difficulty=request.difficulty,
                     target_muscles=pw.muscle_groups,
+                    organization_id=organization_id,
                 )
                 # Add exercises to new workout if provided
                 if pw.workout_exercises:
@@ -2405,6 +2417,7 @@ async def duplicate_plan(
     plan_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
     duplicate_workouts: Annotated[bool, Query()] = True,
     new_name: Annotated[str | None, Query(max_length=100)] = None,
     from_catalog: Annotated[bool, Query()] = False,
@@ -2433,12 +2446,21 @@ async def duplicate_plan(
     # If importing from catalog, track the source template
     source_template_id = plan_id if from_catalog else None
 
+    # Resolve organization_id from header
+    org_id = None
+    if x_organization_id:
+        try:
+            org_id = UUID(x_organization_id)
+        except ValueError:
+            pass
+
     new_plan = await workout_service.duplicate_plan(
         plan=plan,
         new_owner_id=current_user.id,
         new_name=new_name,
         duplicate_workouts=duplicate_workouts,
         source_template_id=source_template_id,
+        organization_id=org_id,
     )
 
     # Refresh to get full data
