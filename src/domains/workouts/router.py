@@ -899,6 +899,7 @@ async def add_set(
 
 @router.get("/plans", response_model=list[PlanListResponse])
 async def list_plans(
+    request: Request,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: Annotated[UUID | None, Query()] = None,
@@ -908,10 +909,20 @@ async def list_plans(
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> list[PlanListResponse]:
     """List training plans for the current user."""
+    # Use query param if provided, otherwise fallback to X-Organization-ID header
+    org_id = organization_id
+    if org_id is None:
+        header_org = request.headers.get("x-organization-id")
+        if header_org:
+            try:
+                org_id = UUID(header_org)
+            except ValueError:
+                pass
+
     workout_service = WorkoutService(db)
     plans = await workout_service.list_plans(
         user_id=current_user.id,
-        organization_id=organization_id,
+        organization_id=org_id,
         templates_only=templates_only,
         search=search,
         limit=limit,
