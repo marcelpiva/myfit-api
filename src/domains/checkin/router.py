@@ -92,7 +92,7 @@ async def get_gym(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     return GymResponse.model_validate(gym)
@@ -112,7 +112,7 @@ async def update_gym(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     updated = await service.update_gym(
@@ -174,7 +174,7 @@ async def create_checkin(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already checked in. Please check out first.",
+            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
         )
 
     # Verify gym exists
@@ -182,7 +182,7 @@ async def create_checkin(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     checkin = await service.create_checkin(
@@ -208,7 +208,7 @@ async def checkin_by_code(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already checked in. Please check out first.",
+            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
         )
 
     # Find and validate code
@@ -216,13 +216,13 @@ async def checkin_by_code(
     if not code:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Invalid check-in code",
+            detail="Código de check-in inválido",
         )
 
     if not code.is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Check-in code is expired or has reached maximum uses",
+            detail="Código expirado ou esgotado",
         )
 
     # Use the code
@@ -283,7 +283,7 @@ async def checkin_by_location(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already checked in. Please check out first.",
+            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
         )
 
     checkin, gym, distance = await service.checkin_by_location(
@@ -300,7 +300,7 @@ async def checkin_by_location(
             checkin=CheckInResponse.model_validate(checkin),
             nearest_gym=GymResponse.model_validate(gym) if gym else None,
             distance_meters=distance,
-            message=f"Checked in at {gym.name}",
+            message=f"Check-in realizado em {gym.name}",
         )
     else:
         return LocationCheckInResponse(
@@ -308,7 +308,7 @@ async def checkin_by_location(
             checkin=None,
             nearest_gym=GymResponse.model_validate(gym) if gym else None,
             distance_meters=distance,
-            message=f"Too far from nearest gym ({int(distance)}m away)" if gym and distance else "No gyms found",
+            message=f"Você está a {int(distance)}m da academia mais próxima" if gym and distance else "Nenhuma academia encontrada",
         )
 
 
@@ -325,7 +325,7 @@ async def checkout(
     if not active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Not currently checked in",
+            detail="Você não tem check-in ativo",
         )
 
     notes = request.notes if request else None
@@ -349,7 +349,7 @@ async def create_code(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     code = await service.create_code(
@@ -373,7 +373,7 @@ async def deactivate_code(
     if not code_obj:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Code not found",
+            detail="Código não encontrado",
         )
 
     await service.deactivate_code(code_obj)
@@ -410,7 +410,7 @@ async def create_request(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already checked in. Please check out first.",
+            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
         )
 
     # Verify gym exists
@@ -418,7 +418,7 @@ async def create_request(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     req = await service.create_request(
@@ -461,19 +461,19 @@ async def respond_to_request(
     if not req:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Request not found",
+            detail="Solicitação não encontrada",
         )
 
     if req.approver_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to respond to this request",
+            detail="Sem autorização para responder esta solicitação",
         )
 
     if req.status != CheckInStatus.PENDING:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Request already responded to",
+            detail="Solicitação já foi respondida",
         )
 
     updated_req, _ = await service.respond_to_request(
@@ -543,7 +543,7 @@ async def manual_checkin_for_student(
     if not gym:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Gym not found",
+            detail="Academia não encontrada",
         )
 
     # Verify caller is trainer/admin in the gym's organization
@@ -562,7 +562,7 @@ async def manual_checkin_for_student(
     if not trainer_membership:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only trainers or admins can check in students",
+            detail="Apenas personal trainers ou administradores podem registrar check-in de alunos",
         )
 
     # Verify student is member of the same organization
@@ -577,7 +577,7 @@ async def manual_checkin_for_student(
     if not student_membership:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Student not found in this organization",
+            detail="Aluno não encontrado nesta organização",
         )
 
     # Check if student already checked in
@@ -585,7 +585,7 @@ async def manual_checkin_for_student(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Student is already checked in",
+            detail="Aluno já tem um check-in ativo",
         )
 
     # Create check-in for the student
@@ -629,7 +629,7 @@ async def detect_nearby_trainer(
     if not x_organization_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Organization-ID header is required",
+            detail="Organização não identificada",
         )
 
     service = CheckInService(db)
@@ -675,7 +675,7 @@ async def checkin_near_trainer(
     if not x_organization_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="X-Organization-ID header is required",
+            detail="Organização não identificada",
         )
 
     service = CheckInService(db)
@@ -685,7 +685,7 @@ async def checkin_near_trainer(
     if active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already checked in. Please check out first.",
+            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
         )
 
     # Get trainer location and verify proximity
@@ -693,7 +693,7 @@ async def checkin_near_trainer(
     if not trainer_loc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Trainer location not available",
+            detail="Localização do personal não disponível",
         )
 
     t_lat, t_lng, source, gym_id, gym_name = trainer_loc
@@ -704,7 +704,7 @@ async def checkin_near_trainer(
     if distance > 200:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Too far from trainer ({int(distance)}m). Must be within 200m.",
+            detail=f"Você está a {int(distance)}m do personal. Aproxime-se (máx. 200m).",
         )
 
     # If trainer has an active check-in at a gym, use that gym_id
@@ -720,10 +720,22 @@ async def checkin_near_trainer(
             gym_id = gym.id
 
     if not gym_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No gym associated with trainer's location",
-        )
+        # Fallback: find or create gym for organization
+        org_id = UUID(x_organization_id)
+        org_gyms = await service.list_gyms(organization_id=org_id, limit=1)
+        if org_gyms:
+            gym_id = org_gyms[0].id
+        else:
+            # Auto-create gym at trainer's location
+            new_gym = await service.create_gym(
+                organization_id=org_id,
+                name="Local do Personal Trainer",
+                address="Localização do Personal Trainer",
+                latitude=t_lat,
+                longitude=t_lng,
+                radius_meters=200,
+            )
+            gym_id = new_gym.id
 
     # Create check-in linked to trainer
     checkin = await service.create_checkin(
