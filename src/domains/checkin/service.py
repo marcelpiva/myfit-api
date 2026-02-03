@@ -173,8 +173,12 @@ class CheckInService:
         status: CheckInStatus = CheckInStatus.CONFIRMED,
         approved_by_id: uuid.UUID | None = None,
         notes: str | None = None,
+        expires_in_minutes: int | None = 20,
     ) -> CheckIn:
         """Create a new check-in."""
+        expires_at = None
+        if expires_in_minutes:
+            expires_at = datetime.now(timezone.utc) + timedelta(minutes=expires_in_minutes)
         checkin = CheckIn(
             user_id=user_id,
             gym_id=gym_id,
@@ -182,6 +186,7 @@ class CheckInService:
             status=status,
             approved_by_id=approved_by_id,
             notes=notes,
+            expires_at=expires_at,
         )
         self.db.add(checkin)
         await self.db.commit()
@@ -499,6 +504,18 @@ class CheckInService:
             distance = self.calculate_distance(latitude, longitude, t_lat, t_lng)
 
             if distance <= max_distance_meters:
+                # Check if trainer has active session
+                session_result = await self.db.execute(
+                    select(TrainerLocation).where(
+                        and_(
+                            TrainerLocation.user_id == trainer_membership.user_id,
+                            TrainerLocation.session_active == True,
+                            TrainerLocation.expires_at > func.now(),
+                        )
+                    )
+                )
+                session_loc = session_result.scalar_one_or_none()
+
                 nearby.append({
                     "trainer_id": str(trainer_membership.user_id),
                     "trainer_name": trainer_membership.user.name if trainer_membership.user else "Personal",
@@ -506,6 +523,7 @@ class CheckInService:
                     "source": source,
                     "gym_id": str(gym_id) if gym_id else None,
                     "gym_name": gym_name,
+                    "session_active": session_loc is not None,
                 })
 
         nearby.sort(key=lambda x: x["distance_meters"])
@@ -543,6 +561,126 @@ class CheckInService:
         await self.db.commit()
         await self.db.refresh(loc)
         return loc
+
+    # Training Session operations
+
+    async def start_training_session(
+        self,
+        user_id: uuid.UUID,
+        latitude: float,
+        longitude: float,
+    ) -> TrainerLocation:
+        """Start a training session (marks trainer as available)."""
+        loc = await self.update_trainer_location(user_id, latitude, longitude)
+        loc.session_active = True
+        loc.session_started_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        await self.db.refresh(loc)
+        return loc
+
+    async def end_training_session(
+        self,
+        user_id: uuid.UUID,
+        organization_id: uuid.UUID,
+    ) -> None:
+        """End training session and checkout all active students."""
+        # Deactivate session
+        result = await self.db.execute(
+            select(TrainerLocation).where(TrainerLocation.user_id == user_id)
+        )
+        loc = result.scalar_one_or_none()
+        if loc:
+            loc.session_active = False
+            loc.session_started_at = None
+
+        # Find all active check-ins approved by this trainer
+        result = await self.db.execute(
+            select(CheckIn)
+            .where(
+                and_(
+                    CheckIn.approved_by_id == user_id,
+                    CheckIn.checked_out_at.is_(None),
+                    CheckIn.status == CheckInStatus.CONFIRMED,
+                )
+            )
+        )
+        active_checkins = result.scalars().all()
+        for checkin in active_checkins:
+            checkin.checked_out_at = datetime.now(timezone.utc)
+
+        await self.db.commit()
+
+    async def get_active_session(
+        self,
+        user_id: uuid.UUID,
+    ) -> dict | None:
+        """Get trainer's active session with student check-ins."""
+        result = await self.db.execute(
+            select(TrainerLocation).where(
+                and_(
+                    TrainerLocation.user_id == user_id,
+                    TrainerLocation.session_active == True,
+                    TrainerLocation.expires_at > func.now(),
+                )
+            )
+        )
+        loc = result.scalar_one_or_none()
+        if not loc:
+            return None
+
+        # Get all active check-ins approved by this trainer (today)
+        today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+        result = await self.db.execute(
+            select(CheckIn)
+            .where(
+                and_(
+                    CheckIn.approved_by_id == user_id,
+                    CheckIn.checked_in_at >= today_start,
+                )
+            )
+            .options(selectinload(CheckIn.user))
+            .order_by(CheckIn.checked_in_at.desc())
+        )
+        checkins = result.scalars().all()
+
+        now = datetime.now(timezone.utc)
+
+        # Lazy expiration: cancel expired pending check-ins
+        checkin_list = []
+        for c in checkins:
+            elapsed = int((now - c.checked_in_at).total_seconds() / 60)
+
+            # Auto-cancel if pending and expired (20 min)
+            if c.expires_at and c.expires_at < now and c.checked_out_at is None and c.status == CheckInStatus.CONFIRMED:
+                c.checked_out_at = now
+                c.notes = (c.notes or "") + " [auto-expirado 20min]"
+
+            status = "active"
+            if c.checked_out_at:
+                status = "completed"
+
+            checkin_list.append({
+                "id": str(c.id),
+                "student_name": c.user.name if c.user else "Aluno",
+                "student_avatar": c.user.avatar_url if c.user and hasattr(c.user, 'avatar_url') else None,
+                "checked_in_at": c.checked_in_at.isoformat(),
+                "elapsed_minutes": elapsed,
+                "status": status,
+                "checked_out_at": c.checked_out_at.isoformat() if c.checked_out_at else None,
+            })
+
+        await self.db.commit()
+
+        return {
+            "session": {
+                "id": str(loc.id),
+                "started_at": loc.session_started_at.isoformat() if loc.session_started_at else loc.updated_at.isoformat(),
+                "status": "active",
+                "latitude": loc.latitude,
+                "longitude": loc.longitude,
+            },
+            "checkins": checkin_list,
+        }
 
     # Stats
 

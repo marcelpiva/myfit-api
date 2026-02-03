@@ -10,6 +10,7 @@ from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.checkin.models import CheckInMethod, CheckInStatus
 from src.domains.checkin.schemas import (
+    ActiveSessionResponse,
     CheckInByCodeRequest,
     CheckInByLocationRequest,
     CheckInCodeCreate,
@@ -30,6 +31,7 @@ from src.domains.checkin.schemas import (
     NearbyGymResponse,
     NearbyTrainerInfo,
     NearbyTrainerResponse,
+    StartTrainingSessionRequest,
     UpdateTrainerLocationRequest,
 )
 from src.domains.checkin.service import CheckInService
@@ -780,3 +782,54 @@ async def get_checkin_stats(
         days=days,
     )
     return CheckInStatsResponse(**stats)
+
+
+# Training Session endpoints
+
+@router.post("/training-sessions/start")
+async def start_training_session(
+    request: StartTrainingSessionRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str, Header()],
+):
+    """Trainer starts a training session (becomes available for students)."""
+    service = CheckInService(db)
+    loc = await service.start_training_session(
+        user_id=current_user.id,
+        latitude=request.latitude,
+        longitude=request.longitude,
+    )
+    return {
+        "session_id": str(loc.id),
+        "started_at": loc.session_started_at.isoformat() if loc.session_started_at else None,
+        "status": "active",
+    }
+
+
+@router.post("/training-sessions/end")
+async def end_training_session(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str, Header()],
+):
+    """Trainer ends the training session and checks out all students."""
+    service = CheckInService(db)
+    await service.end_training_session(
+        user_id=current_user.id,
+        organization_id=UUID(x_organization_id),
+    )
+    return {"status": "ended"}
+
+
+@router.get("/training-sessions/active")
+async def get_active_session(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    """Get trainer's active training session with student check-ins."""
+    service = CheckInService(db)
+    session = await service.get_active_session(user_id=current_user.id)
+    if not session:
+        return {"session": None, "checkins": []}
+    return session

@@ -228,6 +228,7 @@ class NearbyTrainerInfo(BaseModel):
     source: str  # "checkin" or "gps"
     gym_id: UUID | None = None
     gym_name: str | None = None
+    session_active: bool = False
 
 
 class NearbyTrainerResponse(BaseModel):
@@ -250,3 +251,41 @@ class CheckInNearTrainerRequest(BaseModel):
     latitude: float = Field(ge=-90, le=90)
     longitude: float = Field(ge=-180, le=180)
     trainer_id: UUID
+
+
+# Training session schemas
+
+class StartTrainingSessionRequest(BaseModel):
+    """Start a training session."""
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class TrainingSessionResponse(BaseModel):
+    """Training session info."""
+
+    id: UUID
+    started_at: datetime
+    status: str
+    latitude: float
+    longitude: float
+
+
+class SessionCheckinInfo(BaseModel):
+    """Check-in info within a training session."""
+
+    id: UUID
+    student_name: str
+    student_avatar: str | None = None
+    checked_in_at: datetime
+    elapsed_minutes: int
+    status: str
+    checked_out_at: datetime | None = None
+
+
+class ActiveSessionResponse(BaseModel):
+    """Active training session with check-ins."""
+
+    session: TrainingSessionResponse
+    checkins: list[SessionCheckinInfo] = []

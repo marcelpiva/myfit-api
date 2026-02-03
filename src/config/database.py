@@ -132,6 +132,11 @@ async def _run_pending_migrations() -> None:
         ("training_location", "users", "VARCHAR(500)", None),
         ("preferred_activities", "users", "VARCHAR(500)", None),
         ("can_do_impact", "users", "BOOLEAN", None),
+        # Training session fields on trainer_locations
+        ("session_active", "trainer_locations", "BOOLEAN", "FALSE"),
+        ("session_started_at", "trainer_locations", "TIMESTAMP", None),
+        # Check-in expiration
+        ("expires_at", "check_ins", "TIMESTAMP", None),
     ]
 
     # Create a separate engine for migrations to avoid connection state issues

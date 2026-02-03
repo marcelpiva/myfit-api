@@ -104,6 +104,10 @@ class CheckIn(Base, UUIDMixin):
         nullable=True,
     )
     notes: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
@@ -230,6 +234,13 @@ class TrainerLocation(Base, UUIDMixin):
     expires_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
+    )
+    session_active: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default="false", nullable=False,
+    )
+    session_started_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
     )
 
     # Relationships
