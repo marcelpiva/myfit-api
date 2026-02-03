@@ -1,7 +1,7 @@
 """Check-in models for the MyFit platform."""
 import enum
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -160,8 +160,11 @@ class CheckInCode(Base, UUIDMixin, TimestampMixin):
         """Check if code is still valid."""
         if not self.is_active:
             return False
-        if self.expires_at and datetime.now(self.expires_at.tzinfo) > self.expires_at:
-            return False
+        if self.expires_at:
+            now_utc = datetime.now(timezone.utc)
+            expires_utc = self.expires_at if self.expires_at.tzinfo else self.expires_at.replace(tzinfo=timezone.utc)
+            if now_utc > expires_utc:
+                return False
         if self.max_uses and self.uses_count >= self.max_uses:
             return False
         return True
