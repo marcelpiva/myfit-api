@@ -556,7 +556,7 @@ async def manual_checkin_for_student(
                 UserRole.TRAINER, UserRole.COACH,
                 UserRole.GYM_ADMIN, UserRole.GYM_OWNER,
             ]),
-        )
+        ).limit(1)
     )
     trainer_membership = result.scalar_one_or_none()
     if not trainer_membership:
@@ -571,7 +571,7 @@ async def manual_checkin_for_student(
             OrganizationMembership.organization_id == gym.organization_id,
             OrganizationMembership.user_id == request.student_id,
             OrganizationMembership.is_active == True,
-        )
+        ).limit(1)
     )
     student_membership = result.scalar_one_or_none()
     if not student_membership:
