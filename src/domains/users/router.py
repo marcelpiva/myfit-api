@@ -288,6 +288,25 @@ async def change_password(
     await TokenBlacklist.invalidate_all_user_tokens(str(current_user.id))
 
 
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_account(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete (soft-delete) the current user's account.
+
+    - Archives all organizations owned by the user
+    - Deactivates all memberships
+    - Sets is_active=False on the user
+    - Invalidates all tokens
+    """
+    user_service = UserService(db)
+    await user_service.delete_account(current_user)
+
+    # Invalidate all user tokens
+    await TokenBlacklist.invalidate_all_user_tokens(str(current_user.id))
+
+
 @router.get("/search", response_model=list[UserListResponse])
 async def search_users(
     current_user: CurrentUser,

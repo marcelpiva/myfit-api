@@ -1,8 +1,8 @@
 """User service with database operations."""
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 
-from sqlalchemy import select
+from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.core.security import hash_password, verify_password
@@ -267,3 +267,60 @@ class UserService:
             .offset(offset)
         )
         return list(result.scalars().all())
+
+    async def delete_account(self, user: User) -> None:
+        """Soft-delete a user account.
+
+        - Archives all organizations where user is owner
+        - Deactivates all user memberships
+        - Sets user is_active=False
+
+        Args:
+            user: The User to delete
+        """
+        from src.domains.organizations.models import (
+            Organization,
+            OrganizationMembership,
+        )
+        from src.domains.workouts.models import WorkoutAssignment
+
+        # 1. Archive organizations where user is owner
+        owned_orgs_result = await self.db.execute(
+            select(Organization).where(
+                and_(
+                    Organization.owner_id == user.id,
+                    Organization.is_active == True,
+                )
+            )
+        )
+        owned_orgs = owned_orgs_result.scalars().all()
+        for org in owned_orgs:
+            org.archived_at = datetime.now(timezone.utc)
+            # Deactivate workout assignments in owned orgs
+            assignments_result = await self.db.execute(
+                select(WorkoutAssignment).where(
+                    and_(
+                        WorkoutAssignment.organization_id == org.id,
+                        WorkoutAssignment.is_active == True,
+                    )
+                )
+            )
+            for assignment in assignments_result.scalars().all():
+                assignment.is_active = False
+
+        # 2. Deactivate all user memberships
+        memberships_result = await self.db.execute(
+            select(OrganizationMembership).where(
+                and_(
+                    OrganizationMembership.user_id == user.id,
+                    OrganizationMembership.is_active == True,
+                )
+            )
+        )
+        for membership in memberships_result.scalars().all():
+            membership.is_active = False
+
+        # 3. Soft-delete user
+        user.is_active = False
+
+        await self.db.commit()

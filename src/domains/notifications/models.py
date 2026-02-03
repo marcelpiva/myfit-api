@@ -39,6 +39,9 @@ class NotificationType(str, enum.Enum):
     # Check-in related
     CHECKIN_REMINDER = "checkin_reminder"
     CHECKIN_STREAK = "checkin_streak"
+    CHECKIN_REQUEST_CREATED = "checkin_request_created"
+    CHECKIN_REQUEST_APPROVED = "checkin_request_approved"
+    CHECKIN_REQUEST_REJECTED = "checkin_request_rejected"
 
     # Gamification related
     ACHIEVEMENT_UNLOCKED = "achievement_unlocked"

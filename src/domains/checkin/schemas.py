@@ -124,6 +124,14 @@ class CheckInCodeResponse(BaseModel):
 
 # Check-in request schemas
 
+class ManualCheckinForStudentRequest(BaseModel):
+    """Trainer creates check-in on behalf of a student."""
+
+    student_id: UUID
+    gym_id: UUID
+    notes: str | None = Field(None, max_length=500)
+
+
 class CheckInRequestCreate(BaseModel):
     """Create check-in request."""
 
@@ -152,8 +160,29 @@ class CheckInRequestResponse(BaseModel):
     response_note: str | None = None
     created_at: datetime
     gym: GymResponse | None = None
+    approver_name: str | None = None
+    requester_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_request(cls, req) -> "CheckInRequestResponse":
+        """Create response from ORM model with user relationships loaded."""
+        data = {
+            "id": req.id,
+            "user_id": req.user_id,
+            "gym_id": req.gym_id,
+            "approver_id": req.approver_id,
+            "status": req.status,
+            "reason": req.reason,
+            "responded_at": req.responded_at,
+            "response_note": req.response_note,
+            "created_at": req.created_at,
+            "gym": GymResponse.model_validate(req.gym) if req.gym else None,
+            "approver_name": req.approver.name if hasattr(req, "approver") and req.approver else None,
+            "requester_name": req.user.name if hasattr(req, "user") and req.user else None,
+        }
+        return cls(**data)
 
 
 # Stats schema
@@ -177,3 +206,47 @@ class LocationCheckInResponse(BaseModel):
     nearest_gym: GymResponse | None = None
     distance_meters: float | None = None
     message: str
+
+
+class NearbyGymResponse(BaseModel):
+    """Nearby gym detection response (read-only, no check-in created)."""
+
+    found: bool
+    gym: GymResponse | None = None
+    distance_meters: float | None = None
+    within_radius: bool = False
+
+
+# Trainer location schemas
+
+class NearbyTrainerInfo(BaseModel):
+    """Info about a nearby trainer."""
+
+    trainer_id: UUID
+    trainer_name: str
+    distance_meters: float
+    source: str  # "checkin" or "gps"
+    gym_id: UUID | None = None
+    gym_name: str | None = None
+
+
+class NearbyTrainerResponse(BaseModel):
+    """Nearby trainer detection response."""
+
+    found: bool
+    trainers: list[NearbyTrainerInfo] = []
+
+
+class UpdateTrainerLocationRequest(BaseModel):
+    """Trainer shares GPS location."""
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+
+
+class CheckInNearTrainerRequest(BaseModel):
+    """Student check-in near a trainer."""
+
+    latitude: float = Field(ge=-90, le=90)
+    longitude: float = Field(ge=-180, le=180)
+    trainer_id: UUID

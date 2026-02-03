@@ -207,6 +207,38 @@ class CheckInRequest(Base, UUIDMixin, TimestampMixin):
         return f"<CheckInRequest user={self.user_id} status={self.status}>"
 
 
+class TrainerLocation(Base, UUIDMixin):
+    """Real-time GPS location shared by a trainer for student proximity detection."""
+
+    __tablename__ = "trainer_locations"
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    latitude: Mapped[float] = mapped_column(Float, nullable=False)
+    longitude: Mapped[float] = mapped_column(Float, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+    )
+
+    # Relationships
+    user: Mapped["User"] = relationship("User")
+
+    def __repr__(self) -> str:
+        return f"<TrainerLocation user={self.user_id}>"
+
+
 # Import for type hints
 from src.domains.organizations.models import Organization  # noqa: E402, F401
 from src.domains.users.models import User  # noqa: E402, F401

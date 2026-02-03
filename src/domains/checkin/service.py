@@ -15,7 +15,9 @@ from src.domains.checkin.models import (
     CheckInRequest,
     CheckInStatus,
     Gym,
+    TrainerLocation,
 )
+from src.domains.organizations.models import OrganizationMembership, UserRole
 
 
 class CheckInService:
@@ -270,6 +272,27 @@ class CheckInService:
         result = await self.db.execute(query)
         return list(result.scalars().all())
 
+    async def list_user_requests(
+        self,
+        user_id: uuid.UUID,
+        status_filter: CheckInStatus | None = None,
+        limit: int = 20,
+    ) -> list[CheckInRequest]:
+        """List check-in requests created by a user (student sees their own requests)."""
+        query = select(CheckInRequest).where(
+            CheckInRequest.user_id == user_id,
+        ).options(
+            selectinload(CheckInRequest.gym),
+            selectinload(CheckInRequest.approver),
+        )
+
+        if status_filter:
+            query = query.where(CheckInRequest.status == status_filter)
+
+        query = query.order_by(CheckInRequest.created_at.desc()).limit(limit)
+        result = await self.db.execute(query)
+        return list(result.scalars().all())
+
     async def create_request(
         self,
         user_id: uuid.UUID,
@@ -342,14 +365,18 @@ class CheckInService:
 
         return R * c
 
-    async def checkin_by_location(
+    async def find_nearest_gym(
         self,
-        user_id: uuid.UUID,
         latitude: float,
         longitude: float,
-    ) -> tuple[CheckIn | None, Gym | None, float | None]:
-        """Check in by location - finds nearest gym within radius."""
-        gyms = await self.list_gyms(active_only=True, limit=100)
+        organization_id: uuid.UUID | None = None,
+    ) -> tuple[Gym | None, float | None]:
+        """Find nearest gym without creating a check-in."""
+        gyms = await self.list_gyms(
+            organization_id=organization_id,
+            active_only=True,
+            limit=100,
+        )
 
         nearest_gym = None
         nearest_distance = float('inf')
@@ -363,7 +390,23 @@ class CheckInService:
                 nearest_distance = distance
                 nearest_gym = gym
 
-        if nearest_gym and nearest_distance <= nearest_gym.radius_meters:
+        if nearest_gym:
+            return nearest_gym, nearest_distance
+        return None, None
+
+    async def checkin_by_location(
+        self,
+        user_id: uuid.UUID,
+        latitude: float,
+        longitude: float,
+        organization_id: uuid.UUID | None = None,
+    ) -> tuple[CheckIn | None, Gym | None, float | None]:
+        """Check in by location - finds nearest gym within radius."""
+        nearest_gym, nearest_distance = await self.find_nearest_gym(
+            latitude, longitude, organization_id=organization_id,
+        )
+
+        if nearest_gym and nearest_distance is not None and nearest_distance <= nearest_gym.radius_meters:
             checkin = await self.create_checkin(
                 user_id=user_id,
                 gym_id=nearest_gym.id,
@@ -371,7 +414,135 @@ class CheckInService:
             )
             return checkin, nearest_gym, nearest_distance
 
-        return None, nearest_gym, nearest_distance if nearest_gym else None
+        return None, nearest_gym, nearest_distance
+
+    # Trainer location operations
+
+    async def get_trainer_location(
+        self,
+        trainer_id: uuid.UUID,
+    ) -> tuple[float, float, str, uuid.UUID | None, str | None] | None:
+        """Get a trainer's current location.
+
+        Priority: active check-in (gym lat/lng) > shared GPS (TrainerLocation).
+
+        Returns:
+            Tuple of (latitude, longitude, source, gym_id, gym_name) or None.
+            source is "checkin" or "gps".
+        """
+        # 1. Check active check-in
+        active = await self.get_active_checkin(trainer_id)
+        if active and active.gym:
+            return (
+                active.gym.latitude,
+                active.gym.longitude,
+                "checkin",
+                active.gym.id,
+                active.gym.name,
+            )
+
+        # 2. Check shared GPS location (not expired)
+        result = await self.db.execute(
+            select(TrainerLocation).where(
+                and_(
+                    TrainerLocation.user_id == trainer_id,
+                    TrainerLocation.expires_at > func.now(),
+                )
+            )
+        )
+        loc = result.scalar_one_or_none()
+        if loc:
+            return (loc.latitude, loc.longitude, "gps", None, None)
+
+        return None
+
+    async def find_nearby_trainers(
+        self,
+        student_id: uuid.UUID,
+        latitude: float,
+        longitude: float,
+        organization_id: uuid.UUID,
+        max_distance_meters: float = 200,
+    ) -> list[dict]:
+        """Find trainers/coaches near the student's position.
+
+        Looks up all trainers in the organization, gets their location,
+        and returns those within max_distance_meters sorted by distance.
+
+        Returns:
+            List of dicts: {trainer_id, trainer_name, distance_meters, source, gym_id, gym_name}
+        """
+        # Get all trainers/coaches in the organization
+        result = await self.db.execute(
+            select(OrganizationMembership)
+            .where(
+                and_(
+                    OrganizationMembership.organization_id == organization_id,
+                    OrganizationMembership.is_active == True,
+                    OrganizationMembership.role.in_([
+                        UserRole.TRAINER,
+                        UserRole.COACH,
+                    ]),
+                )
+            )
+            .options(selectinload(OrganizationMembership.user))
+        )
+        trainers = result.scalars().all()
+
+        nearby = []
+        for trainer_membership in trainers:
+            loc = await self.get_trainer_location(trainer_membership.user_id)
+            if not loc:
+                continue
+
+            t_lat, t_lng, source, gym_id, gym_name = loc
+            distance = self.calculate_distance(latitude, longitude, t_lat, t_lng)
+
+            if distance <= max_distance_meters:
+                nearby.append({
+                    "trainer_id": str(trainer_membership.user_id),
+                    "trainer_name": trainer_membership.user.name if trainer_membership.user else "Personal",
+                    "distance_meters": round(distance, 1),
+                    "source": source,
+                    "gym_id": str(gym_id) if gym_id else None,
+                    "gym_name": gym_name,
+                })
+
+        nearby.sort(key=lambda x: x["distance_meters"])
+        return nearby
+
+    async def update_trainer_location(
+        self,
+        user_id: uuid.UUID,
+        latitude: float,
+        longitude: float,
+        ttl_hours: int = 2,
+    ) -> TrainerLocation:
+        """Upsert trainer's GPS location with TTL expiry."""
+        result = await self.db.execute(
+            select(TrainerLocation).where(TrainerLocation.user_id == user_id)
+        )
+        loc = result.scalar_one_or_none()
+
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
+
+        if loc:
+            loc.latitude = latitude
+            loc.longitude = longitude
+            loc.expires_at = expires_at
+            loc.updated_at = datetime.now(timezone.utc)
+        else:
+            loc = TrainerLocation(
+                user_id=user_id,
+                latitude=latitude,
+                longitude=longitude,
+                expires_at=expires_at,
+            )
+            self.db.add(loc)
+
+        await self.db.commit()
+        await self.db.refresh(loc)
+        return loc
 
     # Stats
 

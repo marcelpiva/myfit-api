@@ -74,6 +74,7 @@ from src.domains.checkin.models import (
     CheckInRequest,
     CheckInStatus,
     Gym,
+    TrainerLocation,
 )
 
 # Gamification domain
@@ -195,6 +196,7 @@ __all__ = [
     "CheckInRequest",
     "CheckInMethod",
     "CheckInStatus",
+    "TrainerLocation",
     # Gamification
     "UserPoints",
     "PointTransaction",

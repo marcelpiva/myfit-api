@@ -3,7 +3,7 @@ from datetime import date
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -15,6 +15,7 @@ from src.domains.checkin.schemas import (
     CheckInCodeCreate,
     CheckInCodeResponse,
     CheckInCreate,
+    CheckInNearTrainerRequest,
     CheckInRequestCreate,
     CheckInRequestRespond,
     CheckInRequestResponse,
@@ -25,8 +26,15 @@ from src.domains.checkin.schemas import (
     GymResponse,
     GymUpdate,
     LocationCheckInResponse,
+    ManualCheckinForStudentRequest,
+    NearbyGymResponse,
+    NearbyTrainerInfo,
+    NearbyTrainerResponse,
+    UpdateTrainerLocationRequest,
 )
 from src.domains.checkin.service import CheckInService
+from src.domains.notifications.push_service import send_push_notification
+from src.domains.users.models import User
 
 router = APIRouter()
 
@@ -232,14 +240,43 @@ async def checkin_by_code(
     return CheckInResponse.model_validate(checkin)
 
 
+@router.post("/nearby", response_model=NearbyGymResponse)
+async def detect_nearby_gym(
+    request: CheckInByLocationRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
+) -> NearbyGymResponse:
+    """Detect the nearest gym without creating a check-in."""
+    service = CheckInService(db)
+    org_id = UUID(x_organization_id) if x_organization_id else None
+
+    gym, distance = await service.find_nearest_gym(
+        latitude=request.latitude,
+        longitude=request.longitude,
+        organization_id=org_id,
+    )
+
+    if gym:
+        return NearbyGymResponse(
+            found=True,
+            gym=GymResponse.model_validate(gym),
+            distance_meters=distance,
+            within_radius=distance is not None and distance <= gym.radius_meters,
+        )
+    return NearbyGymResponse(found=False)
+
+
 @router.post("/location", response_model=LocationCheckInResponse)
 async def checkin_by_location(
     request: CheckInByLocationRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> LocationCheckInResponse:
     """Check in by location."""
     service = CheckInService(db)
+    org_id = UUID(x_organization_id) if x_organization_id else None
 
     # Check if already checked in
     active = await service.get_active_checkin(current_user.id)
@@ -253,6 +290,7 @@ async def checkin_by_location(
         user_id=current_user.id,
         latitude=request.latitude,
         longitude=request.longitude,
+        organization_id=org_id,
     )
 
     if checkin:
@@ -270,7 +308,7 @@ async def checkin_by_location(
             checkin=None,
             nearest_gym=GymResponse.model_validate(gym) if gym else None,
             distance_meters=distance,
-            message=f"Too far from nearest gym ({int(distance)}m away)" if gym else "No gyms found",
+            message=f"Too far from nearest gym ({int(distance)}m away)" if gym and distance else "No gyms found",
         )
 
 
@@ -389,6 +427,23 @@ async def create_request(
         approver_id=request.approver_id,
         reason=request.reason,
     )
+
+    # Send push notification to approver
+    try:
+        await send_push_notification(
+            db=db,
+            user_id=request.approver_id,
+            title="Solicitação de Check-in",
+            body=f"{current_user.name} solicitou check-in",
+            data={
+                "type": "checkin_request_created",
+                "request_id": str(req.id),
+                "gym_id": str(request.gym_id),
+            },
+        )
+    except Exception:
+        pass  # Don't fail the request if push fails
+
     return CheckInRequestResponse.model_validate(req)
 
 
@@ -426,7 +481,276 @@ async def respond_to_request(
         approved=response.approved,
         response_note=response.response_note,
     )
+
+    # Send push notification to the student
+    try:
+        if response.approved:
+            title = "Check-in aprovado!"
+            body = f"{current_user.name} aprovou seu check-in"
+            ntype = "checkin_request_approved"
+        else:
+            title = "Check-in recusado"
+            body = f"{current_user.name} recusou seu check-in"
+            ntype = "checkin_request_rejected"
+
+        await send_push_notification(
+            db=db,
+            user_id=req.user_id,
+            title=title,
+            body=body,
+            data={
+                "type": ntype,
+                "request_id": str(request_id),
+            },
+        )
+    except Exception:
+        pass  # Don't fail the response if push fails
+
     return CheckInRequestResponse.model_validate(updated_req)
+
+
+@router.get("/my-requests", response_model=list[CheckInRequestResponse])
+async def list_my_requests(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    status_filter: Annotated[CheckInStatus | None, Query(alias="status")] = None,
+    limit: Annotated[int, Query(ge=1, le=50)] = 20,
+) -> list[CheckInRequestResponse]:
+    """List check-in requests created by the current user (student sees their own requests)."""
+    service = CheckInService(db)
+    requests = await service.list_user_requests(
+        user_id=current_user.id,
+        status_filter=status_filter,
+        limit=limit,
+    )
+    return [CheckInRequestResponse.from_request(r) for r in requests]
+
+
+@router.post("/manual-for-student", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
+async def manual_checkin_for_student(
+    request: ManualCheckinForStudentRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CheckInResponse:
+    """Trainer creates a manual check-in on behalf of a student."""
+    from sqlalchemy import select as sa_select
+    from src.domains.organizations.models import OrganizationMembership, UserRole
+
+    service = CheckInService(db)
+
+    # Verify gym exists
+    gym = await service.get_gym_by_id(request.gym_id)
+    if not gym:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Gym not found",
+        )
+
+    # Verify caller is trainer/admin in the gym's organization
+    result = await db.execute(
+        sa_select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == gym.organization_id,
+            OrganizationMembership.user_id == current_user.id,
+            OrganizationMembership.is_active == True,
+            OrganizationMembership.role.in_([
+                UserRole.TRAINER, UserRole.COACH,
+                UserRole.GYM_ADMIN, UserRole.GYM_OWNER,
+            ]),
+        )
+    )
+    trainer_membership = result.scalar_one_or_none()
+    if not trainer_membership:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only trainers or admins can check in students",
+        )
+
+    # Verify student is member of the same organization
+    result = await db.execute(
+        sa_select(OrganizationMembership).where(
+            OrganizationMembership.organization_id == gym.organization_id,
+            OrganizationMembership.user_id == request.student_id,
+            OrganizationMembership.is_active == True,
+        )
+    )
+    student_membership = result.scalar_one_or_none()
+    if not student_membership:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found in this organization",
+        )
+
+    # Check if student already checked in
+    active = await service.get_active_checkin(request.student_id)
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Student is already checked in",
+        )
+
+    # Create check-in for the student
+    checkin = await service.create_checkin(
+        user_id=request.student_id,
+        gym_id=request.gym_id,
+        method=CheckInMethod.MANUAL,
+        approved_by_id=current_user.id,
+        notes=request.notes,
+    )
+
+    # Send push notification to student
+    try:
+        await send_push_notification(
+            db=db,
+            user_id=request.student_id,
+            title="Check-in registrado",
+            body=f"{current_user.name} registrou seu check-in",
+            data={
+                "type": "checkin_manual",
+                "checkin_id": str(checkin.id),
+            },
+        )
+    except Exception:
+        pass
+
+    checkin = await service.get_checkin_by_id(checkin.id)
+    return CheckInResponse.model_validate(checkin)
+
+
+# Trainer location endpoints
+
+@router.post("/nearby-trainer", response_model=NearbyTrainerResponse)
+async def detect_nearby_trainer(
+    request: CheckInByLocationRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
+) -> NearbyTrainerResponse:
+    """Detect nearby trainers for a student (read-only, no check-in created)."""
+    if not x_organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Organization-ID header is required",
+        )
+
+    service = CheckInService(db)
+    org_id = UUID(x_organization_id)
+
+    trainers = await service.find_nearby_trainers(
+        student_id=current_user.id,
+        latitude=request.latitude,
+        longitude=request.longitude,
+        organization_id=org_id,
+    )
+
+    return NearbyTrainerResponse(
+        found=len(trainers) > 0,
+        trainers=[NearbyTrainerInfo(**t) for t in trainers],
+    )
+
+
+@router.post("/trainer-location")
+async def update_trainer_location(
+    request: UpdateTrainerLocationRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Trainer shares their GPS location for student proximity detection."""
+    service = CheckInService(db)
+    loc = await service.update_trainer_location(
+        user_id=current_user.id,
+        latitude=request.latitude,
+        longitude=request.longitude,
+    )
+    return {"success": True, "expires_at": loc.expires_at.isoformat()}
+
+
+@router.post("/checkin-near-trainer", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
+async def checkin_near_trainer(
+    request: CheckInNearTrainerRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
+) -> CheckInResponse:
+    """Student checks in near their trainer."""
+    if not x_organization_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="X-Organization-ID header is required",
+        )
+
+    service = CheckInService(db)
+
+    # Check if already checked in
+    active = await service.get_active_checkin(current_user.id)
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Already checked in. Please check out first.",
+        )
+
+    # Get trainer location and verify proximity
+    trainer_loc = await service.get_trainer_location(request.trainer_id)
+    if not trainer_loc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Trainer location not available",
+        )
+
+    t_lat, t_lng, source, gym_id, gym_name = trainer_loc
+    distance = service.calculate_distance(
+        request.latitude, request.longitude, t_lat, t_lng,
+    )
+
+    if distance > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Too far from trainer ({int(distance)}m). Must be within 200m.",
+        )
+
+    # If trainer has an active check-in at a gym, use that gym_id
+    # Otherwise, find the nearest gym to the trainer's GPS
+    if not gym_id:
+        org_id = UUID(x_organization_id)
+        gym, _ = await service.find_nearest_gym(
+            latitude=t_lat,
+            longitude=t_lng,
+            organization_id=org_id,
+        )
+        if gym:
+            gym_id = gym.id
+
+    if not gym_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No gym associated with trainer's location",
+        )
+
+    # Create check-in linked to trainer
+    checkin = await service.create_checkin(
+        user_id=current_user.id,
+        gym_id=gym_id,
+        method=CheckInMethod.LOCATION,
+        approved_by_id=request.trainer_id,
+    )
+
+    # Send push notification to trainer
+    try:
+        await send_push_notification(
+            db=db,
+            user_id=request.trainer_id,
+            title="Check-in do aluno",
+            body=f"{current_user.name} fez check-in próximo a você",
+            data={
+                "type": "checkin_near_trainer",
+                "checkin_id": str(checkin.id),
+                "student_id": str(current_user.id),
+            },
+        )
+    except Exception:
+        pass
+
+    checkin = await service.get_checkin_by_id(checkin.id)
+    return CheckInResponse.model_validate(checkin)
 
 
 # Stats
