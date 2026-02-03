@@ -1743,8 +1743,8 @@ class WorkoutService:
         organization_id: uuid.UUID | None = None,
     ) -> list[ActiveSessionResponse]:
         """List active sessions for students (trainer view)."""
-        from src.domains.organizations.models import OrganizationMembership
-        from src.domains.users.models import User, UserRole
+        from src.domains.organizations.models import OrganizationMembership, UserRole
+        from src.domains.users.models import User
 
         # Get students that this trainer can see
         students_query = (
