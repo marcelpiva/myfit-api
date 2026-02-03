@@ -462,7 +462,7 @@ class CheckInService:
         latitude: float,
         longitude: float,
         organization_id: uuid.UUID,
-        max_distance_meters: float = 200,
+        max_distance_meters: float = 500,
     ) -> list[dict]:
         """Find trainers/coaches near the student's position.
 
