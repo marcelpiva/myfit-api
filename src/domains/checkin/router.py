@@ -445,10 +445,9 @@ async def manual_checkin_for_student(
             detail="Academia não encontrada",
         )
 
-    # Verify caller is trainer/admin in the gym's organization
+    # Verify caller is trainer/admin in any organization
     result = await db.execute(
         sa_select(OrganizationMembership).where(
-            OrganizationMembership.organization_id == gym.organization_id,
             OrganizationMembership.user_id == current_user.id,
             OrganizationMembership.is_active == True,
             OrganizationMembership.role.in_([
@@ -464,10 +463,10 @@ async def manual_checkin_for_student(
             detail="Apenas personal trainers ou administradores podem registrar check-in de alunos",
         )
 
-    # Verify student is member of the same organization
+    # Verify student is member of the same organization as the trainer
     result = await db.execute(
         sa_select(OrganizationMembership).where(
-            OrganizationMembership.organization_id == gym.organization_id,
+            OrganizationMembership.organization_id == trainer_membership.organization_id,
             OrganizationMembership.user_id == request.student_id,
             OrganizationMembership.is_active == True,
         ).limit(1)
