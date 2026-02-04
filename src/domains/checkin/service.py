@@ -124,14 +124,17 @@ class CheckInService:
         return result.scalar_one_or_none()
 
     async def get_active_checkin(self, user_id: uuid.UUID) -> CheckIn | None:
-        """Get user's active check-in (not checked out)."""
+        """Get user's active check-in (not checked out, confirmed or pending acceptance)."""
         result = await self.db.execute(
             select(CheckIn)
             .where(
                 and_(
                     CheckIn.user_id == user_id,
                     CheckIn.checked_out_at.is_(None),
-                    CheckIn.status == CheckInStatus.CONFIRMED,
+                    CheckIn.status.in_([
+                        CheckInStatus.CONFIRMED,
+                        CheckInStatus.PENDING_ACCEPTANCE,
+                    ]),
                 )
             )
             .options(selectinload(CheckIn.gym))
@@ -174,6 +177,7 @@ class CheckInService:
         approved_by_id: uuid.UUID | None = None,
         notes: str | None = None,
         expires_in_minutes: int | None = 20,
+        initiated_by: uuid.UUID | None = None,
     ) -> CheckIn:
         """Create a new check-in."""
         expires_at = None
@@ -187,6 +191,7 @@ class CheckInService:
             approved_by_id=approved_by_id,
             notes=notes,
             expires_at=expires_at,
+            initiated_by=initiated_by,
         )
         self.db.add(checkin)
         await self.db.commit()
@@ -681,6 +686,95 @@ class CheckInService:
             },
             "checkins": checkin_list,
         }
+
+    # Accept/Reject pending check-ins
+
+    async def accept_checkin(self, checkin: CheckIn) -> CheckIn:
+        """Accept a pending_acceptance check-in."""
+        checkin.status = CheckInStatus.CONFIRMED
+        checkin.accepted_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        await self.db.refresh(checkin)
+        return checkin
+
+    async def reject_checkin(self, checkin: CheckIn) -> CheckIn:
+        """Reject a pending_acceptance check-in."""
+        checkin.status = CheckInStatus.REJECTED
+        checkin.checked_out_at = datetime.now(timezone.utc)
+        await self.db.commit()
+        await self.db.refresh(checkin)
+        return checkin
+
+    async def get_pending_acceptance_for_user(
+        self,
+        user_id: uuid.UUID,
+    ) -> list[CheckIn]:
+        """Get check-ins pending acceptance where user is the counterparty.
+
+        If user is the student (user_id == checkin.user_id), show check-ins initiated by trainer.
+        If user is the trainer (initiated_by != user_id), show check-ins they need to accept.
+        """
+        now = datetime.now(timezone.utc)
+
+        # Find check-ins pending acceptance where:
+        # 1. User is the student (user_id) and trainer initiated (initiated_by != user_id)
+        # 2. User is the trainer (approved_by_id) and student initiated (initiated_by != user_id)
+        result = await self.db.execute(
+            select(CheckIn)
+            .where(
+                and_(
+                    CheckIn.status == CheckInStatus.PENDING_ACCEPTANCE,
+                    CheckIn.checked_out_at.is_(None),
+                    # User is involved but did NOT initiate
+                    CheckIn.initiated_by != user_id,
+                    # User is either the student or the approver
+                    (CheckIn.user_id == user_id) | (CheckIn.approved_by_id == user_id),
+                )
+            )
+            .options(
+                selectinload(CheckIn.gym),
+                selectinload(CheckIn.user),
+                selectinload(CheckIn.initiated_by_user),
+            )
+            .order_by(CheckIn.checked_in_at.desc())
+        )
+        checkins = list(result.scalars().all())
+
+        # Lazy expiration: auto-cancel expired pending check-ins
+        active = []
+        for c in checkins:
+            if c.expires_at and c.expires_at < now:
+                c.status = CheckInStatus.REJECTED
+                c.checked_out_at = now
+                c.notes = (c.notes or "") + " [expirado]"
+            else:
+                active.append(c)
+
+        await self.db.commit()
+        return active
+
+    async def get_my_pending_checkins(
+        self,
+        user_id: uuid.UUID,
+    ) -> list[CheckIn]:
+        """Get check-ins that the user initiated and are pending acceptance."""
+        result = await self.db.execute(
+            select(CheckIn)
+            .where(
+                and_(
+                    CheckIn.status == CheckInStatus.PENDING_ACCEPTANCE,
+                    CheckIn.checked_out_at.is_(None),
+                    CheckIn.initiated_by == user_id,
+                )
+            )
+            .options(
+                selectinload(CheckIn.gym),
+                selectinload(CheckIn.user),
+                selectinload(CheckIn.approved_by),
+            )
+            .order_by(CheckIn.checked_in_at.desc())
+        )
+        return list(result.scalars().all())
 
     # Stats
 

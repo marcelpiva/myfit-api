@@ -1,5 +1,5 @@
 """Check-in router with gym and check-in endpoints."""
-from datetime import date
+from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
@@ -31,6 +31,7 @@ from src.domains.checkin.schemas import (
     NearbyGymResponse,
     NearbyTrainerInfo,
     NearbyTrainerResponse,
+    PendingAcceptanceResponse,
     StartTrainingSessionRequest,
     UpdateTrainerLocationRequest,
 )
@@ -230,12 +231,53 @@ async def checkin_by_code(
     # Use the code
     await service.use_code(code)
 
-    # Create check-in
+    # Create check-in with pending_acceptance (trainer at gym must accept)
+    # Find a trainer/admin at this gym's organization to be the approver
+    from sqlalchemy import select as sa_select
+    from src.domains.organizations.models import OrganizationMembership, UserRole
+
+    gym = await service.get_gym_by_id(code.gym_id)
+    approver_id = None
+    if gym:
+        result = await db.execute(
+            sa_select(OrganizationMembership).where(
+                OrganizationMembership.organization_id == gym.organization_id,
+                OrganizationMembership.is_active == True,
+                OrganizationMembership.role.in_([
+                    UserRole.TRAINER, UserRole.COACH,
+                    UserRole.GYM_ADMIN, UserRole.GYM_OWNER,
+                ]),
+            ).limit(1)
+        )
+        trainer_membership = result.scalar_one_or_none()
+        if trainer_membership:
+            approver_id = trainer_membership.user_id
+
     checkin = await service.create_checkin(
         user_id=current_user.id,
         gym_id=code.gym_id,
         method=CheckInMethod.CODE,
+        status=CheckInStatus.PENDING_ACCEPTANCE,
+        approved_by_id=approver_id,
+        initiated_by=current_user.id,
+        expires_in_minutes=5,
     )
+
+    # Send push notification to approver
+    if approver_id:
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=approver_id,
+                title="Solicitação de Check-in",
+                body=f"{current_user.name} quer fazer check-in por código",
+                data={
+                    "type": "checkin_pending_acceptance",
+                    "checkin_id": str(checkin.id),
+                },
+            )
+        except Exception:
+            pass
 
     # Load gym relationship
     checkin = await service.get_checkin_by_id(checkin.id)
@@ -590,24 +632,27 @@ async def manual_checkin_for_student(
             detail="Aluno já tem um check-in ativo",
         )
 
-    # Create check-in for the student
+    # Create check-in for the student with pending_acceptance status
     checkin = await service.create_checkin(
         user_id=request.student_id,
         gym_id=request.gym_id,
         method=CheckInMethod.MANUAL,
+        status=CheckInStatus.PENDING_ACCEPTANCE,
         approved_by_id=current_user.id,
         notes=request.notes,
+        initiated_by=current_user.id,
+        expires_in_minutes=5,
     )
 
-    # Send push notification to student
+    # Send push notification to student (needs to accept)
     try:
         await send_push_notification(
             db=db,
             user_id=request.student_id,
-            title="Check-in registrado",
-            body=f"{current_user.name} registrou seu check-in",
+            title="Solicitação de Check-in",
+            body=f"{current_user.name} quer fazer check-in com você",
             data={
-                "type": "checkin_manual",
+                "type": "checkin_pending_acceptance",
                 "checkin_id": str(checkin.id),
             },
         )
@@ -739,23 +784,26 @@ async def checkin_near_trainer(
             )
             gym_id = new_gym.id
 
-    # Create check-in linked to trainer
+    # Create check-in linked to trainer with pending_acceptance
     checkin = await service.create_checkin(
         user_id=current_user.id,
         gym_id=gym_id,
         method=CheckInMethod.LOCATION,
+        status=CheckInStatus.PENDING_ACCEPTANCE,
         approved_by_id=request.trainer_id,
+        initiated_by=current_user.id,
+        expires_in_minutes=5,
     )
 
-    # Send push notification to trainer
+    # Send push notification to trainer (needs to accept)
     try:
         await send_push_notification(
             db=db,
             user_id=request.trainer_id,
-            title="Check-in do aluno",
-            body=f"{current_user.name} fez check-in próximo a você",
+            title="Solicitação de Check-in",
+            body=f"{current_user.name} quer fazer check-in com você",
             data={
-                "type": "checkin_near_trainer",
+                "type": "checkin_pending_acceptance",
                 "checkin_id": str(checkin.id),
                 "student_id": str(current_user.id),
             },
@@ -782,6 +830,169 @@ async def get_checkin_stats(
         days=days,
     )
     return CheckInStatsResponse(**stats)
+
+
+# Check-in acceptance endpoints
+
+@router.get("/pending-acceptance", response_model=list[PendingAcceptanceResponse])
+async def get_pending_acceptance(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[PendingAcceptanceResponse]:
+    """Get check-ins pending acceptance from the current user."""
+    from src.domains.organizations.models import OrganizationMembership
+
+    service = CheckInService(db)
+    checkins = await service.get_pending_acceptance_for_user(current_user.id)
+
+    results = []
+    for c in checkins:
+        # Determine initiated_by role
+        initiated_by_role = "student"
+        if c.initiated_by and c.approved_by_id == c.user_id:
+            # Trainer initiated for student
+            initiated_by_role = "trainer"
+        elif c.initiated_by == c.approved_by_id:
+            initiated_by_role = "trainer"
+        elif c.initiated_by and c.initiated_by != c.user_id:
+            initiated_by_role = "trainer"
+
+        initiator = c.initiated_by_user
+        results.append(PendingAcceptanceResponse(
+            id=c.id,
+            initiated_by_name=initiator.name if initiator else "Usuário",
+            initiated_by_avatar=initiator.avatar_url if initiator and hasattr(initiator, 'avatar_url') else None,
+            initiated_by_role=initiated_by_role,
+            initiated_by_id=c.initiated_by,
+            user_id=c.user_id,
+            user_name=c.user.name if c.user else "Aluno",
+            gym_name=c.gym.name if c.gym else None,
+            gym_id=c.gym_id,
+            method=c.method,
+            created_at=c.checked_in_at,
+            expires_at=c.expires_at,
+        ))
+
+    return results
+
+
+@router.post("/{checkin_id}/accept", response_model=CheckInResponse)
+async def accept_checkin(
+    checkin_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CheckInResponse:
+    """Accept a pending check-in (counterparty accepts)."""
+    service = CheckInService(db)
+
+    checkin = await service.get_checkin_by_id(checkin_id)
+    if not checkin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Check-in não encontrado",
+        )
+
+    if checkin.status != CheckInStatus.PENDING_ACCEPTANCE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in não está pendente de aceite",
+        )
+
+    # Verify current user is the counterparty (not the initiator)
+    if checkin.initiated_by == current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não pode aceitar um check-in que você mesmo iniciou",
+        )
+
+    # Verify user is involved (student or approver)
+    if current_user.id != checkin.user_id and current_user.id != checkin.approved_by_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para aceitar este check-in",
+        )
+
+    # Check expiration
+    if checkin.expires_at and checkin.expires_at < datetime.now(timezone.utc):
+        checkin = await service.reject_checkin(checkin)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in expirou",
+        )
+
+    checkin = await service.accept_checkin(checkin)
+
+    # Send push notification to initiator
+    try:
+        await send_push_notification(
+            db=db,
+            user_id=checkin.initiated_by,
+            title="Check-in aceito!",
+            body=f"{current_user.name} aceitou o check-in",
+            data={
+                "type": "checkin_accepted",
+                "checkin_id": str(checkin.id),
+            },
+        )
+    except Exception:
+        pass
+
+    checkin = await service.get_checkin_by_id(checkin.id)
+    return CheckInResponse.model_validate(checkin)
+
+
+@router.post("/{checkin_id}/reject", response_model=CheckInResponse)
+async def reject_checkin(
+    checkin_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CheckInResponse:
+    """Reject/cancel a pending check-in."""
+    service = CheckInService(db)
+
+    checkin = await service.get_checkin_by_id(checkin_id)
+    if not checkin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Check-in não encontrado",
+        )
+
+    if checkin.status != CheckInStatus.PENDING_ACCEPTANCE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in não está pendente de aceite",
+        )
+
+    # Both initiator (cancel) and counterparty (reject) can reject
+    if current_user.id != checkin.user_id and current_user.id != checkin.approved_by_id and current_user.id != checkin.initiated_by:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não tem permissão para rejeitar este check-in",
+        )
+
+    checkin = await service.reject_checkin(checkin)
+
+    # Notify the other party
+    notify_user_id = checkin.initiated_by if current_user.id != checkin.initiated_by else (
+        checkin.user_id if current_user.id != checkin.user_id else checkin.approved_by_id
+    )
+    if notify_user_id and notify_user_id != current_user.id:
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=notify_user_id,
+                title="Check-in recusado",
+                body=f"{current_user.name} recusou o check-in",
+                data={
+                    "type": "checkin_rejected",
+                    "checkin_id": str(checkin.id),
+                },
+            )
+        except Exception:
+            pass
+
+    checkin = await service.get_checkin_by_id(checkin.id)
+    return CheckInResponse.model_validate(checkin)
 
 
 # Training Session endpoints

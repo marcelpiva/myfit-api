@@ -25,6 +25,7 @@ class CheckInStatus(str, enum.Enum):
     """Check-in status."""
 
     PENDING = "pending"
+    PENDING_ACCEPTANCE = "pending_acceptance"
     CONFIRMED = "confirmed"
     REJECTED = "rejected"
 
@@ -108,12 +109,24 @@ class CheckIn(Base, UUIDMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    initiated_by: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
 
     # Relationships
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
     gym: Mapped["Gym"] = relationship("Gym")
     approved_by: Mapped["User | None"] = relationship(
         "User", foreign_keys=[approved_by_id]
+    )
+    initiated_by_user: Mapped["User | None"] = relationship(
+        "User", foreign_keys=[initiated_by]
     )
 
     @property

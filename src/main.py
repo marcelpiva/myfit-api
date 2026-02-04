@@ -44,6 +44,7 @@ async def run_pending_migrations():
         ("add_archived_at", "src.migrations.add_archived_at"),
         ("add_autonomous_org_type", "src.migrations.add_autonomous_org_type"),
         ("backfill_workout_org_id", "src.migrations.backfill_workout_org_id"),
+        ("add_checkin_acceptance", "src.migrations.add_checkin_acceptance"),
     ]
 
     for name, module_path in migrations:

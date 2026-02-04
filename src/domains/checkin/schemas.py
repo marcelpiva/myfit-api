@@ -89,6 +89,8 @@ class CheckInResponse(BaseModel):
     checked_in_at: datetime
     checked_out_at: datetime | None = None
     approved_by_id: UUID | None = None
+    initiated_by: UUID | None = None
+    accepted_at: datetime | None = None
     notes: str | None = None
     is_active: bool
     duration_minutes: int | None = None
@@ -289,3 +291,22 @@ class ActiveSessionResponse(BaseModel):
 
     session: TrainingSessionResponse
     checkins: list[SessionCheckinInfo] = []
+
+
+# Pending acceptance schemas
+
+class PendingAcceptanceResponse(BaseModel):
+    """Check-in pending acceptance response."""
+
+    id: UUID
+    initiated_by_name: str
+    initiated_by_avatar: str | None = None
+    initiated_by_role: str
+    initiated_by_id: UUID
+    user_id: UUID
+    user_name: str
+    gym_name: str | None = None
+    gym_id: UUID
+    method: CheckInMethod
+    created_at: datetime
+    expires_at: datetime | None = None
