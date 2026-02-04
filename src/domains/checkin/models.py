@@ -30,6 +30,13 @@ class CheckInStatus(str, enum.Enum):
     REJECTED = "rejected"
 
 
+class TrainingMode(str, enum.Enum):
+    """Training mode for check-in sessions."""
+
+    IN_PERSON = "in_person"
+    ONLINE = "online"
+
+
 class Gym(Base, UUIDMixin, TimestampMixin):
     """Gym/Location for check-ins."""
 
@@ -116,6 +123,10 @@ class CheckIn(Base, UUIDMixin):
     )
     accepted_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True),
+        nullable=True,
+    )
+    training_mode: Mapped[str | None] = mapped_column(
+        String(20),
         nullable=True,
     )
 

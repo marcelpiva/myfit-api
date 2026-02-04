@@ -169,32 +169,11 @@ async def create_checkin(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CheckInResponse:
-    """Create a manual check-in."""
-    service = CheckInService(db)
-
-    # Check if already checked in
-    active = await service.get_active_checkin(current_user.id)
-    if active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
-        )
-
-    # Verify gym exists
-    gym = await service.get_gym_by_id(request.gym_id)
-    if not gym:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Academia não encontrada",
-        )
-
-    checkin = await service.create_checkin(
-        user_id=current_user.id,
-        gym_id=request.gym_id,
-        method=request.method,
-        notes=request.notes,
+    """Create a manual check-in. DISABLED: Use /manual-for-student instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Check-in manual desabilitado. O personal trainer deve iniciar o check-in via /manual-for-student.",
     )
-    return CheckInResponse.model_validate(checkin)
 
 
 @router.post("/code", response_model=CheckInResponse, status_code=status.HTTP_201_CREATED)
@@ -203,85 +182,11 @@ async def checkin_by_code(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CheckInResponse:
-    """Check in using a code."""
-    service = CheckInService(db)
-
-    # Check if already checked in
-    active = await service.get_active_checkin(current_user.id)
-    if active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
-        )
-
-    # Find and validate code
-    code = await service.get_code_by_value(request.code)
-    if not code:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Código de check-in inválido",
-        )
-
-    if not code.is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Código expirado ou esgotado",
-        )
-
-    # Use the code
-    await service.use_code(code)
-
-    # Create check-in with pending_acceptance (trainer at gym must accept)
-    # Find a trainer/admin at this gym's organization to be the approver
-    from sqlalchemy import select as sa_select
-    from src.domains.organizations.models import OrganizationMembership, UserRole
-
-    gym = await service.get_gym_by_id(code.gym_id)
-    approver_id = None
-    if gym:
-        result = await db.execute(
-            sa_select(OrganizationMembership).where(
-                OrganizationMembership.organization_id == gym.organization_id,
-                OrganizationMembership.is_active == True,
-                OrganizationMembership.role.in_([
-                    UserRole.TRAINER, UserRole.COACH,
-                    UserRole.GYM_ADMIN, UserRole.GYM_OWNER,
-                ]),
-            ).limit(1)
-        )
-        trainer_membership = result.scalar_one_or_none()
-        if trainer_membership:
-            approver_id = trainer_membership.user_id
-
-    checkin = await service.create_checkin(
-        user_id=current_user.id,
-        gym_id=code.gym_id,
-        method=CheckInMethod.CODE,
-        status=CheckInStatus.PENDING_ACCEPTANCE,
-        approved_by_id=approver_id,
-        initiated_by=current_user.id,
-        expires_in_minutes=5,
+    """Check in using a code. DISABLED: Use /manual-for-student instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Check-in por código desabilitado. O personal trainer deve iniciar o check-in.",
     )
-
-    # Send push notification to approver
-    if approver_id:
-        try:
-            await send_push_notification(
-                db=db,
-                user_id=approver_id,
-                title="Solicitação de Check-in",
-                body=f"{current_user.name} quer fazer check-in por código",
-                data={
-                    "type": "checkin_pending_acceptance",
-                    "checkin_id": str(checkin.id),
-                },
-            )
-        except Exception:
-            pass
-
-    # Load gym relationship
-    checkin = await service.get_checkin_by_id(checkin.id)
-    return CheckInResponse.model_validate(checkin)
 
 
 @router.post("/nearby", response_model=NearbyGymResponse)
@@ -318,42 +223,11 @@ async def checkin_by_location(
     db: Annotated[AsyncSession, Depends(get_db)],
     x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> LocationCheckInResponse:
-    """Check in by location."""
-    service = CheckInService(db)
-    org_id = UUID(x_organization_id) if x_organization_id else None
-
-    # Check if already checked in
-    active = await service.get_active_checkin(current_user.id)
-    if active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
-        )
-
-    checkin, gym, distance = await service.checkin_by_location(
-        user_id=current_user.id,
-        latitude=request.latitude,
-        longitude=request.longitude,
-        organization_id=org_id,
+    """Check in by location. DISABLED: Use /manual-for-student instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Check-in por localização desabilitado. O personal trainer deve iniciar o check-in.",
     )
-
-    if checkin:
-        checkin = await service.get_checkin_by_id(checkin.id)
-        return LocationCheckInResponse(
-            success=True,
-            checkin=CheckInResponse.model_validate(checkin),
-            nearest_gym=GymResponse.model_validate(gym) if gym else None,
-            distance_meters=distance,
-            message=f"Check-in realizado em {gym.name}",
-        )
-    else:
-        return LocationCheckInResponse(
-            success=False,
-            checkin=None,
-            nearest_gym=GymResponse.model_validate(gym) if gym else None,
-            distance_meters=distance,
-            message=f"Você está a {int(distance)}m da academia mais próxima" if gym and distance else "Nenhuma academia encontrada",
-        )
 
 
 @router.post("/checkout", response_model=CheckInResponse)
@@ -446,49 +320,11 @@ async def create_request(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CheckInRequestResponse:
-    """Create a check-in request for approval."""
-    service = CheckInService(db)
-
-    # Check if already checked in
-    active = await service.get_active_checkin(current_user.id)
-    if active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
-        )
-
-    # Verify gym exists
-    gym = await service.get_gym_by_id(request.gym_id)
-    if not gym:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Academia não encontrada",
-        )
-
-    req = await service.create_request(
-        user_id=current_user.id,
-        gym_id=request.gym_id,
-        approver_id=request.approver_id,
-        reason=request.reason,
+    """Create a check-in request for approval. DISABLED: Use /manual-for-student instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Solicitação de check-in desabilitada. O personal trainer deve iniciar o check-in.",
     )
-
-    # Send push notification to approver
-    try:
-        await send_push_notification(
-            db=db,
-            user_id=request.approver_id,
-            title="Solicitação de Check-in",
-            body=f"{current_user.name} solicitou check-in",
-            data={
-                "type": "checkin_request_created",
-                "request_id": str(req.id),
-                "gym_id": str(request.gym_id),
-            },
-        )
-    except Exception:
-        pass  # Don't fail the request if push fails
-
-    return CheckInRequestResponse.model_validate(req)
 
 
 @router.post("/requests/{request_id}/respond", response_model=CheckInRequestResponse)
@@ -642,6 +478,7 @@ async def manual_checkin_for_student(
         notes=request.notes,
         initiated_by=current_user.id,
         expires_in_minutes=5,
+        training_mode=request.training_mode.value,
     )
 
     # Send push notification to student (needs to accept)
@@ -718,101 +555,11 @@ async def checkin_near_trainer(
     db: Annotated[AsyncSession, Depends(get_db)],
     x_organization_id: Annotated[str | None, Header(alias="X-Organization-ID")] = None,
 ) -> CheckInResponse:
-    """Student checks in near their trainer."""
-    if not x_organization_id:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Organização não identificada",
-        )
-
-    service = CheckInService(db)
-
-    # Check if already checked in
-    active = await service.get_active_checkin(current_user.id)
-    if active:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Você já tem um check-in ativo. Faça checkout primeiro.",
-        )
-
-    # Get trainer location and verify proximity
-    trainer_loc = await service.get_trainer_location(request.trainer_id)
-    if not trainer_loc:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Localização do personal não disponível",
-        )
-
-    t_lat, t_lng, source, gym_id, gym_name = trainer_loc
-    distance = service.calculate_distance(
-        request.latitude, request.longitude, t_lat, t_lng,
+    """Student checks in near their trainer. DISABLED: Use /manual-for-student instead."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="Check-in por proximidade desabilitado. O personal trainer deve iniciar o check-in.",
     )
-
-    if distance > 200:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Você está a {int(distance)}m do personal. Aproxime-se (máx. 200m).",
-        )
-
-    # If trainer has an active check-in at a gym, use that gym_id
-    # Otherwise, find the nearest gym to the trainer's GPS
-    if not gym_id:
-        org_id = UUID(x_organization_id)
-        gym, _ = await service.find_nearest_gym(
-            latitude=t_lat,
-            longitude=t_lng,
-            organization_id=org_id,
-        )
-        if gym:
-            gym_id = gym.id
-
-    if not gym_id:
-        # Fallback: find or create gym for organization
-        org_id = UUID(x_organization_id)
-        org_gyms = await service.list_gyms(organization_id=org_id, limit=1)
-        if org_gyms:
-            gym_id = org_gyms[0].id
-        else:
-            # Auto-create gym at trainer's location
-            new_gym = await service.create_gym(
-                organization_id=org_id,
-                name="Local do Personal Trainer",
-                address="Localização do Personal Trainer",
-                latitude=t_lat,
-                longitude=t_lng,
-                radius_meters=200,
-            )
-            gym_id = new_gym.id
-
-    # Create check-in linked to trainer with pending_acceptance
-    checkin = await service.create_checkin(
-        user_id=current_user.id,
-        gym_id=gym_id,
-        method=CheckInMethod.LOCATION,
-        status=CheckInStatus.PENDING_ACCEPTANCE,
-        approved_by_id=request.trainer_id,
-        initiated_by=current_user.id,
-        expires_in_minutes=5,
-    )
-
-    # Send push notification to trainer (needs to accept)
-    try:
-        await send_push_notification(
-            db=db,
-            user_id=request.trainer_id,
-            title="Solicitação de Check-in",
-            body=f"{current_user.name} quer fazer check-in com você",
-            data={
-                "type": "checkin_pending_acceptance",
-                "checkin_id": str(checkin.id),
-                "student_id": str(current_user.id),
-            },
-        )
-    except Exception:
-        pass
-
-    checkin = await service.get_checkin_by_id(checkin.id)
-    return CheckInResponse.model_validate(checkin)
 
 
 # Stats
@@ -869,6 +616,7 @@ async def get_pending_acceptance(
             gym_name=c.gym.name if c.gym else None,
             gym_id=c.gym_id,
             method=c.method,
+            training_mode=c.training_mode,
             created_at=c.checked_in_at,
             expires_at=c.expires_at,
         ))

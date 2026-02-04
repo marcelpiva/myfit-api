@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from src.domains.checkin.models import CheckInMethod, CheckInStatus
+from src.domains.checkin.models import CheckInMethod, CheckInStatus, TrainingMode
 
 
 # Gym schemas
@@ -94,6 +94,7 @@ class CheckInResponse(BaseModel):
     notes: str | None = None
     is_active: bool
     duration_minutes: int | None = None
+    training_mode: str | None = None
     gym: GymResponse | None = None
 
     model_config = ConfigDict(from_attributes=True)
@@ -131,6 +132,7 @@ class ManualCheckinForStudentRequest(BaseModel):
 
     student_id: UUID
     gym_id: UUID
+    training_mode: TrainingMode
     notes: str | None = Field(None, max_length=500)
 
 
@@ -308,5 +310,6 @@ class PendingAcceptanceResponse(BaseModel):
     gym_name: str | None = None
     gym_id: UUID
     method: CheckInMethod
+    training_mode: str | None = None
     created_at: datetime
     expires_at: datetime | None = None
