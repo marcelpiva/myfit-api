@@ -182,11 +182,46 @@ async def checkin_by_code(
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> CheckInResponse:
-    """Check in using a code. DISABLED: Use /manual-for-student instead."""
-    raise HTTPException(
-        status_code=status.HTTP_410_GONE,
-        detail="Check-in por código desabilitado. O personal trainer deve iniciar o check-in.",
+    """Check in using a code (QR or manual entry)."""
+    service = CheckInService(db)
+
+    # Validate code
+    code = await service.get_code_by_value(request.code)
+    if not code:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Código não encontrado.",
+        )
+    if not code.is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Código inválido ou expirado.",
+        )
+
+    # Check if user already has an active check-in
+    active = await service.get_active_checkin(current_user.id)
+    if active:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Você já possui um check-in ativo.",
+        )
+
+    # Create check-in (confirmed immediately for code-based)
+    checkin = await service.create_checkin(
+        user_id=current_user.id,
+        gym_id=code.gym_id,
+        method=CheckInMethod.CODE,
+        status=CheckInStatus.CONFIRMED,
+        initiated_by=current_user.id,
     )
+
+    # Increment code usage
+    await service.use_code(code)
+
+    # Reload with gym relationship
+    checkin = await service.get_checkin_by_id(checkin.id)
+
+    return CheckInResponse.model_validate(checkin)
 
 
 @router.post("/nearby", response_model=NearbyGymResponse)
