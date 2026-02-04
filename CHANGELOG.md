@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.9] - 2026-02-04
+
+### Added
+- **Training Sessions** - Start/end/active training sessions with 20-minute auto-expiration
+  - Trainer-initiated sessions with student acceptance flow
+  - `pending_acceptance` status for check-in requests
+- **Push Notifications for Sessions** - Notifications on checkout and end_training_session events
+- **Code-Based Check-in** - Re-enabled code-based check-in endpoint for QR/manual code entry
+- **Training Mode** - Added `training_mode` field to check-in for trainer-only initiation
+
+### Fixed
+- **Trainer Role Validation** - Fixed trainer role check to validate in own org, not gym's org for manual-for-student check-in
+- **Proximity Radius** - Increased trainer proximity radius from 200m to 500m
+- **UTC Validation** - Fixed UTC consistency in `CheckInCode.is_valid` validation
+- **Multi-Membership Check-in** - Handle multiple memberships correctly in manual check-in for student
+- **Gym Fallback** - Auto-create gym fallback + translate check-in errors to Portuguese
+
+---
+
 ## [0.6.8] - 2026-01-28
 
 ### Fixed
