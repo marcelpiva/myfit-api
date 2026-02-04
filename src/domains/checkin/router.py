@@ -248,6 +248,25 @@ async def checkout(
 
     notes = request.notes if request else None
     checkin = await service.checkout(active, notes=notes)
+
+    # Send push notification to counterparty
+    try:
+        notify_user_id = None
+        if checkin.approved_by_id and checkin.approved_by_id != current_user.id:
+            notify_user_id = checkin.approved_by_id
+        elif checkin.user_id != current_user.id:
+            notify_user_id = checkin.user_id
+        if notify_user_id:
+            await send_push_notification(
+                db=db,
+                user_id=notify_user_id,
+                title="Sessão encerrada",
+                body=f"{current_user.name} encerrou a sessão",
+                data={"type": "checkin_ended", "checkin_id": str(checkin.id)},
+            )
+    except Exception:
+        pass  # Push failure should not block checkout
+
     return CheckInResponse.model_validate(checkin)
 
 
@@ -774,10 +793,24 @@ async def end_training_session(
 ):
     """Trainer ends the training session and checks out all students."""
     service = CheckInService(db)
-    await service.end_training_session(
+    student_ids = await service.end_training_session(
         user_id=current_user.id,
         organization_id=UUID(x_organization_id),
     )
+
+    # Send push notification to all students whose sessions were ended
+    for sid in student_ids:
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=sid,
+                title="Sessão encerrada",
+                body=f"{current_user.name} encerrou a sessão de treino",
+                data={"type": "checkin_ended"},
+            )
+        except Exception:
+            pass  # Push failure should not block session end
+
     return {"status": "ended"}
 
 

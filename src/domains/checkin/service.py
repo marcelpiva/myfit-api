@@ -589,8 +589,8 @@ class CheckInService:
         self,
         user_id: uuid.UUID,
         organization_id: uuid.UUID,
-    ) -> None:
-        """End training session and checkout all active students."""
+    ) -> list[uuid.UUID]:
+        """End training session and checkout all active students. Returns student user IDs."""
         # Deactivate session
         result = await self.db.execute(
             select(TrainerLocation).where(TrainerLocation.user_id == user_id)
@@ -612,10 +612,13 @@ class CheckInService:
             )
         )
         active_checkins = result.scalars().all()
+        student_ids = []
         for checkin in active_checkins:
             checkin.checked_out_at = datetime.now(timezone.utc)
+            student_ids.append(checkin.user_id)
 
         await self.db.commit()
+        return student_ids
 
     async def get_active_session(
         self,
