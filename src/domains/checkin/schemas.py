@@ -127,6 +127,13 @@ class CheckInCodeResponse(BaseModel):
 
 # Check-in request schemas
 
+class CheckInAcceptRequest(BaseModel):
+    """Accept check-in request with optional GPS for proximity verification."""
+
+    latitude: float | None = Field(None, ge=-90, le=90)
+    longitude: float | None = Field(None, ge=-180, le=180)
+
+
 class ManualCheckinForStudentRequest(BaseModel):
     """Trainer creates check-in on behalf of a student."""
 
@@ -134,6 +141,7 @@ class ManualCheckinForStudentRequest(BaseModel):
     gym_id: UUID
     training_mode: TrainingMode
     notes: str | None = Field(None, max_length=500)
+    unilateral: bool = False
 
 
 class CheckInRequestCreate(BaseModel):

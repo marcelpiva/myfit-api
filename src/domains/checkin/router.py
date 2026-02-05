@@ -4,7 +4,7 @@ from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -12,6 +12,7 @@ from src.domains.auth.dependencies import CurrentUser
 from src.domains.checkin.models import CheckInMethod, CheckInStatus
 from src.domains.checkin.schemas import (
     ActiveSessionResponse,
+    CheckInAcceptRequest,
     CheckInByCodeRequest,
     CheckInByLocationRequest,
     CheckInCodeCreate,
@@ -575,33 +576,56 @@ async def manual_checkin_for_student(
             detail="Aluno já tem um check-in ativo",
         )
 
-    # Create check-in for the student with pending_acceptance status
-    checkin = await service.create_checkin(
-        user_id=request.student_id,
-        gym_id=request.gym_id,
-        method=CheckInMethod.MANUAL,
-        status=CheckInStatus.PENDING_ACCEPTANCE,
-        approved_by_id=current_user.id,
-        notes=request.notes,
-        initiated_by=current_user.id,
-        expires_in_minutes=5,
-        training_mode=request.training_mode.value,
-    )
-
-    # Send push notification to student (needs to accept)
-    try:
-        await send_push_notification(
-            db=db,
+    if request.unilateral:
+        # Unilateral: check-in is immediately CONFIRMED (student has no phone)
+        checkin = await service.create_checkin(
             user_id=request.student_id,
-            title="Solicitação de Check-in",
-            body=f"{current_user.name} quer fazer check-in com você",
-            data={
-                "type": "checkin_pending_acceptance",
-                "checkin_id": str(checkin.id),
-            },
+            gym_id=request.gym_id,
+            method=CheckInMethod.MANUAL,
+            status=CheckInStatus.CONFIRMED,
+            approved_by_id=current_user.id,
+            notes=request.notes,
+            initiated_by=current_user.id,
+            expires_in_minutes=None,
+            training_mode=request.training_mode.value,
         )
-    except Exception:
-        pass
+
+        # Auto-activate trainer session
+        if gym:
+            loc = await service.update_trainer_location(
+                current_user.id, gym.latitude, gym.longitude,
+            )
+            loc.session_active = True
+            loc.session_started_at = checkin.checked_in_at
+            await db.commit()
+    else:
+        # Normal flow: pending acceptance
+        checkin = await service.create_checkin(
+            user_id=request.student_id,
+            gym_id=request.gym_id,
+            method=CheckInMethod.MANUAL,
+            status=CheckInStatus.PENDING_ACCEPTANCE,
+            approved_by_id=current_user.id,
+            notes=request.notes,
+            initiated_by=current_user.id,
+            expires_in_minutes=5,
+            training_mode=request.training_mode.value,
+        )
+
+        # Send push notification to student (needs to accept)
+        try:
+            await send_push_notification(
+                db=db,
+                user_id=request.student_id,
+                title="Solicitação de Check-in",
+                body=f"{current_user.name} quer fazer check-in com você",
+                data={
+                    "type": "checkin_pending_acceptance",
+                    "checkin_id": str(checkin.id),
+                },
+            )
+        except Exception:
+            pass
 
     checkin = await service.get_checkin_by_id(checkin.id)
     return CheckInResponse.model_validate(checkin)
@@ -779,6 +803,7 @@ async def accept_checkin(
     checkin_id: UUID,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
+    request: CheckInAcceptRequest | None = Body(None),
 ) -> CheckInResponse:
     """Accept a pending check-in (counterparty accepts)."""
     service = CheckInService(db)
@@ -819,6 +844,25 @@ async def accept_checkin(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Check-in expirou",
             )
+
+    # GPS proximity verification for in-person check-ins (200m)
+    if checkin.training_mode == "in_person":
+        student_lat = request.latitude if request else None
+        student_lng = request.longitude if request else None
+
+        if student_lat is not None and student_lng is not None:
+            # Get trainer location
+            trainer_id = checkin.initiated_by or checkin.approved_by_id
+            if trainer_id:
+                trainer_loc = await service.get_trainer_location(trainer_id)
+                if trainer_loc:
+                    t_lat, t_lng, _source, _gym_id, _gym_name = trainer_loc
+                    distance = service.calculate_distance(student_lat, student_lng, t_lat, t_lng)
+                    if distance > 200:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail=f"Você está a {int(distance)}m do trainer. Aproxime-se (máx. 200m)",
+                        )
 
     logger = logging.getLogger(__name__)
     try:
@@ -923,6 +967,48 @@ async def reject_checkin(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao serializar check-in: {str(e)}",
         )
+
+
+@router.post("/{checkin_id}/student-confirm", response_model=CheckInResponse)
+async def student_confirm_unilateral(
+    checkin_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CheckInResponse:
+    """Student confirms a unilateral check-in (optional, for record-keeping)."""
+    service = CheckInService(db)
+
+    checkin = await service.get_checkin_by_id(checkin_id)
+    if not checkin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Check-in não encontrado",
+        )
+
+    if checkin.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem permissão",
+        )
+
+    if checkin.status != CheckInStatus.CONFIRMED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in não está confirmado",
+        )
+
+    if checkin.accepted_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in já foi confirmado pelo aluno",
+        )
+
+    checkin.accepted_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(checkin)
+
+    checkin = await service.get_checkin_by_id(checkin.id)
+    return CheckInResponse.model_validate(checkin)
 
 
 # Training Session endpoints
