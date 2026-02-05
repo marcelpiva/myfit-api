@@ -1,6 +1,6 @@
 # MyFit API
 
-[![Version](https://img.shields.io/badge/version-0.7.0-blue.svg)](./CHANGELOG.md)
+[![Version](https://img.shields.io/badge/version-0.7.1-blue.svg)](./CHANGELOG.md)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.115+-009688.svg?logo=fastapi)](https://fastapi.tiangolo.com)
 
 FastAPI backend for the MyFit fitness platform.
@@ -86,6 +86,7 @@ src/
 │   ├── progress/     # Progress tracking
 │   ├── schedule/     # Trainer-student appointments
 │   ├── trainers/     # Trainer management & student notes
+│   ├── checkin/      # Check-in system (GPS proximity, unilateral, QR)
 │   ├── chat/         # Real-time chat
 │   ├── payments/     # Payment processing
 │   └── ...

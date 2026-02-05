@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-02-05
+
+### Added
+- **GPS Proximity Verification on Accept** - `POST /checkins/{id}/accept` validates distance
+  - Accepts optional `latitude`/`longitude` in request body (`CheckInAcceptRequest`)
+  - For in-person check-ins: calculates distance between student and trainer (max 200m)
+  - Uses existing `calculate_distance()` (Haversine) and `get_trainer_location()`
+  - Graceful fallback: if trainer location unavailable, allows accept without GPS check
+  - Returns error with actual distance when student is too far
+- **Unilateral Check-in** - Trainer registers check-in without student acceptance
+  - New `unilateral: bool` field in `ManualCheckinForStudentRequest`
+  - When `unilateral=True`: creates CONFIRMED check-in directly, no expiration, skips push notification
+  - Auto-activates trainer session immediately
+- **Student Retroactive Confirmation** - `POST /checkins/{id}/student-confirm`
+  - Student confirms presence after unilateral check-in (optional)
+  - Sets `accepted_at` on the check-in record
+  - Validates student is the check-in's user and status is CONFIRMED
+
+---
+
 ## [0.7.0] - 2026-02-05
 
 ### Added
