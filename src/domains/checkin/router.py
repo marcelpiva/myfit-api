@@ -694,6 +694,33 @@ async def get_my_initiated_pending(
     return results
 
 
+@router.get("/{checkin_id}", response_model=CheckInResponse)
+async def get_checkin(
+    checkin_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> CheckInResponse:
+    """Get a single check-in by ID."""
+    service = CheckInService(db)
+    checkin = await service.get_checkin_by_id(checkin_id)
+    if not checkin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Check-in não encontrado",
+        )
+    # Verify user is involved
+    if (
+        current_user.id != checkin.user_id
+        and current_user.id != checkin.approved_by_id
+        and current_user.id != checkin.initiated_by
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem permissão",
+        )
+    return CheckInResponse.model_validate(checkin)
+
+
 @router.post("/{checkin_id}/accept", response_model=CheckInResponse)
 async def accept_checkin(
     checkin_id: UUID,
