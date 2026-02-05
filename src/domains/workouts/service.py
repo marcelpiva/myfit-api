@@ -1746,24 +1746,25 @@ class WorkoutService:
         from src.domains.organizations.models import OrganizationMembership, UserRole
         from src.domains.users.models import User
 
-        # Get students that this trainer can see
+        # Get students assigned to this trainer
         students_query = (
             select(User.id, User.name, User.avatar_url)
             .join(
-                OrganizationMembership,
-                OrganizationMembership.user_id == User.id,
+                PlanAssignment,
+                PlanAssignment.student_id == User.id,
             )
             .where(
                 and_(
-                    OrganizationMembership.role == UserRole.STUDENT,
-                    OrganizationMembership.is_active == True,
+                    PlanAssignment.trainer_id == trainer_id,
+                    PlanAssignment.is_active == True,
                 )
             )
+            .distinct()
         )
 
         if organization_id:
             students_query = students_query.where(
-                OrganizationMembership.organization_id == organization_id
+                PlanAssignment.organization_id == organization_id
             )
 
         students_result = await self.db.execute(students_query)
