@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-02-05
+
+### Added
+- **Session Auto-Expiration** - Automatically complete stale workout sessions
+  - New `auto_expire_sessions()` method in `WorkoutService`
+  - Sessions in WAITING/ACTIVE/PAUSED status for > 4 hours are auto-completed
+  - Prevents duplicate students appearing in trainer dashboard
+  - New `auto_expire_old_sessions` Celery task runs hourly at :30
+
+### Fixed
+- **`users.user_type` Column Error** - Removed stale migration reference
+  - Removed `user_type` from `database.py` migrations list
+  - Fixes Celery task errors "column users.user_type does not exist"
+  - The `remove_user_type` migration already handles cleanup
+
+### Changed
+- **Active Sessions Deduplication** - Show only most recent session per student
+  - Fixed trainer seeing 8x same student in "Alunos Agora" list
+
+---
+
 ## [0.7.1] - 2026-02-05
 
 ### Added
