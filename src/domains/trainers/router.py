@@ -966,3 +966,46 @@ async def send_invite_email_endpoint(
         "message": f"Convite enviado para {request.email}",
         "invite_id": str(invite.id),
     }
+
+
+@router.post("/generate-bio")
+async def generate_trainer_bio(
+    request: dict,
+    current_user: CurrentUser,
+) -> dict:
+    """Generate a professional bio for a trainer using AI."""
+    import os
+    from openai import AsyncOpenAI
+
+    name = request.get("name", current_user.name or "")
+    specialties = request.get("specialties", "")
+
+    client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+    try:
+        response = await client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "Você é um assistente que gera bios profissionais para personal trainers. "
+                        "Escreva em português brasileiro, em primeira pessoa, de forma profissional "
+                        "e acolhedora. Máximo 200 caracteres. Não use emojis."
+                    ),
+                },
+                {
+                    "role": "user",
+                    "content": f"Gere uma bio profissional para {name}. Especialidades: {specialties or 'não informadas'}.",
+                },
+            ],
+            max_tokens=150,
+            temperature=0.7,
+        )
+        bio = response.choices[0].message.content.strip().strip('"')
+        return {"bio": bio}
+    except Exception as e:
+        logger.error(f"AI bio generation failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao gerar bio com IA",
+        )

@@ -96,6 +96,7 @@ class CheckInResponse(BaseModel):
     duration_minutes: int | None = None
     training_mode: str | None = None
     gym: GymResponse | None = None
+    user_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 

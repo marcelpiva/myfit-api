@@ -166,7 +166,7 @@ class CheckInService:
         offset: int = 0,
     ) -> list[CheckIn]:
         """List check-ins with filters."""
-        query = select(CheckIn).options(selectinload(CheckIn.gym))
+        query = select(CheckIn).options(selectinload(CheckIn.gym), selectinload(CheckIn.user))
 
         if user_id:
             query = query.where(CheckIn.user_id == user_id)

@@ -152,6 +152,68 @@ async def list_checkins(
     return [CheckInResponse.model_validate(c) for c in checkins]
 
 
+@router.get("/gym/{gym_id}", response_model=list[CheckInResponse])
+async def list_gym_checkins(
+    gym_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 20,
+    offset: Annotated[int, Query(ge=0)] = 0,
+) -> list[CheckInResponse]:
+    """List recent check-ins at a gym (for gym owners/admins)."""
+    service = CheckInService(db)
+    checkins = await service.list_checkins(
+        gym_id=gym_id,
+        limit=limit,
+        offset=offset,
+    )
+    results = []
+    for c in checkins:
+        resp = CheckInResponse.model_validate(c)
+        resp.user_name = c.user.name if c.user else None
+        results.append(resp)
+    return results
+
+
+@router.get("/organization/{org_id}", response_model=list[CheckInResponse])
+async def list_organization_checkins(
+    org_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    limit: Annotated[int, Query(ge=1, le=100)] = 10,
+) -> list[CheckInResponse]:
+    """List recent check-ins across all gyms in an organization."""
+    from src.domains.checkin.models import Gym
+    from sqlalchemy import select as sa_select
+    from sqlalchemy.orm import selectinload
+
+    # Get gym IDs for this org
+    gym_query = sa_select(Gym.id).where(Gym.organization_id == org_id)
+    gym_result = await db.execute(gym_query)
+    gym_ids = [r[0] for r in gym_result.all()]
+
+    if not gym_ids:
+        return []
+
+    from src.domains.checkin.models import CheckIn as CheckInModel
+    query = (
+        sa_select(CheckInModel)
+        .options(selectinload(CheckInModel.gym), selectinload(CheckInModel.user))
+        .where(CheckInModel.gym_id.in_(gym_ids))
+        .order_by(CheckInModel.checked_in_at.desc())
+        .limit(limit)
+    )
+    result = await db.execute(query)
+    checkins = list(result.scalars().all())
+
+    results = []
+    for c in checkins:
+        resp = CheckInResponse.model_validate(c)
+        resp.user_name = c.user.name if c.user else None
+        results.append(resp)
+    return results
+
+
 @router.get("/active", response_model=CheckInResponse | None)
 async def get_active_checkin(
     current_user: CurrentUser,
