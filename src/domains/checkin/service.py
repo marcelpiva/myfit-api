@@ -704,6 +704,17 @@ class CheckInService:
         """Accept a pending_acceptance check-in."""
         checkin.status = CheckInStatus.CONFIRMED
         checkin.accepted_at = datetime.now(timezone.utc)
+
+        # Auto-activate trainer session if initiated by trainer
+        if checkin.initiated_by and checkin.initiated_by != checkin.user_id:
+            gym = checkin.gym
+            if gym:
+                await self.start_training_session(
+                    user_id=checkin.initiated_by,
+                    latitude=gym.latitude,
+                    longitude=gym.longitude,
+                )
+
         await self.db.commit()
         await self.db.refresh(checkin)
         return checkin
