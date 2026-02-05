@@ -1745,6 +1745,7 @@ class WorkoutService:
         """List active sessions for students (trainer view)."""
         from src.domains.organizations.models import OrganizationMembership, UserRole
         from src.domains.users.models import User
+        from src.domains.workouts.models import PlanAssignment
 
         # Get students assigned to this trainer
         students_query = (
