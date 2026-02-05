@@ -2453,3 +2453,51 @@ class WorkoutService:
                     })
 
         return diff
+
+    # Session Auto-Expiration
+
+    async def auto_expire_sessions(
+        self,
+        timeout_hours: int = 4,
+    ) -> int:
+        """Auto-expire stale workout sessions.
+
+        Sessions that have been in WAITING, ACTIVE, or PAUSED status for longer
+        than the timeout period are automatically completed.
+
+        Args:
+            timeout_hours: Hours after which a session is considered stale (default 4)
+
+        Returns:
+            Number of sessions expired
+        """
+        from datetime import timedelta
+        from sqlalchemy import update
+
+        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+
+        # Find sessions to expire
+        query = (
+            select(WorkoutSession)
+            .where(
+                WorkoutSession.status.in_([
+                    SessionStatus.WAITING,
+                    SessionStatus.ACTIVE,
+                    SessionStatus.PAUSED,
+                ]),
+                WorkoutSession.started_at < cutoff_time,
+            )
+        )
+        result = await self.db.execute(query)
+        stale_sessions = result.scalars().all()
+
+        expired_count = 0
+        for session in stale_sessions:
+            session.status = SessionStatus.COMPLETED
+            session.completed_at = datetime.now(timezone.utc)
+            expired_count += 1
+
+        if expired_count > 0:
+            await self.db.commit()
+
+        return expired_count

@@ -72,6 +72,12 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute=0, hour="6-22"),
     },
 
+    # Auto-expire stale sessions - every hour
+    "auto-expire-sessions-hourly": {
+        "task": "src.tasks.reminders.auto_expire_old_sessions",
+        "schedule": crontab(minute=30),  # Run at :30 of every hour
+    },
+
     # Check inactive students - daily at 10am
     "check-inactive-students-daily": {
         "task": "src.tasks.notifications.check_inactive_students",

@@ -102,7 +102,7 @@ async def _run_pending_migrations() -> None:
     migrations = [
         # (column_name, table_name, column_definition, default_value)
         # Users table
-        ("user_type", "users", "VARCHAR(20)", "'student'"),
+        # NOTE: user_type was removed - we now use organization_members.role
         ("auth_provider", "users", "VARCHAR(20)", "'email'"),
         ("google_id", "users", "VARCHAR(255)", None),
         ("apple_id", "users", "VARCHAR(255)", None),

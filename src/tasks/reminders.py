@@ -295,3 +295,47 @@ async def _send_streak_reminder_async(user_id: str):
         )
 
         return {"sent": True}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def auto_expire_old_sessions(self):
+    """Auto-expire stale workout sessions.
+
+    This task finds sessions that have been WAITING, ACTIVE, or PAUSED
+    for more than 4 hours and marks them as COMPLETED.
+
+    This prevents duplicate students appearing in the trainer's dashboard
+    when sessions are abandoned without being properly ended.
+
+    Runs hourly.
+    """
+    logger.info("Starting auto-expire sessions task")
+    return run_async(_auto_expire_old_sessions_async())
+
+
+async def _auto_expire_old_sessions_async():
+    """Async implementation of session auto-expiration."""
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    import os
+
+    from src.domains.workouts.service import WorkoutService
+
+    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./myfit.db")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    engine = create_async_engine(database_url)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    async with async_session() as db:
+        try:
+            service = WorkoutService(db)
+            expired_count = await service.auto_expire_sessions(timeout_hours=4)
+            logger.info(f"Auto-expired {expired_count} stale sessions")
+            return {"expired": expired_count}
+        except Exception as e:
+            logger.error(f"Error in auto-expire sessions task: {e}")
+            raise
