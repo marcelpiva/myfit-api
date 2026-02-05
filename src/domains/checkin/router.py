@@ -677,6 +677,22 @@ async def get_pending_acceptance(
     return results
 
 
+@router.get("/my-initiated-pending", response_model=list[CheckInResponse])
+async def get_my_initiated_pending(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[CheckInResponse]:
+    """Get check-ins that the current user initiated and are still pending acceptance."""
+    service = CheckInService(db)
+    checkins = await service.get_my_pending_checkins(current_user.id)
+    results = []
+    for c in checkins:
+        reloaded = await service.get_checkin_by_id(c.id)
+        if reloaded:
+            results.append(CheckInResponse.model_validate(reloaded))
+    return results
+
+
 @router.post("/{checkin_id}/accept", response_model=CheckInResponse)
 async def accept_checkin(
     checkin_id: UUID,
