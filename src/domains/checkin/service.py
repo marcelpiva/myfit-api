@@ -26,6 +26,15 @@ class CheckInService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
+    @staticmethod
+    def _to_utc_iso(dt: datetime | None) -> str:
+        """Convert a datetime to UTC ISO string, handling naive datetimes."""
+        if dt is None:
+            return datetime.now(timezone.utc).isoformat()
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.isoformat()
+
     # Gym operations
 
     async def get_gym_by_id(self, gym_id: uuid.UUID) -> Gym | None:
@@ -703,10 +712,10 @@ class CheckInService:
                 "id": str(c.id),
                 "student_name": c.user.name if c.user else "Aluno",
                 "student_avatar": c.user.avatar_url if c.user and hasattr(c.user, 'avatar_url') else None,
-                "checked_in_at": c.checked_in_at.isoformat(),
+                "checked_in_at": self._to_utc_iso(c.checked_in_at),
                 "elapsed_minutes": elapsed,
                 "status": status,
-                "checked_out_at": c.checked_out_at.isoformat() if c.checked_out_at else None,
+                "checked_out_at": self._to_utc_iso(c.checked_out_at) if c.checked_out_at else None,
             })
 
         await self.db.commit()
@@ -714,7 +723,7 @@ class CheckInService:
         return {
             "session": {
                 "id": str(loc.id),
-                "started_at": loc.session_started_at.isoformat() if loc.session_started_at else loc.updated_at.isoformat(),
+                "started_at": self._to_utc_iso(loc.session_started_at or loc.updated_at),
                 "status": "active",
                 "latitude": loc.latitude,
                 "longitude": loc.longitude,
