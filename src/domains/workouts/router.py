@@ -703,7 +703,7 @@ async def list_active_sessions(
             )
         )
     )
-    if not trainer_membership.scalar_one_or_none():
+    if not trainer_membership.scalars().first():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Você não é membro desta organização",
