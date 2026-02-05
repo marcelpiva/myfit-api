@@ -1794,6 +1794,14 @@ class WorkoutService:
         sessions_result = await self.db.execute(sessions_query)
         sessions = sessions_result.scalars().all()
 
+        # Keep only the most recent session per student (sessions are ordered by started_at desc)
+        seen_users: set[uuid.UUID] = set()
+        unique_sessions = []
+        for s in sessions:
+            if s.user_id not in seen_users:
+                seen_users.add(s.user_id)
+                unique_sessions.append(s)
+
         return [
             ActiveSessionResponse(
                 id=s.id,
@@ -1809,7 +1817,7 @@ class WorkoutService:
                 total_exercises=len(s.workout.exercises) if s.workout else 0,
                 completed_sets=len(s.sets) if s.sets else 0,
             )
-            for s in sessions
+            for s in unique_sessions
         ]
 
     # Prescription Note operations
