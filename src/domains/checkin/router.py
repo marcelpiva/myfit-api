@@ -306,6 +306,59 @@ async def checkout(
     return CheckInResponse.model_validate(checkin)
 
 
+@router.post("/{checkin_id}/checkout", response_model=CheckInResponse)
+async def checkout_by_id(
+    checkin_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    request: CheckOutRequest | None = None,
+) -> CheckInResponse:
+    """Check out a specific check-in (used by trainers to end a student's session)."""
+    service = CheckInService(db)
+
+    checkin = await service.get_checkin_by_id(checkin_id)
+    if not checkin:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Check-in não encontrado",
+        )
+
+    # Only the trainer (initiated_by or approved_by) or the student can checkout
+    allowed = {checkin.user_id, checkin.initiated_by, checkin.approved_by_id}
+    if current_user.id not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Sem permissão para encerrar este check-in",
+        )
+
+    if checkin.checked_out_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Check-in já foi encerrado",
+        )
+
+    notes = request.notes if request else None
+    checkin = await service.checkout(checkin, notes=notes)
+
+    # Reload for response serialization
+    checkin = await service.get_checkin_by_id(checkin.id)
+
+    # Send push notification to student
+    try:
+        if checkin.user_id != current_user.id:
+            await send_push_notification(
+                db=db,
+                user_id=checkin.user_id,
+                title="Sessão encerrada",
+                body=f"{current_user.name} encerrou sua sessão",
+                data={"type": "checkin_ended", "checkin_id": str(checkin.id)},
+            )
+    except Exception:
+        pass
+
+    return CheckInResponse.model_validate(checkin)
+
+
 # Check-in code management
 
 @router.post("/codes", response_model=CheckInCodeResponse, status_code=status.HTTP_201_CREATED)
