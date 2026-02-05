@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-02-05
+
+### Added
+- **Trainer-Initiated Student Checkout** - `POST /checkins/{id}/checkout` endpoint
+  - Trainer can end a specific student's check-in by ID
+  - Permission check: only trainer (initiated_by/approved_by) or student can checkout
+  - Push notification sent to student on checkout
+- **Auto-Activate Trainer Session on Accept** - When student accepts check-in, trainer's `TrainerLocation` is auto-activated with `session_started_at = checked_in_at` for timer sync
+- **Auto-Deactivate Trainer Session** - When last student checks out, trainer session auto-ends (`session_active = False`)
+
+### Fixed
+- **UTC Timezone in Session Data** - All datetime fields in `get_active_session()` now include UTC timezone info via `_to_utc_iso()` helper
+  - Prevents Dart from interpreting naive timestamps as local time (caused negative timer values in UTC-3)
+- **Naive vs Aware Datetime Comparison** - Fixed `TypeError` in `get_pending_acceptance_for_user()` and accept/reject expiration checks
+  - Added `.replace(tzinfo=timezone.utc)` for naive TIMESTAMP values before comparison with aware datetimes
+
+---
+
 ## [0.6.9] - 2026-02-04
 
 ### Added
