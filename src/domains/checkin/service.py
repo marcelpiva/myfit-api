@@ -119,7 +119,11 @@ class CheckInService:
         result = await self.db.execute(
             select(CheckIn)
             .where(CheckIn.id == checkin_id)
-            .options(selectinload(CheckIn.gym))
+            .options(
+                selectinload(CheckIn.gym),
+                selectinload(CheckIn.user),
+                selectinload(CheckIn.initiated_by_user),
+            )
         )
         return result.scalar_one_or_none()
 

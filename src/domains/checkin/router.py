@@ -1,4 +1,5 @@
 """Check-in router with gym and check-in endpoints."""
+import logging
 from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -737,7 +738,15 @@ async def accept_checkin(
             detail="Check-in expirou",
         )
 
-    checkin = await service.accept_checkin(checkin)
+    logger = logging.getLogger(__name__)
+    try:
+        checkin = await service.accept_checkin(checkin)
+    except Exception as e:
+        logger.exception(f"accept_checkin FAILED for checkin_id={checkin_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao aceitar check-in: {str(e)}",
+        )
 
     # Send push notification to initiator
     try:
@@ -754,8 +763,15 @@ async def accept_checkin(
     except Exception:
         pass
 
-    checkin = await service.get_checkin_by_id(checkin.id)
-    return CheckInResponse.model_validate(checkin)
+    try:
+        checkin = await service.get_checkin_by_id(checkin.id)
+        return CheckInResponse.model_validate(checkin)
+    except Exception as e:
+        logger.exception(f"accept_checkin serialization FAILED for checkin_id={checkin_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao serializar check-in: {str(e)}",
+        )
 
 
 @router.post("/{checkin_id}/reject", response_model=CheckInResponse)
@@ -787,7 +803,15 @@ async def reject_checkin(
             detail="Você não tem permissão para rejeitar este check-in",
         )
 
-    checkin = await service.reject_checkin(checkin)
+    logger = logging.getLogger(__name__)
+    try:
+        checkin = await service.reject_checkin(checkin)
+    except Exception as e:
+        logger.exception(f"reject_checkin FAILED for checkin_id={checkin_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao rejeitar check-in: {str(e)}",
+        )
 
     # Notify the other party
     notify_user_id = checkin.initiated_by if current_user.id != checkin.initiated_by else (
@@ -808,8 +832,15 @@ async def reject_checkin(
         except Exception:
             pass
 
-    checkin = await service.get_checkin_by_id(checkin.id)
-    return CheckInResponse.model_validate(checkin)
+    try:
+        checkin = await service.get_checkin_by_id(checkin.id)
+        return CheckInResponse.model_validate(checkin)
+    except Exception as e:
+        logger.exception(f"reject_checkin serialization FAILED for checkin_id={checkin_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erro ao serializar check-in: {str(e)}",
+        )
 
 
 # Training Session endpoints

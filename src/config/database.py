@@ -223,6 +223,7 @@ async def _sync_enum_values() -> None:
     # Define expected enum values
     enum_updates = [
         ("exercise_mode_enum", ["strength", "duration", "interval", "distance", "stretching"]),
+        ("checkin_status_enum", ["pending", "pending_acceptance", "confirmed", "rejected"]),
     ]
 
     async with engine.begin() as conn:
