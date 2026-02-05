@@ -680,6 +680,43 @@ async def list_sessions(
     ]
 
 
+@router.get("/sessions/active", response_model=list[ActiveSessionResponse])
+async def list_active_sessions(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: Annotated[UUID, Query()],  # SECURITY: Now required to prevent cross-org access
+) -> list[ActiveSessionResponse]:
+    """List active sessions for students (trainer view - 'Students Now').
+
+    Organization ID is required to ensure trainers only see sessions from their organization.
+    """
+    from sqlalchemy import and_, select
+    from src.domains.organizations.models import OrganizationMembership
+
+    # SECURITY: Verify trainer is a member of the specified organization
+    trainer_membership = await db.execute(
+        select(OrganizationMembership).where(
+            and_(
+                OrganizationMembership.user_id == current_user.id,
+                OrganizationMembership.organization_id == organization_id,
+                OrganizationMembership.is_active == True,
+            )
+        )
+    )
+    if not trainer_membership.scalar_one_or_none():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Você não é membro desta organização",
+        )
+
+    workout_service = WorkoutService(db)
+    sessions = await workout_service.list_active_sessions(
+        trainer_id=current_user.id,
+        organization_id=organization_id,
+    )
+    return sessions
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: UUID,
@@ -3491,43 +3528,6 @@ async def remove_exercise(
 
 
 # Co-Training endpoints
-
-@router.get("/sessions/active", response_model=list[ActiveSessionResponse])
-async def list_active_sessions(
-    current_user: CurrentUser,
-    db: Annotated[AsyncSession, Depends(get_db)],
-    organization_id: Annotated[UUID, Query()],  # SECURITY: Now required to prevent cross-org access
-) -> list[ActiveSessionResponse]:
-    """List active sessions for students (trainer view - 'Students Now').
-
-    Organization ID is required to ensure trainers only see sessions from their organization.
-    """
-    from sqlalchemy import and_, select
-    from src.domains.organizations.models import OrganizationMembership
-
-    # SECURITY: Verify trainer is a member of the specified organization
-    trainer_membership = await db.execute(
-        select(OrganizationMembership).where(
-            and_(
-                OrganizationMembership.user_id == current_user.id,
-                OrganizationMembership.organization_id == organization_id,
-                OrganizationMembership.is_active == True,
-            )
-        )
-    )
-    if not trainer_membership.scalar_one_or_none():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Você não é membro desta organização",
-        )
-
-    workout_service = WorkoutService(db)
-    sessions = await workout_service.list_active_sessions(
-        trainer_id=current_user.id,
-        organization_id=organization_id,
-    )
-    return sessions
-
 
 @router.post("/sessions/{session_id}/join", response_model=SessionJoinResponse)
 async def join_session(
