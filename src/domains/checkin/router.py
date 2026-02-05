@@ -730,13 +730,15 @@ async def accept_checkin(
             detail="Você não tem permissão para aceitar este check-in",
         )
 
-    # Check expiration
-    if checkin.expires_at and checkin.expires_at < datetime.now(timezone.utc):
-        checkin = await service.reject_checkin(checkin)
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Check-in expirou",
-        )
+    # Check expiration (handle naive datetimes from DB)
+    if checkin.expires_at:
+        exp = checkin.expires_at.replace(tzinfo=timezone.utc) if checkin.expires_at.tzinfo is None else checkin.expires_at
+        if exp < datetime.now(timezone.utc):
+            checkin = await service.reject_checkin(checkin)
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Check-in expirou",
+            )
 
     logger = logging.getLogger(__name__)
     try:

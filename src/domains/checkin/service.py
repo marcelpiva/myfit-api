@@ -662,10 +662,12 @@ class CheckInService:
         # Lazy expiration: cancel expired pending check-ins
         checkin_list = []
         for c in checkins:
-            elapsed = int((now - c.checked_in_at).total_seconds() / 60)
+            checked_in = c.checked_in_at.replace(tzinfo=timezone.utc) if c.checked_in_at and c.checked_in_at.tzinfo is None else (c.checked_in_at or now)
+            elapsed = int((now - checked_in).total_seconds() / 60)
 
             # Auto-cancel if pending and expired (20 min)
-            if c.expires_at and c.expires_at < now and c.checked_out_at is None and c.status == CheckInStatus.CONFIRMED:
+            exp = c.expires_at.replace(tzinfo=timezone.utc) if c.expires_at and c.expires_at.tzinfo is None else c.expires_at
+            if exp and exp < now and c.checked_out_at is None and c.status == CheckInStatus.CONFIRMED:
                 c.checked_out_at = now
                 c.notes = (c.notes or "") + " [auto-expirado 20min]"
 
@@ -752,7 +754,8 @@ class CheckInService:
         # Lazy expiration: auto-cancel expired pending check-ins
         active = []
         for c in checkins:
-            if c.expires_at and c.expires_at < now:
+            exp = c.expires_at.replace(tzinfo=timezone.utc) if c.expires_at and c.expires_at.tzinfo is None else c.expires_at
+            if exp and exp < now:
                 c.status = CheckInStatus.REJECTED
                 c.checked_out_at = now
                 c.notes = (c.notes or "") + " [expirado]"
