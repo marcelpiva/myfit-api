@@ -709,11 +709,12 @@ class CheckInService:
         if checkin.initiated_by and checkin.initiated_by != checkin.user_id:
             gym = checkin.gym
             if gym:
-                await self.start_training_session(
-                    user_id=checkin.initiated_by,
-                    latitude=gym.latitude,
-                    longitude=gym.longitude,
+                loc = await self.update_trainer_location(
+                    checkin.initiated_by, gym.latitude, gym.longitude,
                 )
+                loc.session_active = True
+                # Use checked_in_at so trainer timer syncs with student timer
+                loc.session_started_at = checkin.checked_in_at
 
         await self.db.commit()
         await self.db.refresh(checkin)
