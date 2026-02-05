@@ -214,6 +214,30 @@ class CheckInService:
         if notes:
             checkin.notes = notes
 
+        # Auto-deactivate trainer session if no more active students
+        trainer_id = checkin.approved_by_id or checkin.initiated_by
+        if trainer_id and trainer_id != checkin.user_id:
+            remaining = await self.db.execute(
+                select(func.count(CheckIn.id)).where(
+                    and_(
+                        CheckIn.approved_by_id == trainer_id,
+                        CheckIn.checked_out_at.is_(None),
+                        CheckIn.status == CheckInStatus.CONFIRMED,
+                        CheckIn.id != checkin.id,
+                    )
+                )
+            )
+            if remaining.scalar() == 0:
+                result = await self.db.execute(
+                    select(TrainerLocation).where(
+                        TrainerLocation.user_id == trainer_id
+                    )
+                )
+                loc = result.scalar_one_or_none()
+                if loc and loc.session_active:
+                    loc.session_active = False
+                    loc.session_started_at = None
+
         await self.db.commit()
         await self.db.refresh(checkin)
         return checkin
