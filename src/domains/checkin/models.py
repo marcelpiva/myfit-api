@@ -147,9 +147,10 @@ class CheckIn(Base, UUIDMixin):
 
     @property
     def duration_minutes(self) -> int | None:
-        """Calculate check-in duration."""
+        """Calculate check-in duration from acceptance (or creation if no acceptance)."""
         if self.checked_out_at:
-            delta = self.checked_out_at - self.checked_in_at
+            start = self.accepted_at or self.checked_in_at
+            delta = self.checked_out_at - start
             return int(delta.total_seconds() / 60)
         return None
 

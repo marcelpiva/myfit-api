@@ -695,8 +695,9 @@ class CheckInService:
         # Lazy expiration: cancel expired pending check-ins
         checkin_list = []
         for c in checkins:
-            checked_in = c.checked_in_at.replace(tzinfo=timezone.utc) if c.checked_in_at and c.checked_in_at.tzinfo is None else (c.checked_in_at or now)
-            elapsed = int((now - checked_in).total_seconds() / 60)
+            start = c.accepted_at or c.checked_in_at
+            start = start.replace(tzinfo=timezone.utc) if start and start.tzinfo is None else (start or now)
+            elapsed = int((now - start).total_seconds() / 60)
 
             # Auto-cancel if pending and expired (20 min)
             exp = c.expires_at.replace(tzinfo=timezone.utc) if c.expires_at and c.expires_at.tzinfo is None else c.expires_at
@@ -747,7 +748,7 @@ class CheckInService:
                 )
                 loc.session_active = True
                 # Use checked_in_at so trainer timer syncs with student timer
-                loc.session_started_at = checkin.checked_in_at
+                loc.session_started_at = checkin.accepted_at or checkin.checked_in_at
 
         await self.db.commit()
         await self.db.refresh(checkin)
