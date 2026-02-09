@@ -2461,43 +2461,51 @@ class WorkoutService:
 
     async def auto_expire_sessions(
         self,
-        timeout_hours: int = 4,
+        timeout_hours: int = 2,
+        waiting_timeout_minutes: int = 5,
     ) -> int:
         """Auto-expire stale workout sessions.
 
-        Sessions that have been in WAITING, ACTIVE, or PAUSED status for longer
-        than the timeout period are automatically completed.
-
-        Args:
-            timeout_hours: Hours after which a session is considered stale (default 4)
+        WAITING sessions expire after waiting_timeout_minutes (default 5 min).
+        ACTIVE/PAUSED sessions expire after timeout_hours (default 2h).
 
         Returns:
             Number of sessions expired
         """
         from datetime import timedelta
-        from sqlalchemy import update
 
-        cutoff_time = datetime.now(timezone.utc) - timedelta(hours=timeout_hours)
+        now = datetime.now(timezone.utc)
+        active_cutoff = now - timedelta(hours=timeout_hours)
+        waiting_cutoff = now - timedelta(minutes=waiting_timeout_minutes)
 
-        # Find sessions to expire
-        query = (
+        # Expire WAITING sessions after 5 minutes
+        waiting_query = (
+            select(WorkoutSession)
+            .where(
+                WorkoutSession.status == SessionStatus.WAITING,
+                WorkoutSession.started_at < waiting_cutoff,
+            )
+        )
+        # Expire ACTIVE/PAUSED sessions after 2 hours
+        active_query = (
             select(WorkoutSession)
             .where(
                 WorkoutSession.status.in_([
-                    SessionStatus.WAITING,
                     SessionStatus.ACTIVE,
                     SessionStatus.PAUSED,
                 ]),
-                WorkoutSession.started_at < cutoff_time,
+                WorkoutSession.started_at < active_cutoff,
             )
         )
-        result = await self.db.execute(query)
-        stale_sessions = result.scalars().all()
+
+        waiting_result = await self.db.execute(waiting_query)
+        active_result = await self.db.execute(active_query)
+        stale_sessions = list(waiting_result.scalars().all()) + list(active_result.scalars().all())
 
         expired_count = 0
         for session in stale_sessions:
             session.status = SessionStatus.COMPLETED
-            session.completed_at = datetime.now(timezone.utc)
+            session.completed_at = now
             expired_count += 1
 
         if expired_count > 0:
