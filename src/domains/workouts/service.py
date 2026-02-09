@@ -2512,3 +2512,31 @@ class WorkoutService:
             await self.db.commit()
 
         return expired_count
+
+    async def force_expire_all_sessions(self) -> int:
+        """Force-expire ALL non-completed sessions. Used for cleanup."""
+        now = datetime.now(timezone.utc)
+
+        query = (
+            select(WorkoutSession)
+            .where(
+                WorkoutSession.status.in_([
+                    SessionStatus.WAITING,
+                    SessionStatus.ACTIVE,
+                    SessionStatus.PAUSED,
+                ]),
+            )
+        )
+        result = await self.db.execute(query)
+        sessions = result.scalars().all()
+
+        count = 0
+        for session in sessions:
+            session.status = SessionStatus.COMPLETED
+            session.completed_at = now
+            count += 1
+
+        if count > 0:
+            await self.db.commit()
+
+        return count

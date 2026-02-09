@@ -721,6 +721,17 @@ async def list_active_sessions(
     return sessions
 
 
+@router.post("/sessions/cleanup")
+async def cleanup_sessions(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Force-expire all non-completed sessions. Trainer cleanup tool."""
+    workout_service = WorkoutService(db)
+    count = await workout_service.force_expire_all_sessions()
+    return {"expired": count}
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: UUID,
