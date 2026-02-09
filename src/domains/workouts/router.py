@@ -3577,7 +3577,7 @@ async def join_session(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> SessionJoinResponse:
     """Trainer joins a student's session for co-training."""
-    from src.domains.workouts.realtime import notify_trainer_joined
+    from src.domains.workouts.realtime import notify_trainer_joined, get_session_snapshot
 
     workout_service = WorkoutService(db)
     session = await workout_service.get_session_by_id(session_id)
@@ -3599,6 +3599,9 @@ async def join_session(
         session=session,
         trainer_id=current_user.id,
     )
+
+    # Cache session state BEFORE broadcasting (so SYNC_RESPONSE has data)
+    await get_session_snapshot(db, session_id)
 
     # Notify via real-time
     await notify_trainer_joined(
