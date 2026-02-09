@@ -1779,9 +1779,9 @@ class WorkoutService:
         if not student_data:
             return []
 
-        # Get active sessions for these students (started within last 1 hour)
+        # Get active sessions for these students (started within last 30 min, matching auto_expire)
         from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=30)
         sessions_query = (
             select(WorkoutSession)
             .where(
