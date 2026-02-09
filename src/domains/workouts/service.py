@@ -2461,13 +2461,13 @@ class WorkoutService:
 
     async def auto_expire_sessions(
         self,
-        active_timeout_minutes: int = 60,
-        waiting_timeout_minutes: int = 10,
+        active_timeout_minutes: int = 30,
+        waiting_timeout_minutes: int = 3,
     ) -> int:
         """Auto-expire stale workout sessions.
 
-        WAITING sessions expire after 10 minutes.
-        ACTIVE/PAUSED sessions expire after 60 minutes.
+        WAITING sessions expire after 3 minutes.
+        ACTIVE/PAUSED sessions expire after 30 minutes.
 
         Returns:
             Number of sessions expired
