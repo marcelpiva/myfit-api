@@ -1774,9 +1774,9 @@ class WorkoutService:
         if not student_data:
             return []
 
-        # Get active sessions for these students (started within last 2 hours)
+        # Get active sessions for these students (started within last 1 hour)
         from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
         sessions_query = (
             select(WorkoutSession)
             .where(
@@ -2461,13 +2461,13 @@ class WorkoutService:
 
     async def auto_expire_sessions(
         self,
-        timeout_hours: int = 2,
-        waiting_timeout_minutes: int = 5,
+        active_timeout_minutes: int = 60,
+        waiting_timeout_minutes: int = 2,
     ) -> int:
         """Auto-expire stale workout sessions.
 
-        WAITING sessions expire after waiting_timeout_minutes (default 5 min).
-        ACTIVE/PAUSED sessions expire after timeout_hours (default 2h).
+        WAITING sessions expire after 2 minutes.
+        ACTIVE/PAUSED sessions expire after 60 minutes.
 
         Returns:
             Number of sessions expired
@@ -2475,10 +2475,10 @@ class WorkoutService:
         from datetime import timedelta
 
         now = datetime.now(timezone.utc)
-        active_cutoff = now - timedelta(hours=timeout_hours)
+        active_cutoff = now - timedelta(minutes=active_timeout_minutes)
         waiting_cutoff = now - timedelta(minutes=waiting_timeout_minutes)
 
-        # Expire WAITING sessions after 5 minutes
+        # Expire WAITING sessions after 2 minutes
         waiting_query = (
             select(WorkoutSession)
             .where(
@@ -2486,7 +2486,7 @@ class WorkoutService:
                 WorkoutSession.started_at < waiting_cutoff,
             )
         )
-        # Expire ACTIVE/PAUSED sessions after 2 hours
+        # Expire ACTIVE/PAUSED sessions after 60 minutes
         active_query = (
             select(WorkoutSession)
             .where(
