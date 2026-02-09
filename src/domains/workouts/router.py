@@ -735,10 +735,35 @@ async def get_session(
 
     # Allow both session owner (student) and trainer to access
     if session.user_id != current_user.id and session.trainer_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Access denied",
+        # Also allow trainers who share an organization with the session owner
+        from sqlalchemy import and_, select
+        from src.domains.organizations.models import OrganizationMembership
+
+        user_orgs = await db.execute(
+            select(OrganizationMembership.organization_id).where(
+                and_(
+                    OrganizationMembership.user_id == current_user.id,
+                    OrganizationMembership.is_active == True,
+                )
+            )
         )
+        user_org_ids = {row[0] for row in user_orgs.all()}
+
+        session_owner_orgs = await db.execute(
+            select(OrganizationMembership.organization_id).where(
+                and_(
+                    OrganizationMembership.user_id == session.user_id,
+                    OrganizationMembership.is_active == True,
+                )
+            )
+        )
+        session_owner_org_ids = {row[0] for row in session_owner_orgs.all()}
+
+        if not user_org_ids & session_owner_org_ids:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Access denied",
+            )
 
     return SessionResponse.model_validate(session)
 
