@@ -732,6 +732,23 @@ async def cleanup_sessions(
     return {"expired": count}
 
 
+@router.get("/sessions/my-active", response_model=SessionResponse | None)
+async def get_my_active_session(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionResponse | None:
+    """Get the current user's active or paused shared session, if any.
+
+    Used by the student app to offer session resumption after app restart.
+    """
+    workout_service = WorkoutService(db)
+    await workout_service.auto_expire_sessions()
+    session = await workout_service.get_user_active_session(user_id=current_user.id)
+    if session is None:
+        return None
+    return SessionResponse.model_validate(session)
+
+
 @router.get("/sessions/{session_id}", response_model=SessionResponse)
 async def get_session(
     session_id: UUID,

@@ -437,6 +437,10 @@ class WorkoutSession(Base, UUIDMixin):
         DateTime(timezone=True),
         nullable=True,
     )
+    paused_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     duration_minutes: Mapped[int | None] = mapped_column(Integer, nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     rating: Mapped[int | None] = mapped_column(Integer, nullable=True)  # 1-5

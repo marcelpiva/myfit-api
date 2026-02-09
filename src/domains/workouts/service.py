@@ -1672,7 +1672,12 @@ class WorkoutService:
 
         session.status = status
 
-        if status == SessionStatus.COMPLETED:
+        if status == SessionStatus.PAUSED:
+            session.paused_at = datetime.now(timezone.utc)
+        elif status == SessionStatus.ACTIVE:
+            session.paused_at = None  # Clear when resumed
+        elif status == SessionStatus.COMPLETED:
+            session.paused_at = None
             session.completed_at = datetime.now(timezone.utc)
             if session.started_at:
                 delta = session.completed_at - session.started_at
@@ -2468,17 +2473,50 @@ class WorkoutService:
 
         return diff
 
+    # Session Resume
+
+    async def get_user_active_session(
+        self,
+        user_id: uuid.UUID,
+    ) -> WorkoutSession | None:
+        """Get the user's most recent active or paused shared session.
+
+        Used to offer session resumption after app restart.
+        """
+        from datetime import timedelta
+
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=90)
+
+        result = await self.db.execute(
+            select(WorkoutSession)
+            .where(
+                WorkoutSession.user_id == user_id,
+                WorkoutSession.is_shared == True,  # noqa: E712
+                WorkoutSession.status.in_([
+                    SessionStatus.ACTIVE,
+                    SessionStatus.PAUSED,
+                ]),
+                WorkoutSession.completed_at.is_(None),
+                WorkoutSession.started_at > cutoff,
+            )
+            .order_by(WorkoutSession.started_at.desc())
+            .limit(1)
+        )
+        return result.scalar_one_or_none()
+
     # Session Auto-Expiration
 
     async def auto_expire_sessions(
         self,
         active_timeout_minutes: int = 90,
         waiting_timeout_minutes: int = 5,
+        paused_timeout_minutes: int = 5,
     ) -> int:
         """Auto-expire stale workout sessions.
 
         WAITING sessions expire after 5 minutes.
-        ACTIVE/PAUSED sessions expire after 90 minutes (1h30).
+        PAUSED sessions expire after 5 minutes (from paused_at).
+        ACTIVE sessions expire after 90 minutes (from started_at).
 
         Returns:
             Number of sessions expired
@@ -2488,8 +2526,9 @@ class WorkoutService:
         now = datetime.now(timezone.utc)
         active_cutoff = now - timedelta(minutes=active_timeout_minutes)
         waiting_cutoff = now - timedelta(minutes=waiting_timeout_minutes)
+        paused_cutoff = now - timedelta(minutes=paused_timeout_minutes)
 
-        # Expire WAITING sessions after 2 minutes
+        # Expire WAITING sessions after 5 minutes
         waiting_query = (
             select(WorkoutSession)
             .where(
@@ -2497,26 +2536,48 @@ class WorkoutService:
                 WorkoutSession.started_at < waiting_cutoff,
             )
         )
-        # Expire ACTIVE/PAUSED sessions after 60 minutes
+        # Expire ACTIVE sessions after 90 minutes
         active_query = (
             select(WorkoutSession)
             .where(
-                WorkoutSession.status.in_([
-                    SessionStatus.ACTIVE,
-                    SessionStatus.PAUSED,
-                ]),
+                WorkoutSession.status == SessionStatus.ACTIVE,
                 WorkoutSession.started_at < active_cutoff,
+            )
+        )
+        # Expire PAUSED sessions after 5 minutes from paused_at
+        paused_query = (
+            select(WorkoutSession)
+            .where(
+                WorkoutSession.status == SessionStatus.PAUSED,
+                or_(
+                    # Use paused_at if available
+                    and_(
+                        WorkoutSession.paused_at.isnot(None),
+                        WorkoutSession.paused_at < paused_cutoff,
+                    ),
+                    # Fallback: paused_at not set, use started_at with active timeout
+                    and_(
+                        WorkoutSession.paused_at.is_(None),
+                        WorkoutSession.started_at < active_cutoff,
+                    ),
+                ),
             )
         )
 
         waiting_result = await self.db.execute(waiting_query)
         active_result = await self.db.execute(active_query)
-        stale_sessions = list(waiting_result.scalars().all()) + list(active_result.scalars().all())
+        paused_result = await self.db.execute(paused_query)
+        stale_sessions = (
+            list(waiting_result.scalars().all())
+            + list(active_result.scalars().all())
+            + list(paused_result.scalars().all())
+        )
 
         expired_count = 0
         for session in stale_sessions:
             session.status = SessionStatus.COMPLETED
             session.completed_at = now
+            session.paused_at = None
             expired_count += 1
 
         if expired_count > 0:
