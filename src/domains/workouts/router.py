@@ -710,6 +710,10 @@ async def list_active_sessions(
         )
 
     workout_service = WorkoutService(db)
+
+    # Auto-expire stale sessions inline (Celery beat not running on Railway)
+    await workout_service.auto_expire_sessions(timeout_hours=4)
+
     sessions = await workout_service.list_active_sessions(
         trainer_id=current_user.id,
         organization_id=organization_id,
@@ -953,6 +957,18 @@ async def add_set(
         duration_seconds=request.duration_seconds,
         notes=request.notes,
     )
+
+    # Broadcast set completion to trainer via SSE
+    if session.is_shared:
+        from src.domains.workouts.realtime import notify_set_completed
+        await notify_set_completed(
+            session_id=session_id,
+            user_id=current_user.id,
+            exercise_id=request.exercise_id,
+            set_number=request.set_number,
+            reps=request.reps_completed,
+            weight_kg=request.weight_kg,
+        )
 
     return SessionSetResponse.model_validate(session_set)
 
