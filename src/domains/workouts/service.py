@@ -1666,6 +1666,10 @@ class WorkoutService:
         status: SessionStatus,
     ) -> WorkoutSession:
         """Update session status."""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[SESSION] Updating session {session.id} from {session.status} to {status}")
+
         session.status = status
 
         if status == SessionStatus.COMPLETED:
@@ -1676,6 +1680,7 @@ class WorkoutService:
 
         await self.db.commit()
         await self.db.refresh(session)
+        logger.info(f"[SESSION] Session {session.id} now status={session.status}, completed_at={session.completed_at}")
         return session
 
     async def create_trainer_adjustment(
@@ -1796,6 +1801,12 @@ class WorkoutService:
 
         sessions_result = await self.db.execute(sessions_query)
         sessions = sessions_result.scalars().all()
+
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"[ACTIVE_SESSIONS] Found {len(list(sessions))} raw sessions for trainer {trainer_id}")
+        for s in sessions:
+            logger.info(f"[ACTIVE_SESSIONS]   - {s.id}: user={s.user_id}, status={s.status}, started={s.started_at}, completed={s.completed_at}")
 
         # Keep only the most recent session per student (sessions are ordered by started_at desc)
         seen_users: set[uuid.UUID] = set()
