@@ -1774,9 +1774,9 @@ class WorkoutService:
         if not student_data:
             return []
 
-        # Get active sessions for these students (started within last 4 hours)
+        # Get active sessions for these students (started within last 2 hours)
         from datetime import timedelta
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
         sessions_query = (
             select(WorkoutSession)
             .where(
