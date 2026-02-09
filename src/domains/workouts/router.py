@@ -711,8 +711,8 @@ async def list_active_sessions(
 
     workout_service = WorkoutService(db)
 
-    # Force-expire ALL stale sessions (one-time cleanup + ongoing auto-expire)
-    await workout_service.force_expire_all_sessions()
+    # Auto-expire stale sessions inline (Celery beat not running on Railway)
+    await workout_service.auto_expire_sessions()
 
     sessions = await workout_service.list_active_sessions(
         trainer_id=current_user.id,
