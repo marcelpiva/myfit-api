@@ -1774,7 +1774,9 @@ class WorkoutService:
         if not student_data:
             return []
 
-        # Get active sessions for these students
+        # Get active sessions for these students (started within last 4 hours)
+        from datetime import timedelta
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=4)
         sessions_query = (
             select(WorkoutSession)
             .where(
@@ -1782,6 +1784,7 @@ class WorkoutService:
                     WorkoutSession.user_id.in_(student_data.keys()),
                     WorkoutSession.status.in_([SessionStatus.WAITING, SessionStatus.ACTIVE, SessionStatus.PAUSED]),
                     WorkoutSession.completed_at.is_(None),
+                    WorkoutSession.started_at > cutoff,
                 )
             )
             .options(
