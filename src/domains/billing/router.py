@@ -32,7 +32,7 @@ from .schemas import (
     SendReminderRequest,
 )
 
-router = APIRouter(prefix="/billing", tags=["billing"])
+router = APIRouter(tags=["billing"])
 
 
 def _payment_to_response(payment: Payment) -> PaymentResponse:
