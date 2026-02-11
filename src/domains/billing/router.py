@@ -607,25 +607,30 @@ async def get_current_month_revenue(
     year = now.year
     month = now.month
 
-    # Get all payments for this month where current user is payee
-    base_filter = [
+    # Received: filter by paid_at (when payment was actually received)
+    received_query = select(Payment).where(and_(
         Payment.payee_id == current_user.id,
+        Payment.status == PaymentStatus.PAID,
+        Payment.paid_at.isnot(None),
+        extract("year", Payment.paid_at) == year,
+        extract("month", Payment.paid_at) == month,
+    ))
+    received_result = await db.execute(received_query)
+    received_payments = list(received_result.scalars().all())
+
+    # Pending: filter by due_date (when payment is due)
+    pending_query = select(Payment).where(and_(
+        Payment.payee_id == current_user.id,
+        Payment.status.in_([PaymentStatus.PENDING, PaymentStatus.OVERDUE]),
         extract("year", Payment.due_date) == year,
         extract("month", Payment.due_date) == month,
-        Payment.status != PaymentStatus.CANCELLED,
-    ]
+    ))
+    pending_result = await db.execute(pending_query)
+    pending_payments = list(pending_result.scalars().all())
 
-    query = select(Payment).where(and_(*base_filter))
-    result = await db.execute(query)
-    payments = list(result.scalars().all())
-
-    received_amount = sum(p.amount_cents for p in payments if p.status == PaymentStatus.PAID)
-    pending_amount = sum(
-        p.amount_cents for p in payments if p.status in [PaymentStatus.PENDING, PaymentStatus.OVERDUE]
-    )
+    received_amount = sum(p.amount_cents for p in received_payments)
+    pending_amount = sum(p.amount_cents for p in pending_payments)
     total_amount = received_amount + pending_amount
-    paid_count = sum(1 for p in payments if p.status == PaymentStatus.PAID)
-    pending_count = sum(1 for p in payments if p.status in [PaymentStatus.PENDING, PaymentStatus.OVERDUE])
 
     return MonthlyRevenueResponse(
         year=year,
@@ -633,9 +638,9 @@ async def get_current_month_revenue(
         received_amount_cents=received_amount,
         pending_amount_cents=pending_amount,
         total_amount_cents=total_amount,
-        payments_count=len(payments),
-        paid_count=paid_count,
-        pending_count=pending_count,
+        payments_count=len(received_payments) + len(pending_payments),
+        paid_count=len(received_payments),
+        pending_count=len(pending_payments),
     )
 
 
@@ -653,25 +658,30 @@ async def get_month_revenue(
             detail="Month must be between 1 and 12",
         )
 
-    # Get all payments for this month where current user is payee
-    base_filter = [
+    # Received: filter by paid_at (when payment was actually received)
+    received_query = select(Payment).where(and_(
         Payment.payee_id == current_user.id,
+        Payment.status == PaymentStatus.PAID,
+        Payment.paid_at.isnot(None),
+        extract("year", Payment.paid_at) == year,
+        extract("month", Payment.paid_at) == month,
+    ))
+    received_result = await db.execute(received_query)
+    received_payments = list(received_result.scalars().all())
+
+    # Pending: filter by due_date (when payment is due)
+    pending_query = select(Payment).where(and_(
+        Payment.payee_id == current_user.id,
+        Payment.status.in_([PaymentStatus.PENDING, PaymentStatus.OVERDUE]),
         extract("year", Payment.due_date) == year,
         extract("month", Payment.due_date) == month,
-        Payment.status != PaymentStatus.CANCELLED,
-    ]
+    ))
+    pending_result = await db.execute(pending_query)
+    pending_payments = list(pending_result.scalars().all())
 
-    query = select(Payment).where(and_(*base_filter))
-    result = await db.execute(query)
-    payments = list(result.scalars().all())
-
-    received_amount = sum(p.amount_cents for p in payments if p.status == PaymentStatus.PAID)
-    pending_amount = sum(
-        p.amount_cents for p in payments if p.status in [PaymentStatus.PENDING, PaymentStatus.OVERDUE]
-    )
+    received_amount = sum(p.amount_cents for p in received_payments)
+    pending_amount = sum(p.amount_cents for p in pending_payments)
     total_amount = received_amount + pending_amount
-    paid_count = sum(1 for p in payments if p.status == PaymentStatus.PAID)
-    pending_count = sum(1 for p in payments if p.status in [PaymentStatus.PENDING, PaymentStatus.OVERDUE])
 
     return MonthlyRevenueResponse(
         year=year,
@@ -679,9 +689,9 @@ async def get_month_revenue(
         received_amount_cents=received_amount,
         pending_amount_cents=pending_amount,
         total_amount_cents=total_amount,
-        payments_count=len(payments),
-        paid_count=paid_count,
-        pending_count=pending_count,
+        payments_count=len(received_payments) + len(pending_payments),
+        paid_count=len(received_payments),
+        pending_count=len(pending_payments),
     )
 
 

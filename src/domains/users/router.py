@@ -11,6 +11,7 @@ from src.config.database import get_db
 from src.core.redis import TokenBlacklist
 from src.domains.auth.dependencies import CurrentUser
 from src.domains.users.schemas import (
+    ActiveGoalResponse,
     AvatarUploadResponse,
     PasswordChangeRequest,
     PlanProgressResponse,
@@ -25,6 +26,8 @@ from src.domains.users.schemas import (
     UserSettingsResponse,
     UserSettingsUpdate,
     WeeklyProgressResponse,
+    WeightPointResponse,
+    WeightTrendResponse,
 )
 from src.domains.users.service import UserService
 from src.domains.organizations.service import OrganizationService
@@ -484,9 +487,12 @@ async def get_student_dashboard(
         )
     ) or 0
 
-    # Calculate adherence (workouts per week target: 5, so ~20 per month)
+    # Use user's weekly_frequency as target (default 5)
+    weekly_target = current_user.weekly_frequency or 5
+
+    # Calculate adherence based on user's actual target
     days_in_month = (now - start_of_month).days + 1
-    expected_workouts = max(1, int((days_in_month / 7) * 5))
+    expected_workouts = max(1, int((days_in_month / 7) * weekly_target))
     adherence_percent = min(100, int((workouts_this_month / expected_workouts) * 100))
 
     # Weight change (latest vs oldest measurement)
@@ -652,7 +658,7 @@ async def get_student_dashboard(
 
     weekly_progress = WeeklyProgressResponse(
         completed=len(days_completed),
-        target=5,  # Default target
+        target=weekly_target,
         days=days,
     )
 
@@ -790,6 +796,115 @@ async def get_student_dashboard(
         )
     ) or 0
 
+    # ==================== Active Goals ====================
+    active_goals: list[ActiveGoalResponse] = []
+
+    # Get user settings for goal_weight
+    user_settings = await user_service.get_settings(current_user.id)
+
+    # Weight goal
+    if user_settings and user_settings.goal_weight and latest:
+        current_weight = latest.weight_kg
+        goal_weight = user_settings.goal_weight
+        total_diff = abs(goal_weight - (oldest.weight_kg if oldest else current_weight))
+        current_diff = abs(goal_weight - current_weight)
+        progress = max(0, min(100, int(((total_diff - current_diff) / max(total_diff, 0.1)) * 100)))
+        active_goals.append(ActiveGoalResponse(
+            goal_type="weight",
+            label=f"Meta: {goal_weight}kg",
+            current_value=current_weight,
+            target_value=goal_weight,
+            progress_percent=progress,
+            icon="⚖️",
+        ))
+
+    # Fitness goal
+    if current_user.fitness_goal:
+        goal_labels = {
+            "hypertrophy": "Hipertrofia",
+            "strength": "Força",
+            "fat_loss": "Emagrecimento",
+            "endurance": "Resistência",
+            "functional": "Funcional",
+            "general_fitness": "Condicionamento",
+        }
+        goal_icons = {
+            "hypertrophy": "💪",
+            "strength": "🏋️",
+            "fat_loss": "🔥",
+            "endurance": "🏃",
+            "functional": "⚡",
+            "general_fitness": "🎯",
+        }
+        label = goal_labels.get(current_user.fitness_goal, current_user.fitness_goal)
+        icon = goal_icons.get(current_user.fitness_goal, "🎯")
+        # Progress based on total workouts (milestone-style)
+        workout_milestones = [0, 10, 25, 50, 100, 200]
+        next_milestone = 10
+        for m in workout_milestones:
+            if m > total_workouts:
+                next_milestone = m
+                break
+        else:
+            next_milestone = total_workouts + 50
+        progress = min(100, int((total_workouts / max(next_milestone, 1)) * 100))
+        active_goals.append(ActiveGoalResponse(
+            goal_type="fitness",
+            label=label,
+            current_value=float(total_workouts),
+            target_value=float(next_milestone),
+            progress_percent=progress,
+            icon=icon,
+        ))
+
+    # Weekly frequency goal
+    if current_user.weekly_frequency:
+        freq_progress = min(100, int((len(days_completed) / current_user.weekly_frequency) * 100))
+        active_goals.append(ActiveGoalResponse(
+            goal_type="frequency",
+            label=f"{current_user.weekly_frequency}x por semana",
+            current_value=float(len(days_completed)),
+            target_value=float(current_user.weekly_frequency),
+            progress_percent=freq_progress,
+            icon="📅",
+        ))
+
+    # ==================== Weight Trend (last 14 days) ====================
+    weight_trend_response = None
+    fourteen_days_ago = now - timedelta(days=14)
+    weight_logs_result = await db.execute(
+        select(WeightLog)
+        .where(
+            WeightLog.user_id == current_user.id,
+            WeightLog.logged_at >= fourteen_days_ago,
+        )
+        .order_by(WeightLog.logged_at.asc())
+    )
+    weight_logs = weight_logs_result.scalars().all()
+
+    if weight_logs:
+        points = [
+            WeightPointResponse(
+                date=log.logged_at.date() if hasattr(log.logged_at, 'date') else log.logged_at,
+                weight_kg=round(log.weight_kg, 1),
+            )
+            for log in weight_logs
+        ]
+        first_weight = weight_logs[0].weight_kg
+        last_weight = weight_logs[-1].weight_kg
+        change = round(last_weight - first_weight, 1)
+        trend = "stable"
+        if change < -0.3:
+            trend = "down"
+        elif change > 0.3:
+            trend = "up"
+
+        weight_trend_response = WeightTrendResponse(
+            points=points,
+            trend=trend,
+            change_kg=change,
+        )
+
     return StudentDashboardResponse(
         stats=stats,
         today_workout=today_workout,
@@ -798,4 +913,6 @@ async def get_student_dashboard(
         trainer=trainer_info,
         plan_progress=plan_progress,
         unread_notes_count=unread_notes_count,
+        active_goals=active_goals,
+        weight_trend=weight_trend_response,
     )

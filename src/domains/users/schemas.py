@@ -141,6 +141,32 @@ class UserListResponse(BaseModel):
 # ==================== Student Dashboard Schemas ====================
 
 
+class ActiveGoalResponse(BaseModel):
+    """Active goal from onboarding."""
+
+    goal_type: str  # "weight", "fitness", "frequency"
+    label: str
+    current_value: float
+    target_value: float
+    progress_percent: int
+    icon: str  # emoji or icon name
+
+
+class WeightPointResponse(BaseModel):
+    """Single weight data point."""
+
+    date: date
+    weight_kg: float
+
+
+class WeightTrendResponse(BaseModel):
+    """Weight trend over recent period."""
+
+    points: list[WeightPointResponse] = []
+    trend: str = "stable"  # "up", "down", "stable"
+    change_kg: float = 0.0
+
+
 class StudentStatsResponse(BaseModel):
     """Student statistics."""
 
@@ -211,3 +237,5 @@ class StudentDashboardResponse(BaseModel):
     trainer: TrainerInfoResponse | None = None
     plan_progress: PlanProgressResponse | None = None
     unread_notes_count: int = 0
+    active_goals: list[ActiveGoalResponse] = []
+    weight_trend: WeightTrendResponse | None = None
