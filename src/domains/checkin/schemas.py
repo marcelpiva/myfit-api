@@ -143,6 +143,7 @@ class ManualCheckinForStudentRequest(BaseModel):
     training_mode: TrainingMode
     notes: str | None = Field(None, max_length=500)
     unilateral: bool = False
+    appointment_id: UUID | None = None
 
 
 class CheckInRequestCreate(BaseModel):

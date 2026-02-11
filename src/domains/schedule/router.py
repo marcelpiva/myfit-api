@@ -196,6 +196,22 @@ async def create_appointment(
             detail="Student not found",
         )
 
+    # Validate service plan if provided
+    if request.service_plan_id:
+        from src.domains.billing.models import ServicePlan as BillingServicePlan
+
+        plan = await db.get(BillingServicePlan, request.service_plan_id)
+        if not plan or not plan.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Service plan not found or inactive",
+            )
+        if plan.student_id != request.student_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Service plan does not belong to this student",
+            )
+
     appointment = Appointment(
         trainer_id=current_user.id,
         student_id=request.student_id,
@@ -205,6 +221,9 @@ async def create_appointment(
         workout_type=request.workout_type,
         notes=request.notes,
         status=AppointmentStatus.PENDING,
+        service_plan_id=request.service_plan_id,
+        session_type=request.session_type,
+        is_complimentary=request.is_complimentary,
     )
 
     db.add(appointment)
@@ -473,6 +492,12 @@ async def delete_appointment(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the trainer can delete this appointment",
+        )
+
+    if appointment.status == AppointmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot delete a completed session with attendance records",
         )
 
     await db.delete(appointment)
@@ -1063,9 +1088,8 @@ async def student_book_session(
     )
     db.add(appointment)
 
-    # For packages, decrement remaining sessions
-    if plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
-        plan.remaining_sessions -= 1
+    # Note: remaining_sessions is NOT decremented at booking time.
+    # Credits are consumed when attendance is marked as ATTENDED.
 
     await db.commit()
     await db.refresh(appointment)
@@ -1263,9 +1287,32 @@ async def update_attendance(
     if request.notes:
         appointment.notes = f"{appointment.notes or ''}\nAttendance: {request.notes}".strip()
 
-    # If attended, mark as completed
+    # If attended, mark as completed and handle billing
     if request.attendance_status == AttendanceStatus.ATTENDED:
         appointment.status = AppointmentStatus.COMPLETED
+
+        # Billing integration: consume session credit or create payment
+        if appointment.service_plan_id and not appointment.is_complimentary:
+            from src.domains.billing.models import Payment, PaymentStatus, PaymentType, ServicePlan, ServicePlanType
+
+            plan = await db.get(ServicePlan, appointment.service_plan_id)
+            if plan:
+                if plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
+                    plan.remaining_sessions = max(0, plan.remaining_sessions - 1)
+                elif plan.plan_type == ServicePlanType.DROP_IN and plan.per_session_cents:
+                    payment = Payment(
+                        payer_id=appointment.student_id,
+                        payee_id=appointment.trainer_id,
+                        organization_id=appointment.organization_id,
+                        payment_type=PaymentType.SESSION,
+                        description=f"Sessão avulsa - {appointment.date_time.strftime('%d/%m/%Y %H:%M')}",
+                        amount_cents=plan.per_session_cents,
+                        status=PaymentStatus.PENDING,
+                        due_date=appointment.date_time.date(),
+                        service_plan_id=plan.id,
+                    )
+                    db.add(payment)
+                    appointment.payment_id = payment.id
 
     # If missed + grant_makeup, create a makeup appointment placeholder
     makeup_appointment = None

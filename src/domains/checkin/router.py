@@ -45,6 +45,52 @@ from src.domains.notifications.push_service import send_push_notification
 from src.domains.users.models import User
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
+
+
+async def _auto_mark_attendance(db: AsyncSession, appointment_id: UUID, trainer_id: UUID) -> None:
+    """Auto-mark attendance as ATTENDED when check-in is linked to an appointment.
+
+    Also triggers billing consumption (package credit or drop-in payment).
+    """
+    from src.domains.schedule.models import Appointment, AppointmentStatus, AttendanceStatus
+
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment or appointment.status in (
+        AppointmentStatus.CANCELLED,
+        AppointmentStatus.COMPLETED,
+    ):
+        return
+
+    appointment.attendance_status = AttendanceStatus.ATTENDED
+    appointment.status = AppointmentStatus.COMPLETED
+
+    # Billing integration: consume credit or create payment
+    if appointment.service_plan_id and not appointment.is_complimentary:
+        from src.domains.billing.models import (
+            Payment, PaymentStatus, PaymentType, ServicePlan, ServicePlanType,
+        )
+
+        plan = await db.get(ServicePlan, appointment.service_plan_id)
+        if plan:
+            if plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
+                plan.remaining_sessions = max(0, plan.remaining_sessions - 1)
+            elif plan.plan_type == ServicePlanType.DROP_IN and plan.per_session_cents:
+                payment = Payment(
+                    payer_id=appointment.student_id,
+                    payee_id=appointment.trainer_id,
+                    organization_id=appointment.organization_id,
+                    payment_type=PaymentType.SESSION,
+                    description=f"Sessão avulsa - {appointment.date_time.strftime('%d/%m/%Y %H:%M')}",
+                    amount_cents=plan.per_session_cents,
+                    status=PaymentStatus.PENDING,
+                    due_date=appointment.date_time.date(),
+                    service_plan_id=plan.id,
+                )
+                db.add(payment)
+
+    await db.commit()
+    logger.info(f"Auto-marked attendance for appointment {appointment_id}")
 
 
 # Gym endpoints
@@ -653,7 +699,12 @@ async def manual_checkin_for_student(
             initiated_by=current_user.id,
             expires_in_minutes=None,
             training_mode=request.training_mode.value,
+            appointment_id=request.appointment_id,
         )
+
+        # Auto-mark attendance if linked to an appointment
+        if request.appointment_id:
+            await _auto_mark_attendance(db, request.appointment_id, current_user.id)
 
         # Auto-activate trainer session
         if gym:
@@ -675,6 +726,7 @@ async def manual_checkin_for_student(
             initiated_by=current_user.id,
             expires_in_minutes=5,
             training_mode=request.training_mode.value,
+            appointment_id=request.appointment_id,
         )
 
         # Send push notification to student (needs to accept)

@@ -192,6 +192,7 @@ class CheckInService:
         expires_in_minutes: int | None = 20,
         initiated_by: uuid.UUID | None = None,
         training_mode: str | None = None,
+        appointment_id: uuid.UUID | None = None,
     ) -> CheckIn:
         """Create a new check-in."""
         expires_at = None
@@ -207,6 +208,7 @@ class CheckInService:
             expires_at=expires_at,
             initiated_by=initiated_by,
             training_mode=training_mode,
+            appointment_id=appointment_id,
         )
         self.db.add(checkin)
         await self.db.commit()
