@@ -667,3 +667,144 @@ async def _send_notification_async_impl(user_id: str, notification_type: str, ti
         )
 
         return {"sent": True}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def mark_missed_appointments(self):
+    """Mark no-show appointments as MISSED.
+
+    Finds all appointments from today (and yesterday as catch-up) where:
+    - status is PENDING or CONFIRMED (not cancelled/completed)
+    - attendance_status is SCHEDULED
+    - date_time has already passed (at least 2 hours ago)
+
+    Marks them as MISSED. Does NOT consume package credits.
+
+    Runs daily at 11pm.
+    """
+    logger.info("Starting no-show appointment check")
+    return run_async(_mark_missed_appointments_async())
+
+
+async def _mark_missed_appointments_async():
+    """Async implementation of no-show marking."""
+    from sqlalchemy import select, and_
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    import os
+
+    from src.domains.schedule.models import (
+        Appointment,
+        AppointmentStatus,
+        AttendanceStatus,
+    )
+    from src.domains.notifications.models import NotificationType
+    from src.domains.notifications.schemas import NotificationCreate
+    from src.domains.notifications.router import create_notification, should_send_notification
+    from src.domains.notifications.push_service import send_push_notification
+
+    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./myfit.db")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    engine = create_async_engine(database_url)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    marked_count = 0
+
+    async with async_session() as db:
+        try:
+            now = datetime.now(timezone.utc)
+            # Look at appointments from the last 48 hours that are still SCHEDULED
+            cutoff = now - timedelta(hours=2)  # Must be at least 2h past
+            lookback = now - timedelta(hours=48)
+
+            query = (
+                select(Appointment)
+                .where(
+                    and_(
+                        Appointment.date_time >= lookback,
+                        Appointment.date_time <= cutoff,
+                        Appointment.status.in_([
+                            AppointmentStatus.PENDING,
+                            AppointmentStatus.CONFIRMED,
+                        ]),
+                        Appointment.attendance_status == AttendanceStatus.SCHEDULED,
+                    )
+                )
+            )
+            result = await db.execute(query)
+            appointments = result.scalars().all()
+
+            # Group by trainer for notification batching
+            trainer_missed = {}
+
+            for appt in appointments:
+                appt.attendance_status = AttendanceStatus.MISSED
+                # Do NOT change status to COMPLETED — keep as-is to distinguish
+                marked_count += 1
+
+                trainer_id = str(appt.trainer_id)
+                if trainer_id not in trainer_missed:
+                    trainer_missed[trainer_id] = []
+
+                student_name = appt.student.name if appt.student else "Aluno"
+                trainer_missed[trainer_id].append(student_name)
+
+            await db.commit()
+
+            # Notify trainers about missed sessions
+            for trainer_id, student_names in trainer_missed.items():
+                count = len(student_names)
+                if count == 1:
+                    title = "Falta registrada"
+                    body = f"{student_names[0]} faltou à sessão agendada"
+                else:
+                    title = f"{count} faltas registradas"
+                    names = ", ".join(student_names[:3])
+                    if count > 3:
+                        names += f" e mais {count - 3}"
+                    body = f"{names} faltaram às sessões agendadas"
+
+                try:
+                    trainer_uuid = UUID(trainer_id)
+
+                    should_send = await should_send_notification(
+                        db=db,
+                        user_id=trainer_uuid,
+                        notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                        channel="push",
+                        respect_dnd=True,
+                    )
+
+                    if should_send:
+                        await create_notification(
+                            db=db,
+                            notification_data=NotificationCreate(
+                                user_id=trainer_uuid,
+                                notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                                title=title,
+                                body=body,
+                            ),
+                        )
+
+                        await send_push_notification(
+                            db=db,
+                            user_id=trainer_uuid,
+                            title=title,
+                            body=body,
+                            data={"type": "missed_appointment"},
+                        )
+                except Exception as e:
+                    logger.error(f"Error notifying trainer {trainer_id}: {e}")
+
+            logger.info(f"Marked {marked_count} appointments as MISSED, notified {len(trainer_missed)} trainers")
+
+        except Exception as e:
+            logger.error(f"Error in no-show check: {e}")
+            await db.rollback()
+            raise
+
+    return {"marked": marked_count, "trainers_notified": len(trainer_missed) if 'trainer_missed' in dir() else 0}

@@ -101,6 +101,12 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.notifications.cleanup_old_notifications",
         "schedule": crontab(minute=0, hour=3, day_of_week=0),
     },
+
+    # Mark no-show appointments as MISSED - daily at 11pm
+    "mark-missed-appointments-daily": {
+        "task": "src.tasks.notifications.mark_missed_appointments",
+        "schedule": crontab(minute=0, hour=23),
+    },
 }
 
 

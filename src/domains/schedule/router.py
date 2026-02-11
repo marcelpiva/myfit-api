@@ -1314,6 +1314,54 @@ async def update_attendance(
                     db.add(payment)
                     appointment.payment_id = payment.id
 
+    # Package depletion alerts (after credit consumption)
+    if (
+        request.attendance_status == AttendanceStatus.ATTENDED
+        and appointment.service_plan_id
+        and not appointment.is_complimentary
+    ):
+        try:
+            from src.domains.billing.models import ServicePlan, ServicePlanType
+            _plan = await db.get(ServicePlan, appointment.service_plan_id)
+            if _plan and _plan.plan_type == ServicePlanType.PACKAGE and _plan.remaining_sessions is not None:
+                student_name = appointment.student.name if appointment.student else "Aluno"
+                if _plan.remaining_sessions == 0:
+                    # Package depleted
+                    await create_notification(
+                        db,
+                        NotificationCreate(
+                            user_id=appointment.trainer_id,
+                            notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                            priority=NotificationPriority.HIGH,
+                            title="Pacote esgotado",
+                            body=f"O pacote de {student_name} ({_plan.name}) não tem mais sessões restantes",
+                            icon="package-x",
+                            action_type="navigate",
+                            action_data=json.dumps({"route": "/billing/plans"}),
+                            reference_type="service_plan",
+                            reference_id=_plan.id,
+                        ),
+                    )
+                elif _plan.remaining_sessions <= 2:
+                    # Package running low
+                    await create_notification(
+                        db,
+                        NotificationCreate(
+                            user_id=appointment.trainer_id,
+                            notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                            priority=NotificationPriority.NORMAL,
+                            title="Pacote quase acabando",
+                            body=f"{student_name} tem apenas {_plan.remaining_sessions} sessão(ões) restante(s) no pacote {_plan.name}",
+                            icon="package-minus",
+                            action_type="navigate",
+                            action_data=json.dumps({"route": "/billing/plans"}),
+                            reference_type="service_plan",
+                            reference_id=_plan.id,
+                        ),
+                    )
+        except Exception:
+            pass  # Non-critical
+
     # If missed + grant_makeup, create a makeup appointment placeholder
     makeup_appointment = None
     if request.attendance_status == AttendanceStatus.MISSED and request.grant_makeup:

@@ -75,6 +75,47 @@ async def _auto_mark_attendance(db: AsyncSession, appointment_id: UUID, trainer_
         if plan:
             if plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
                 plan.remaining_sessions = max(0, plan.remaining_sessions - 1)
+
+                # Package depletion alerts
+                try:
+                    from src.domains.notifications.models import NotificationType, NotificationPriority
+                    from src.domains.notifications.schemas import NotificationCreate
+                    from src.domains.notifications.router import create_notification
+
+                    student_name = appointment.student.name if appointment.student else "Aluno"
+                    if plan.remaining_sessions == 0:
+                        await create_notification(
+                            db,
+                            NotificationCreate(
+                                user_id=trainer_id,
+                                notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                                priority=NotificationPriority.HIGH,
+                                title="Pacote esgotado",
+                                body=f"O pacote de {student_name} ({plan.name}) não tem mais sessões restantes",
+                                icon="package-x",
+                            ),
+                        )
+                        await send_push_notification(
+                            db=db, user_id=trainer_id,
+                            title="Pacote esgotado",
+                            body=f"O pacote de {student_name} não tem mais sessões restantes",
+                            data={"type": "package_depleted"},
+                        )
+                    elif plan.remaining_sessions <= 2:
+                        await create_notification(
+                            db,
+                            NotificationCreate(
+                                user_id=trainer_id,
+                                notification_type=NotificationType.SYSTEM_ANNOUNCEMENT,
+                                priority=NotificationPriority.NORMAL,
+                                title="Pacote quase acabando",
+                                body=f"{student_name} tem apenas {plan.remaining_sessions} sessão(ões) restante(s) no pacote {plan.name}",
+                                icon="package-minus",
+                            ),
+                        )
+                except Exception:
+                    pass  # Non-critical
+
             elif plan.plan_type == ServicePlanType.DROP_IN and plan.per_session_cents:
                 payment = Payment(
                     payer_id=appointment.student_id,
