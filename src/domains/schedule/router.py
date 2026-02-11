@@ -363,6 +363,12 @@ async def update_appointment(
             detail="Only the trainer can update this appointment",
         )
 
+    if appointment.status in (AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot edit a cancelled or completed session",
+        )
+
     if request.date_time is not None:
         appointment.date_time = request.date_time
     if request.duration_minutes is not None:
@@ -400,6 +406,12 @@ async def cancel_appointment(
             detail="Access denied",
         )
 
+    if appointment.status in (AppointmentStatus.CANCELLED, AppointmentStatus.COMPLETED):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot cancel a session that is already cancelled or completed",
+        )
+
     appointment.status = AppointmentStatus.CANCELLED
     appointment.cancellation_reason = request.reason
 
@@ -427,6 +439,12 @@ async def confirm_appointment(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Access denied",
+        )
+
+    if appointment.status != AppointmentStatus.PENDING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only confirm pending sessions",
         )
 
     appointment.status = AppointmentStatus.CONFIRMED
@@ -1234,6 +1252,12 @@ async def update_attendance(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Appointment not found")
     if appointment.trainer_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the trainer can mark attendance")
+
+    if appointment.status == AppointmentStatus.CANCELLED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot mark attendance on a cancelled session",
+        )
 
     appointment.attendance_status = request.attendance_status
     if request.notes:
