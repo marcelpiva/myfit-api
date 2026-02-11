@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-02-11
+
+### Added
+- **Self-Service Booking API** - Students can book sessions directly with their trainer
+  - `GET /schedule/available-slots` - Returns available time slots for a trainer on a given date
+  - `POST /schedule/book` - Student books a session (validates availability, decrements package sessions)
+  - Slot calculation: generates slots from trainer settings, subtracts blocked slots and existing appointments
+  - Conflict detection returns 409 if slot is already taken
+  - Push notification (`SESSION_BOOKED_BY_STUDENT`) sent to trainer on booking
+- **Trainer Availability Management** - Full CRUD for trainer schedule configuration
+  - `GET /schedule/trainer-availability` - Returns trainer's blocked slots and settings
+  - `POST /schedule/trainer-availability/block` - Create blocked time slot (recurring or specific date)
+  - `DELETE /schedule/trainer-availability/block/{id}` - Remove blocked slot
+  - `PUT /schedule/trainer-availability/settings` - Update default hours, session duration, slot interval
+- **Attendance Tracking** - Trainer marks session attendance
+  - `PATCH /schedule/appointments/{id}/attendance` - Mark attended/missed/late_cancelled
+  - Optional makeup session creation for missed appointments
+  - Push notification (`ATTENDANCE_MARKED`) sent to student
+- **New Models** - `TrainerBlockedSlot` and `TrainerSettings` database tables
+- **New Notification Types** - `SESSION_BOOKED_BY_STUDENT`, `ATTENDANCE_MARKED`
+
+---
+
 ## [0.7.2] - 2026-02-05
 
 ### Added

@@ -1,15 +1,17 @@
 """Schedule models for trainer appointments."""
 import enum
 import uuid
-from datetime import datetime
+from datetime import date, datetime, time
 
 from sqlalchemy import (
     Boolean,
+    Date,
     DateTime,
     Enum,
     ForeignKey,
     Integer,
     Text,
+    Time,
 )
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -161,6 +163,67 @@ class TrainerAvailability(Base, UUIDMixin, TimestampMixin):
         Text,
         nullable=False,
     )  # HH:MM format
+
+    # Relationships
+    trainer = relationship("User", lazy="selectin")
+
+
+class TrainerBlockedSlot(Base, UUIDMixin, TimestampMixin):
+    """Blocked time slots for a trainer (lunch, vacation, etc)."""
+
+    __tablename__ = "trainer_blocked_slots"
+
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    day_of_week: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )  # 0=Monday..6=Sunday (for recurring blocks)
+    specific_date: Mapped[date | None] = mapped_column(
+        Date, nullable=True,
+    )  # For one-off blocks
+    start_time: Mapped[time] = mapped_column(
+        Time, nullable=False,
+    )
+    end_time: Mapped[time] = mapped_column(
+        Time, nullable=False,
+    )
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_recurring: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False,
+    )  # True = weekly on day_of_week, False = specific_date
+
+    # Relationships
+    trainer = relationship("User", lazy="selectin")
+
+
+class TrainerSettings(Base, UUIDMixin, TimestampMixin):
+    """Per-trainer scheduling settings."""
+
+    __tablename__ = "trainer_settings"
+
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    default_start_time: Mapped[time] = mapped_column(
+        Time, nullable=False, default=time(6, 0),
+    )  # Default 06:00
+    default_end_time: Mapped[time] = mapped_column(
+        Time, nullable=False, default=time(21, 0),
+    )  # Default 21:00
+    session_duration_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=60,
+    )
+    slot_interval_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=30,
+    )
 
     # Relationships
     trainer = relationship("User", lazy="selectin")

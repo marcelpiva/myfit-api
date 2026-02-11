@@ -73,6 +73,10 @@ class NotificationType(str, enum.Enum):
     STUDENT_INACTIVE = "student_inactive"
     STUDENT_PROGRESS = "student_progress"
 
+    # Self-service booking
+    SESSION_BOOKED_BY_STUDENT = "session_booked_by_student"
+    ATTENDANCE_MARKED = "attendance_marked"
+
     # System
     SYSTEM_ANNOUNCEMENT = "system_announcement"
     SYSTEM_MAINTENANCE = "system_maintenance"
@@ -259,6 +263,8 @@ NOTIFICATION_TYPE_CATEGORIES = {
     NotificationType.APPOINTMENT_REMINDER: NotificationCategory.APPOINTMENTS,
     NotificationType.APPOINTMENT_CANCELLED: NotificationCategory.APPOINTMENTS,
     NotificationType.APPOINTMENT_CONFIRMED: NotificationCategory.APPOINTMENTS,
+    NotificationType.SESSION_BOOKED_BY_STUDENT: NotificationCategory.APPOINTMENTS,
+    NotificationType.ATTENDANCE_MARKED: NotificationCategory.APPOINTMENTS,
     # System
     NotificationType.SYSTEM_ANNOUNCEMENT: NotificationCategory.SYSTEM,
     NotificationType.SYSTEM_MAINTENANCE: NotificationCategory.SYSTEM,

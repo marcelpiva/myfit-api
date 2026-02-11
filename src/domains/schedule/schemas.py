@@ -1,5 +1,5 @@
 """Schedule schemas for API validation."""
-from datetime import datetime, time
+from datetime import date, datetime, time
 from enum import Enum
 from uuid import UUID
 
@@ -156,3 +156,94 @@ class AutoGenerateScheduleRequest(BaseModel):
     service_plan_id: UUID
     weeks_ahead: int = Field(default=4, ge=1, le=12)
     auto_confirm: bool = False  # If True, appointments are created as CONFIRMED
+
+
+# --- Self-service booking schemas ---
+
+
+class AvailableSlotResponse(BaseModel):
+    """A single available time slot."""
+
+    time: str  # HH:MM
+    available: bool
+
+
+class AvailableSlotsResponse(BaseModel):
+    """List of slots for a given day."""
+
+    date: date
+    trainer_id: UUID
+    slots: list[AvailableSlotResponse]
+
+
+class StudentBookSessionRequest(BaseModel):
+    """Request for a student to book a session."""
+
+    trainer_id: UUID
+    date_time: datetime
+    service_plan_id: UUID
+    duration_minutes: int = Field(default=60, ge=15, le=240)
+    workout_type: AppointmentType | None = None
+
+
+class TrainerBlockedSlotCreate(BaseModel):
+    """Create a blocked time slot for a trainer."""
+
+    day_of_week: int | None = Field(default=None, ge=0, le=6)
+    specific_date: date | None = None
+    start_time: time
+    end_time: time
+    reason: str | None = None
+    is_recurring: bool = False
+
+
+class TrainerBlockedSlotResponse(BaseModel):
+    """Response for a blocked time slot."""
+
+    id: UUID
+    trainer_id: UUID
+    day_of_week: int | None
+    specific_date: date | None
+    start_time: time
+    end_time: time
+    reason: str | None
+    is_recurring: bool
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrainerSettingsUpdate(BaseModel):
+    """Update trainer scheduling settings."""
+
+    default_start_time: time | None = None
+    default_end_time: time | None = None
+    session_duration_minutes: int | None = Field(default=None, ge=15, le=240)
+    slot_interval_minutes: int | None = Field(default=None, ge=15, le=60)
+
+
+class TrainerSettingsResponse(BaseModel):
+    """Trainer scheduling settings response."""
+
+    trainer_id: UUID
+    default_start_time: time
+    default_end_time: time
+    session_duration_minutes: int
+    slot_interval_minutes: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class TrainerFullAvailabilityResponse(BaseModel):
+    """Full trainer availability: settings + blocked slots."""
+
+    settings: TrainerSettingsResponse
+    blocked_slots: list[TrainerBlockedSlotResponse]
+
+
+class AttendanceUpdate(BaseModel):
+    """Update attendance status for an appointment."""
+
+    attendance_status: AttendanceStatus
+    grant_makeup: bool = False
+    notes: str | None = None
