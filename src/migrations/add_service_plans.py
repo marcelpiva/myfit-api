@@ -231,7 +231,17 @@ async def migrate(database_url: str) -> None:
             is_postgres,
         )
 
-        # ── 3. Add columns to check_ins ──
+        # ── 3. Add service_plan_id to payments ──
+        logger.info("Adding columns to payments...")
+
+        await _add_column_if_missing(
+            conn, "payments", "service_plan_id",
+            "UUID REFERENCES service_plans(id) ON DELETE SET NULL",
+            "TEXT REFERENCES service_plans(id) ON DELETE SET NULL",
+            is_postgres,
+        )
+
+        # ── 4. Add columns to check_ins ──
         logger.info("Adding columns to check_ins...")
 
         await _add_column_if_missing(
