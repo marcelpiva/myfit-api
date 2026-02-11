@@ -1,5 +1,5 @@
 """Check-in schemas for request/response validation."""
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
