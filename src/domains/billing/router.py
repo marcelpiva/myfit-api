@@ -16,9 +16,13 @@ from .models import (
     Payment,
     PaymentPlan,
     PaymentStatus,
+    ServicePlan,
+    ServicePlanType,
 )
 from .schemas import (
     BillingSummaryResponse,
+    ConsumeSessionRequest,
+    ConsumeSessionResponse,
     MarkPaidRequest,
     MonthlyRevenueResponse,
     PaymentCreate,
@@ -30,6 +34,10 @@ from .schemas import (
     RevenueHistoryItem,
     RevenueHistoryResponse,
     SendReminderRequest,
+    ServicePlanCreate,
+    ServicePlanListResponse,
+    ServicePlanResponse,
+    ServicePlanUpdate,
 )
 
 router = APIRouter(tags=["billing"])
@@ -741,4 +749,311 @@ async def get_revenue_history(
     return RevenueHistoryResponse(
         months=months,
         total_cents=total,
+    )
+
+
+# --- Service Plans ---
+
+
+def _service_plan_to_response(plan: ServicePlan) -> ServicePlanResponse:
+    """Convert service plan model to response schema."""
+    from .schemas import ScheduleSlotConfig
+
+    schedule_config = None
+    if plan.schedule_config:
+        schedule_config = [
+            ScheduleSlotConfig(**slot) for slot in plan.schedule_config
+        ]
+
+    return ServicePlanResponse(
+        id=plan.id,
+        student_id=plan.student_id,
+        student_name=plan.student.name if plan.student else "Unknown",
+        student_avatar_url=plan.student.avatar_url if plan.student else None,
+        trainer_id=plan.trainer_id,
+        trainer_name=plan.trainer.name if plan.trainer else "Unknown",
+        organization_id=plan.organization_id,
+        organization_name=plan.organization.name if plan.organization else None,
+        name=plan.name,
+        description=plan.description,
+        plan_type=plan.plan_type,
+        amount_cents=plan.amount_cents,
+        currency=plan.currency,
+        sessions_per_week=plan.sessions_per_week,
+        recurrence_type=plan.recurrence_type,
+        billing_day=plan.billing_day,
+        schedule_config=schedule_config,
+        total_sessions=plan.total_sessions,
+        remaining_sessions=plan.remaining_sessions,
+        package_expiry_date=plan.package_expiry_date,
+        per_session_cents=plan.per_session_cents,
+        start_date=plan.start_date,
+        end_date=plan.end_date,
+        is_active=plan.is_active,
+        auto_renew=plan.auto_renew,
+        notes=plan.notes,
+        created_at=plan.created_at,
+        updated_at=plan.updated_at,
+    )
+
+
+@router.get("/service-plans", response_model=ServicePlanListResponse)
+async def list_service_plans(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    student_id: Annotated[UUID | None, Query()] = None,
+    active_only: Annotated[bool, Query()] = True,
+    as_trainer: Annotated[bool, Query()] = True,
+) -> ServicePlanListResponse:
+    """List service plans for current user."""
+    if as_trainer:
+        base_filter = [ServicePlan.trainer_id == current_user.id]
+    else:
+        base_filter = [ServicePlan.student_id == current_user.id]
+
+    if student_id:
+        base_filter.append(ServicePlan.student_id == student_id)
+
+    if active_only:
+        base_filter.append(ServicePlan.is_active == True)  # noqa: E712
+
+    # Count
+    count_query = select(func.count(ServicePlan.id)).where(and_(*base_filter))
+    result = await db.execute(count_query)
+    total = result.scalar() or 0
+
+    # Fetch
+    query = (
+        select(ServicePlan)
+        .where(and_(*base_filter))
+        .order_by(ServicePlan.created_at.desc())
+    )
+
+    result = await db.execute(query)
+    plans = list(result.scalars().all())
+
+    return ServicePlanListResponse(
+        plans=[_service_plan_to_response(p) for p in plans],
+        total=total,
+    )
+
+
+@router.post("/service-plans", response_model=ServicePlanResponse, status_code=status.HTTP_201_CREATED)
+async def create_service_plan(
+    request: ServicePlanCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ServicePlanResponse:
+    """Create a new service plan (trainer only)."""
+    from datetime import timedelta
+
+    # Verify student exists
+    student = await db.get(User, request.student_id)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found",
+        )
+
+    # Convert schedule_config to JSON-compatible format
+    schedule_config_json = None
+    if request.schedule_config:
+        schedule_config_json = [
+            slot.model_dump() for slot in request.schedule_config
+        ]
+
+    # Calculate package expiry date
+    package_expiry_date = None
+    if request.plan_type == ServicePlanType.PACKAGE and request.package_expiry_days:
+        package_expiry_date = request.start_date + timedelta(days=request.package_expiry_days)
+
+    plan = ServicePlan(
+        student_id=request.student_id,
+        trainer_id=current_user.id,
+        organization_id=request.organization_id,
+        name=request.name,
+        description=request.description,
+        plan_type=request.plan_type,
+        amount_cents=request.amount_cents,
+        currency=request.currency,
+        # Recurring
+        sessions_per_week=request.sessions_per_week,
+        recurrence_type=request.recurrence_type,
+        billing_day=request.billing_day,
+        schedule_config=schedule_config_json,
+        # Package
+        total_sessions=request.total_sessions,
+        remaining_sessions=request.total_sessions,  # Start with full balance
+        package_expiry_date=package_expiry_date,
+        # Drop-in
+        per_session_cents=request.per_session_cents,
+        # General
+        start_date=request.start_date,
+        end_date=request.end_date,
+        auto_renew=request.auto_renew,
+        notes=request.notes,
+    )
+
+    db.add(plan)
+    await db.commit()
+    await db.refresh(plan)
+
+    # Reload with relationships
+    plan_query = select(ServicePlan).where(ServicePlan.id == plan.id)
+    result = await db.execute(plan_query)
+    plan = result.scalar_one()
+
+    return _service_plan_to_response(plan)
+
+
+@router.get("/service-plans/{plan_id}", response_model=ServicePlanResponse)
+async def get_service_plan(
+    plan_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ServicePlanResponse:
+    """Get a specific service plan."""
+    plan = await db.get(ServicePlan, plan_id)
+
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service plan not found",
+        )
+
+    if plan.student_id != current_user.id and plan.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    return _service_plan_to_response(plan)
+
+
+@router.put("/service-plans/{plan_id}", response_model=ServicePlanResponse)
+async def update_service_plan(
+    plan_id: UUID,
+    request: ServicePlanUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ServicePlanResponse:
+    """Update a service plan (trainer only)."""
+    plan = await db.get(ServicePlan, plan_id)
+
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service plan not found",
+        )
+
+    if plan.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the trainer can update this plan",
+        )
+
+    update_data = request.model_dump(exclude_unset=True)
+
+    # Convert schedule_config if provided
+    if "schedule_config" in update_data and update_data["schedule_config"] is not None:
+        update_data["schedule_config"] = [
+            slot.model_dump() if hasattr(slot, "model_dump") else slot
+            for slot in update_data["schedule_config"]
+        ]
+
+    for field, value in update_data.items():
+        setattr(plan, field, value)
+
+    await db.commit()
+    await db.refresh(plan)
+
+    return _service_plan_to_response(plan)
+
+
+@router.delete("/service-plans/{plan_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def deactivate_service_plan(
+    plan_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Deactivate a service plan (trainer only)."""
+    plan = await db.get(ServicePlan, plan_id)
+
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service plan not found",
+        )
+
+    if plan.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the trainer can deactivate this plan",
+        )
+
+    plan.is_active = False
+    await db.commit()
+
+
+@router.post("/service-plans/{plan_id}/consume-session", response_model=ConsumeSessionResponse)
+async def consume_package_session(
+    plan_id: UUID,
+    request: ConsumeSessionRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ConsumeSessionResponse:
+    """Consume one session credit from a package plan."""
+    plan = await db.get(ServicePlan, plan_id)
+
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service plan not found",
+        )
+
+    if plan.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the trainer can consume sessions",
+        )
+
+    if plan.plan_type != ServicePlanType.PACKAGE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only consume sessions from package plans",
+        )
+
+    if not plan.is_active:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Service plan is not active",
+        )
+
+    if plan.remaining_sessions is None or plan.remaining_sessions <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No remaining sessions in this package",
+        )
+
+    # Check expiry
+    if plan.package_expiry_date and plan.package_expiry_date < date.today():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Package has expired",
+        )
+
+    plan.remaining_sessions -= 1
+
+    # Auto-deactivate if no sessions left
+    if plan.remaining_sessions == 0:
+        plan.is_active = False
+
+    await db.commit()
+    await db.refresh(plan)
+
+    return ConsumeSessionResponse(
+        remaining_sessions=plan.remaining_sessions,
+        total_sessions=plan.total_sessions or 0,
+        plan_id=plan.id,
+        plan_name=plan.name,
     )

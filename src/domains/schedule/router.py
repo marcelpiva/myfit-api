@@ -19,6 +19,9 @@ from .schemas import (
     AppointmentReschedule,
     AppointmentResponse,
     AppointmentUpdate,
+    AutoGenerateScheduleRequest,
+    ConflictCheckResponse,
+    ConflictDetail,
     RecurringAppointmentCreate,
     TrainerAvailabilityCreate,
     TrainerAvailabilityResponse,
@@ -48,8 +51,14 @@ def _appointment_to_response(
         cancellation_reason=appointment.cancellation_reason,
         created_at=appointment.created_at,
         updated_at=appointment.updated_at,
+        service_plan_id=appointment.service_plan_id,
+        payment_id=appointment.payment_id,
+        session_type=appointment.session_type,
+        attendance_status=appointment.attendance_status,
+        is_complimentary=appointment.is_complimentary,
         trainer_name=trainer_name or (appointment.trainer.name if appointment.trainer else None),
         student_name=student_name or (appointment.student.name if appointment.student else None),
+        service_plan_name=appointment.service_plan.name if hasattr(appointment, "service_plan") and appointment.service_plan else None,
     )
 
 
@@ -582,3 +591,241 @@ async def set_trainer_availability(
             for slot in new_slots
         ],
     )
+
+
+# --- Conflict Detection ---
+
+
+@router.get("/conflicts", response_model=ConflictCheckResponse)
+async def check_conflicts(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    date_time: Annotated[datetime, Query()],
+    duration: Annotated[int, Query(ge=15, le=240)] = 60,
+    student_id: Annotated[UUID | None, Query()] = None,
+) -> ConflictCheckResponse:
+    """Check for scheduling conflicts before creating an appointment."""
+    conflicts: list[ConflictDetail] = []
+    warnings: list[ConflictDetail] = []
+
+    end_time = date_time + timedelta(minutes=duration)
+    buffer_minutes = 15
+
+    # 1. Check trainer's existing appointments for overlap
+    trainer_query = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.trainer_id == current_user.id,
+                Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+                Appointment.date_time < end_time,
+                (Appointment.date_time + timedelta(minutes=1) * Appointment.duration_minutes) > date_time,
+            )
+        )
+    )
+    # Use raw SQL for interval calculation since SQLAlchemy timedelta * column is tricky
+    trainer_appointments_query = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.trainer_id == current_user.id,
+                Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+                Appointment.date_time.between(
+                    date_time - timedelta(minutes=240),  # Max session is 240min
+                    end_time,
+                ),
+            )
+        )
+    )
+    result = await db.execute(trainer_appointments_query)
+    trainer_appointments = list(result.scalars().all())
+
+    for apt in trainer_appointments:
+        apt_end = apt.date_time + timedelta(minutes=apt.duration_minutes)
+        # Check overlap
+        if apt.date_time < end_time and apt_end > date_time:
+            conflicts.append(ConflictDetail(
+                type="trainer_overlap",
+                message=f"Você já tem sessão com {apt.student.name if apt.student else 'aluno'} das {apt.date_time.strftime('%H:%M')} às {apt_end.strftime('%H:%M')}",
+                conflicting_appointment_id=apt.id,
+                conflicting_student_name=apt.student.name if apt.student else None,
+                conflicting_time=apt.date_time,
+            ))
+        # Check buffer
+        elif (apt.date_time - end_time).total_seconds() < buffer_minutes * 60 and apt.date_time > date_time:
+            warnings.append(ConflictDetail(
+                type="buffer_too_short",
+                message=f"Menos de {buffer_minutes}min entre esta sessão e a próxima ({apt.student.name if apt.student else 'aluno'} às {apt.date_time.strftime('%H:%M')})",
+                conflicting_appointment_id=apt.id,
+                conflicting_time=apt.date_time,
+            ))
+        elif (date_time - apt_end).total_seconds() < buffer_minutes * 60 and apt_end < end_time:
+            warnings.append(ConflictDetail(
+                type="buffer_too_short",
+                message=f"Menos de {buffer_minutes}min entre a sessão anterior ({apt.student.name if apt.student else 'aluno'}) e esta",
+                conflicting_appointment_id=apt.id,
+                conflicting_time=apt.date_time,
+            ))
+
+    # 2. Check student's existing appointments for overlap
+    if student_id:
+        student_appointments_query = (
+            select(Appointment)
+            .where(
+                and_(
+                    Appointment.student_id == student_id,
+                    Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+                    Appointment.date_time.between(
+                        date_time - timedelta(minutes=240),
+                        end_time,
+                    ),
+                )
+            )
+        )
+        result = await db.execute(student_appointments_query)
+        student_appointments = list(result.scalars().all())
+
+        for apt in student_appointments:
+            apt_end = apt.date_time + timedelta(minutes=apt.duration_minutes)
+            if apt.date_time < end_time and apt_end > date_time:
+                conflicts.append(ConflictDetail(
+                    type="student_overlap",
+                    message=f"O aluno já tem sessão das {apt.date_time.strftime('%H:%M')} às {apt_end.strftime('%H:%M')}",
+                    conflicting_appointment_id=apt.id,
+                    conflicting_time=apt.date_time,
+                ))
+
+    # 3. Check trainer availability
+    target_day = date_time.weekday()  # 0=Monday
+    availability_query = (
+        select(TrainerAvailability)
+        .where(
+            and_(
+                TrainerAvailability.trainer_id == current_user.id,
+                TrainerAvailability.day_of_week == target_day,
+            )
+        )
+    )
+    result = await db.execute(availability_query)
+    availability_slots = list(result.scalars().all())
+
+    if availability_slots:
+        # Check if the appointment falls within any availability slot
+        appointment_start = date_time.strftime("%H:%M")
+        appointment_end = end_time.strftime("%H:%M")
+        in_availability = any(
+            slot.start_time <= appointment_start and slot.end_time >= appointment_end
+            for slot in availability_slots
+        )
+        if not in_availability:
+            warnings.append(ConflictDetail(
+                type="outside_availability",
+                message="Este horário está fora da sua disponibilidade configurada",
+            ))
+
+    return ConflictCheckResponse(
+        has_conflicts=len(conflicts) > 0,
+        conflicts=conflicts,
+        warnings=warnings,
+    )
+
+
+# --- Auto-generate schedule from service plan ---
+
+
+@router.post("/auto-generate", response_model=list[AppointmentResponse], status_code=status.HTTP_201_CREATED)
+async def auto_generate_schedule(
+    request: AutoGenerateScheduleRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[AppointmentResponse]:
+    """Auto-generate appointments from a service plan's schedule config."""
+    from src.domains.billing.models import ServicePlan
+
+    plan = await db.get(ServicePlan, request.service_plan_id)
+
+    if not plan:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Service plan not found",
+        )
+
+    if plan.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the plan's trainer can generate schedule",
+        )
+
+    if not plan.schedule_config:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Service plan has no schedule configuration",
+        )
+
+    # Generate appointments for the next N weeks
+    today = date.today()
+    appointments_created = []
+
+    for week_offset in range(request.weeks_ahead):
+        week_start = today + timedelta(weeks=week_offset)
+        # Adjust to Monday of that week
+        monday = week_start - timedelta(days=week_start.weekday())
+
+        for slot in plan.schedule_config:
+            slot_day = slot.get("day_of_week", 0)
+            slot_time = slot.get("time", "09:00")
+            slot_duration = slot.get("duration_minutes", 60)
+
+            # Calculate the actual date for this slot
+            appointment_date = monday + timedelta(days=slot_day)
+
+            # Skip dates in the past
+            if appointment_date < today:
+                continue
+
+            # Parse time
+            hour, minute = map(int, slot_time.split(":"))
+            appointment_datetime = datetime.combine(
+                appointment_date,
+                datetime.min.time().replace(hour=hour, minute=minute),
+            )
+
+            # Check if appointment already exists for this slot
+            existing_query = (
+                select(Appointment)
+                .where(
+                    and_(
+                        Appointment.trainer_id == current_user.id,
+                        Appointment.student_id == plan.student_id,
+                        Appointment.date_time == appointment_datetime,
+                        Appointment.status != AppointmentStatus.CANCELLED,
+                    )
+                )
+            )
+            result = await db.execute(existing_query)
+            if result.scalar():
+                continue  # Skip — already exists
+
+            apt = Appointment(
+                trainer_id=current_user.id,
+                student_id=plan.student_id,
+                organization_id=plan.organization_id,
+                date_time=appointment_datetime,
+                duration_minutes=slot_duration,
+                status=AppointmentStatus.CONFIRMED if request.auto_confirm else AppointmentStatus.PENDING,
+                service_plan_id=plan.id,
+                is_complimentary=plan.plan_type.value == "free_trial",
+            )
+            db.add(apt)
+            appointments_created.append(apt)
+
+    await db.commit()
+
+    # Reload all with relationships
+    created_ids = [a.id for a in appointments_created]
+    if created_ids:
+        reload_query = select(Appointment).where(Appointment.id.in_(created_ids)).order_by(Appointment.date_time)
+        result = await db.execute(reload_query)
+        appointments_created = list(result.scalars().all())
+
+    return [_appointment_to_response(a) for a in appointments_created]

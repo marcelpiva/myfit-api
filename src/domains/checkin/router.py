@@ -34,6 +34,9 @@ from src.domains.checkin.schemas import (
     NearbyTrainerInfo,
     NearbyTrainerResponse,
     PendingAcceptanceResponse,
+    ScheduledAppointmentInfo,
+    ServicePlanInfo,
+    SessionContextResponse,
     StartTrainingSessionRequest,
     UpdateTrainerLocationRequest,
 )
@@ -1136,3 +1139,129 @@ async def get_active_session(
     if not session:
         return {"session": None, "checkins": []}
     return session
+
+
+# --- Session Context (smart check-in) ---
+
+
+@router.get("/session-context/{student_id}", response_model=SessionContextResponse)
+async def get_session_context(
+    student_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionContextResponse:
+    """Get session context for a student: today's appointments, active plan, check-in status.
+
+    Used by the trainer when initiating a check-in to show smart options.
+    """
+    from sqlalchemy import and_, select
+
+    from src.domains.billing.models import ServicePlan
+    from src.domains.checkin.models import CheckIn
+    from src.domains.schedule.models import Appointment, AppointmentStatus
+
+    # Get student info
+    student = await db.get(User, student_id)
+    if not student:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Student not found",
+        )
+
+    today = date.today()
+    today_start = datetime.combine(today, datetime.min.time())
+    today_end = datetime.combine(today, datetime.max.time())
+
+    # 1. Get today's appointments for this student with this trainer
+    appointments_query = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.student_id == student_id,
+                Appointment.trainer_id == current_user.id,
+                Appointment.date_time >= today_start,
+                Appointment.date_time <= today_end,
+                Appointment.status.in_([
+                    AppointmentStatus.PENDING,
+                    AppointmentStatus.CONFIRMED,
+                ]),
+            )
+        )
+        .order_by(Appointment.date_time)
+    )
+    result = await db.execute(appointments_query)
+    today_appointments = list(result.scalars().all())
+
+    appointment_infos = []
+    for apt in today_appointments:
+        plan_name = None
+        if apt.service_plan_id:
+            plan = await db.get(ServicePlan, apt.service_plan_id)
+            plan_name = plan.name if plan else None
+
+        appointment_infos.append(ScheduledAppointmentInfo(
+            id=apt.id,
+            date_time=apt.date_time,
+            duration_minutes=apt.duration_minutes,
+            workout_type=apt.workout_type.value if apt.workout_type else None,
+            status=apt.status.value,
+            session_type=apt.session_type.value if hasattr(apt, "session_type") and apt.session_type else "scheduled",
+            service_plan_name=plan_name,
+        ))
+
+    # 2. Get active service plan for this student with this trainer
+    plan_query = (
+        select(ServicePlan)
+        .where(
+            and_(
+                ServicePlan.student_id == student_id,
+                ServicePlan.trainer_id == current_user.id,
+                ServicePlan.is_active == True,  # noqa: E712
+            )
+        )
+        .order_by(ServicePlan.created_at.desc())
+        .limit(1)
+    )
+    result = await db.execute(plan_query)
+    active_plan = result.scalar()
+
+    plan_info = None
+    if active_plan:
+        plan_info = ServicePlanInfo(
+            id=active_plan.id,
+            name=active_plan.name,
+            plan_type=active_plan.plan_type.value,
+            remaining_sessions=active_plan.remaining_sessions,
+            total_sessions=active_plan.total_sessions,
+            package_expiry_date=active_plan.package_expiry_date,
+            is_active=active_plan.is_active,
+        )
+
+    # 3. Check if student already checked in today
+    checkin_query = (
+        select(CheckIn)
+        .where(
+            and_(
+                CheckIn.user_id == student_id,
+                CheckIn.checked_in_at >= today_start,
+                CheckIn.checked_in_at <= today_end,
+                CheckIn.status.in_([
+                    CheckInStatus.CONFIRMED,
+                    CheckInStatus.PENDING_ACCEPTANCE,
+                ]),
+                CheckIn.checked_out_at.is_(None),
+            )
+        )
+        .limit(1)
+    )
+    result = await db.execute(checkin_query)
+    active_checkin = result.scalar()
+
+    return SessionContextResponse(
+        student_id=student_id,
+        student_name=student.name,
+        today_appointments=appointment_infos,
+        active_service_plan=plan_info,
+        already_checked_in_today=active_checkin is not None,
+        active_checkin_id=active_checkin.id if active_checkin else None,
+    )

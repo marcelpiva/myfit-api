@@ -108,6 +108,8 @@ from src.domains.schedule.models import (
     Appointment,
     AppointmentStatus,
     AppointmentType,
+    AttendanceStatus,
+    SessionType,
 )
 
 # Trainers domain
@@ -139,6 +141,8 @@ from src.domains.billing.models import (
     PaymentStatus,
     PaymentType,
     RecurrenceType,
+    ServicePlan,
+    ServicePlanType,
 )
 
 __all__ = [
@@ -221,6 +225,8 @@ __all__ = [
     "Appointment",
     "AppointmentStatus",
     "AppointmentType",
+    "SessionType",
+    "AttendanceStatus",
     # Trainers
     "StudentNote",
     # Chat
@@ -240,4 +246,6 @@ __all__ = [
     "PaymentStatus",
     "PaymentType",
     "RecurrenceType",
+    "ServicePlan",
+    "ServicePlanType",
 ]

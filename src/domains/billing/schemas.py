@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import PaymentMethod, PaymentStatus, PaymentType, RecurrenceType
+from .models import PaymentMethod, PaymentStatus, PaymentType, RecurrenceType, ServicePlanType
 
 
 class PaymentCreate(BaseModel):
@@ -167,3 +167,130 @@ class PaymentPlanResponse(BaseModel):
     updated_at: datetime | None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# --- Service Plan schemas ---
+
+
+class ScheduleSlotConfig(BaseModel):
+    """A single schedule slot for recurring plans."""
+
+    day_of_week: int = Field(ge=0, le=6)  # 0=Monday, 6=Sunday
+    time: str = Field(pattern=r"^\d{2}:\d{2}$")  # HH:MM format
+    duration_minutes: int = Field(default=60, ge=15, le=240)
+
+
+class ServicePlanCreate(BaseModel):
+    """Schema for creating a service plan."""
+
+    student_id: UUID
+    name: str = Field(..., max_length=255)
+    description: str | None = None
+    plan_type: ServicePlanType
+    amount_cents: int = Field(default=0, ge=0)
+    currency: str = Field(default="BRL", max_length=3)
+
+    # Recurring-specific
+    sessions_per_week: int | None = Field(default=None, ge=1, le=7)
+    recurrence_type: RecurrenceType | None = None
+    billing_day: int | None = Field(default=None, ge=1, le=28)
+    schedule_config: list[ScheduleSlotConfig] | None = None
+
+    # Package-specific
+    total_sessions: int | None = Field(default=None, ge=1, le=200)
+    package_expiry_days: int | None = Field(default=None, ge=1, le=365)  # Converted to date on creation
+
+    # Drop-in specific
+    per_session_cents: int | None = Field(default=None, ge=0)
+
+    # General
+    start_date: date
+    end_date: date | None = None
+    auto_renew: bool = False
+    notes: str | None = None
+    organization_id: UUID | None = None
+
+    # Auto-generate schedule on creation
+    auto_generate_schedule: bool = False
+
+
+class ServicePlanUpdate(BaseModel):
+    """Schema for updating a service plan."""
+
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = None
+    amount_cents: int | None = Field(default=None, ge=0)
+    sessions_per_week: int | None = Field(default=None, ge=1, le=7)
+    billing_day: int | None = Field(default=None, ge=1, le=28)
+    schedule_config: list[ScheduleSlotConfig] | None = None
+    per_session_cents: int | None = Field(default=None, ge=0)
+    end_date: date | None = None
+    auto_renew: bool | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class ServicePlanResponse(BaseModel):
+    """Schema for service plan response."""
+
+    id: UUID
+    student_id: UUID
+    student_name: str
+    student_avatar_url: str | None = None
+    trainer_id: UUID
+    trainer_name: str
+    organization_id: UUID | None
+    organization_name: str | None = None
+    name: str
+    description: str | None
+    plan_type: ServicePlanType
+    amount_cents: int
+    currency: str
+
+    # Recurring
+    sessions_per_week: int | None
+    recurrence_type: RecurrenceType | None
+    billing_day: int | None
+    schedule_config: list[ScheduleSlotConfig] | None = None
+
+    # Package
+    total_sessions: int | None
+    remaining_sessions: int | None
+    package_expiry_date: date | None
+
+    # Drop-in
+    per_session_cents: int | None
+
+    # General
+    start_date: date
+    end_date: date | None
+    is_active: bool
+    auto_renew: bool
+    notes: str | None
+    created_at: datetime
+    updated_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ServicePlanListResponse(BaseModel):
+    """Schema for service plan list response."""
+
+    plans: list[ServicePlanResponse]
+    total: int
+
+
+class ConsumeSessionRequest(BaseModel):
+    """Schema for consuming a package session credit."""
+
+    appointment_id: UUID | None = None
+    notes: str | None = None
+
+
+class ConsumeSessionResponse(BaseModel):
+    """Response after consuming a session credit."""
+
+    remaining_sessions: int
+    total_sessions: int
+    plan_id: UUID
+    plan_name: str

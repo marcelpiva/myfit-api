@@ -322,3 +322,41 @@ class PendingAcceptanceResponse(BaseModel):
     training_mode: str | None = None
     created_at: datetime
     expires_at: datetime | None = None
+
+
+# --- Session Context (for smart check-in) ---
+
+
+class ScheduledAppointmentInfo(BaseModel):
+    """Appointment info for session context."""
+
+    id: UUID
+    date_time: datetime
+    duration_minutes: int
+    workout_type: str | None = None
+    status: str
+    session_type: str = "scheduled"
+    service_plan_name: str | None = None
+
+
+class ServicePlanInfo(BaseModel):
+    """Service plan summary for session context."""
+
+    id: UUID
+    name: str
+    plan_type: str
+    remaining_sessions: int | None = None
+    total_sessions: int | None = None
+    package_expiry_date: date | None = None
+    is_active: bool
+
+
+class SessionContextResponse(BaseModel):
+    """Context for smart check-in: what does the student have scheduled today?"""
+
+    student_id: UUID
+    student_name: str
+    today_appointments: list[ScheduledAppointmentInfo] = []
+    active_service_plan: ServicePlanInfo | None = None
+    already_checked_in_today: bool = False
+    active_checkin_id: UUID | None = None

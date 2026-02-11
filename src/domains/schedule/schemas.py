@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from .models import AppointmentStatus, AppointmentType
+from .models import AppointmentStatus, AppointmentType, AttendanceStatus, SessionType
 
 
 class RecurrencePattern(str, Enum):
@@ -26,6 +26,9 @@ class AppointmentCreate(BaseModel):
     workout_type: AppointmentType | None = None
     notes: str | None = None
     organization_id: UUID | None = None
+    service_plan_id: UUID | None = None
+    session_type: SessionType = SessionType.SCHEDULED
+    is_complimentary: bool = False
 
 
 class AppointmentUpdate(BaseModel):
@@ -59,9 +62,17 @@ class AppointmentResponse(BaseModel):
     created_at: datetime
     updated_at: datetime | None
 
+    # Service plan & billing fields
+    service_plan_id: UUID | None = None
+    payment_id: UUID | None = None
+    session_type: SessionType = SessionType.SCHEDULED
+    attendance_status: AttendanceStatus = AttendanceStatus.SCHEDULED
+    is_complimentary: bool = False
+
     # Enriched fields
     trainer_name: str | None = None
     student_name: str | None = None
+    service_plan_name: str | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -119,3 +130,29 @@ class UpcomingAppointmentsResponse(BaseModel):
 
     appointments: list[AppointmentResponse]
     total_count: int
+
+
+class ConflictDetail(BaseModel):
+    """A single scheduling conflict."""
+
+    type: str  # "trainer_overlap", "student_overlap", "outside_availability", "buffer_too_short"
+    message: str
+    conflicting_appointment_id: UUID | None = None
+    conflicting_student_name: str | None = None
+    conflicting_time: datetime | None = None
+
+
+class ConflictCheckResponse(BaseModel):
+    """Response from conflict check endpoint."""
+
+    has_conflicts: bool
+    conflicts: list[ConflictDetail] = []
+    warnings: list[ConflictDetail] = []
+
+
+class AutoGenerateScheduleRequest(BaseModel):
+    """Request to auto-generate appointments from a service plan."""
+
+    service_plan_id: UUID
+    weeks_ahead: int = Field(default=4, ge=1, le=12)
+    auto_confirm: bool = False  # If True, appointments are created as CONFIRMED

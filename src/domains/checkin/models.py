@@ -130,6 +130,20 @@ class CheckIn(Base, UUIDMixin):
         nullable=True,
     )
 
+    # Schedule & billing link
+    appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("appointments.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    service_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("service_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     # Relationships
     user: Mapped["User"] = relationship("User", foreign_keys=[user_id])
     gym: Mapped["Gym"] = relationship("Gym")
@@ -139,6 +153,8 @@ class CheckIn(Base, UUIDMixin):
     initiated_by_user: Mapped["User | None"] = relationship(
         "User", foreign_keys=[initiated_by]
     )
+    appointment: Mapped["Appointment | None"] = relationship("Appointment", lazy="selectin")
+    service_plan: Mapped["ServicePlan | None"] = relationship("ServicePlan", lazy="selectin")
 
     @property
     def is_active(self) -> bool:
@@ -279,5 +295,7 @@ class TrainerLocation(Base, UUIDMixin):
 
 
 # Import for type hints
+from src.domains.billing.models import ServicePlan  # noqa: E402, F401
 from src.domains.organizations.models import Organization  # noqa: E402, F401
+from src.domains.schedule.models import Appointment  # noqa: E402, F401
 from src.domains.users.models import User  # noqa: E402, F401

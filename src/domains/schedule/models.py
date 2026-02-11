@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -35,6 +36,24 @@ class AppointmentType(str, enum.Enum):
     HIIT = "hiit"
     ASSESSMENT = "assessment"
     OTHER = "other"
+
+
+class SessionType(str, enum.Enum):
+    """How this session relates to the service plan."""
+
+    SCHEDULED = "scheduled"  # Regular scheduled session
+    MAKEUP = "makeup"  # Make-up for a missed session
+    EXTRA = "extra"  # Extra session beyond the plan
+    TRIAL = "trial"  # Trial/experimental session
+
+
+class AttendanceStatus(str, enum.Enum):
+    """Attendance tracking for appointments."""
+
+    SCHEDULED = "scheduled"  # Not yet happened
+    ATTENDED = "attended"  # Student was present (check-in done)
+    MISSED = "missed"  # Student didn't show up
+    LATE_CANCELLED = "late_cancelled"  # Cancelled too close to session time
 
 
 class Appointment(Base, UUIDMixin, TimestampMixin):
@@ -83,10 +102,40 @@ class Appointment(Base, UUIDMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     cancellation_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Service plan & billing link
+    service_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("service_plans.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    payment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("payments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    session_type: Mapped[SessionType] = mapped_column(
+        Enum(SessionType),
+        default=SessionType.SCHEDULED,
+        nullable=False,
+        server_default="scheduled",
+    )
+    attendance_status: Mapped[AttendanceStatus] = mapped_column(
+        Enum(AttendanceStatus),
+        default=AttendanceStatus.SCHEDULED,
+        nullable=False,
+        server_default="scheduled",
+    )
+    is_complimentary: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+
     # Relationships
     trainer = relationship("User", foreign_keys=[trainer_id], lazy="selectin")
     student = relationship("User", foreign_keys=[student_id], lazy="selectin")
     organization = relationship("Organization", lazy="selectin")
+    service_plan = relationship("ServicePlan", lazy="selectin")
+    payment = relationship("Payment", lazy="selectin")
 
 
 class TrainerAvailability(Base, UUIDMixin, TimestampMixin):
