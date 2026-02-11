@@ -3,8 +3,10 @@ from datetime import date, datetime, timezone
 from typing import Annotated
 from uuid import UUID
 
+import json
+
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from sqlalchemy import and_, extract, func, select
+from sqlalchemy import and_, extract, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -23,6 +25,7 @@ from .schemas import (
     BillingSummaryResponse,
     ConsumeSessionRequest,
     ConsumeSessionResponse,
+    GeneratePaymentsResponse,
     MarkPaidRequest,
     MonthlyRevenueResponse,
     PaymentCreate,
@@ -760,6 +763,148 @@ async def get_revenue_history(
         months=months,
         total_cents=total,
     )
+
+
+# --- Auto-generate payments + Student confirm ---
+
+
+@router.post("/generate-monthly-payments", response_model=GeneratePaymentsResponse)
+async def generate_monthly_payments(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> GeneratePaymentsResponse:
+    """Auto-mark overdue payments and generate monthly charges from recurring service plans."""
+    today = date.today()
+
+    # 1. Auto-mark overdue: pending payments with due_date < today
+    overdue_stmt = (
+        update(Payment)
+        .where(
+            Payment.payee_id == current_user.id,
+            Payment.status == PaymentStatus.PENDING,
+            Payment.due_date < today,
+        )
+        .values(status=PaymentStatus.OVERDUE)
+    )
+    overdue_result = await db.execute(overdue_stmt)
+    overdue_count = overdue_result.rowcount
+
+    # 2. Fetch active recurring service plans for this trainer
+    plans_query = select(ServicePlan).where(
+        ServicePlan.trainer_id == current_user.id,
+        ServicePlan.plan_type == ServicePlanType.RECURRING,
+        ServicePlan.is_active == True,  # noqa: E712
+    )
+    plans_result = await db.execute(plans_query)
+    plans = list(plans_result.scalars().all())
+
+    generated = 0
+    for plan in plans:
+        billing_day = plan.billing_day or 1
+        # Calculate due date for current month
+        try:
+            due_date = date(today.year, today.month, billing_day)
+        except ValueError:
+            # Handle months with fewer days (e.g., billing_day=31 in Feb)
+            import calendar
+            last_day = calendar.monthrange(today.year, today.month)[1]
+            due_date = date(today.year, today.month, min(billing_day, last_day))
+
+        # Check if payment already exists for this plan + month
+        existing_query = select(func.count(Payment.id)).where(
+            Payment.payee_id == current_user.id,
+            Payment.payer_id == plan.student_id,
+            Payment.service_plan_id == plan.id,
+            extract("year", Payment.due_date) == today.year,
+            extract("month", Payment.due_date) == today.month,
+        )
+        existing_result = await db.execute(existing_query)
+        if (existing_result.scalar() or 0) > 0:
+            continue
+
+        # Create payment
+        month_str = f"{today.month:02d}/{today.year}"
+        payment = Payment(
+            payer_id=plan.student_id,
+            payee_id=current_user.id,
+            organization_id=plan.organization_id,
+            payment_type="monthly_fee",
+            description=f"{plan.name} - {month_str}",
+            amount_cents=plan.amount_cents,
+            currency=plan.currency,
+            due_date=due_date,
+            status=PaymentStatus.PENDING,
+            is_recurring=True,
+            recurrence_type=plan.recurrence_type,
+            service_plan_id=plan.id,
+        )
+        db.add(payment)
+        generated += 1
+
+    await db.commit()
+
+    month_label = f"{today.month:02d}/{today.year}"
+    return GeneratePaymentsResponse(
+        generated=generated,
+        overdue_updated=overdue_count,
+        month=month_label,
+    )
+
+
+@router.post("/payments/{payment_id}/student-confirm", status_code=status.HTTP_200_OK)
+async def student_confirm_payment(
+    payment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Student signals they've paid. Creates notification for trainer."""
+    from src.domains.notifications.router import create_notification
+    from src.domains.notifications.models import NotificationType, NotificationPriority
+    from src.domains.notifications.schemas import NotificationCreate
+
+    payment = await db.get(Payment, payment_id)
+
+    if not payment:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Payment not found",
+        )
+
+    if payment.payer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the payer can confirm this payment",
+        )
+
+    if payment.status not in (PaymentStatus.PENDING, PaymentStatus.OVERDUE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Payment is not in a confirmable state",
+        )
+
+    # Create notification for the trainer (payee)
+    amount_formatted = f"R$ {payment.amount_cents / 100:.2f}"
+    await create_notification(
+        db,
+        NotificationCreate(
+            user_id=payment.payee_id,
+            notification_type=NotificationType.PAYMENT_RECEIVED,
+            priority=NotificationPriority.HIGH,
+            title="Confirmação de pagamento",
+            body=f"{current_user.name} sinalizou que pagou {amount_formatted}",
+            icon="credit-card",
+            action_type="navigate",
+            action_data=json.dumps({"route": f"/billing/payments/{payment_id}"}),
+            reference_type="payment",
+            reference_id=payment_id,
+            sender_id=current_user.id,
+            organization_id=payment.organization_id,
+        ),
+    )
+
+    await db.commit()
+
+    return {"status": "confirmed", "payment_id": str(payment_id)}
 
 
 # --- Service Plans ---

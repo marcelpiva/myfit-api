@@ -294,3 +294,11 @@ class ConsumeSessionResponse(BaseModel):
     total_sessions: int
     plan_id: UUID
     plan_name: str
+
+
+class GeneratePaymentsResponse(BaseModel):
+    """Response for monthly payment generation."""
+
+    generated: int
+    overdue_updated: int
+    month: str
