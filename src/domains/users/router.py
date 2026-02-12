@@ -827,6 +827,13 @@ async def get_student_dashboard(
             "endurance": "Resistência",
             "functional": "Funcional",
             "general_fitness": "Condicionamento",
+            # Flutter onboarding enum values
+            "gainMuscle": "Ganhar Músculo",
+            "loseWeight": "Perder Peso",
+            "improveEndurance": "Melhorar Condicionamento",
+            "maintainHealth": "Manter Saúde",
+            "flexibility": "Flexibilidade",
+            "other": "Outro",
         }
         goal_icons = {
             "hypertrophy": "💪",
@@ -835,6 +842,13 @@ async def get_student_dashboard(
             "endurance": "🏃",
             "functional": "⚡",
             "general_fitness": "🎯",
+            # Flutter onboarding enum values
+            "gainMuscle": "💪",
+            "loseWeight": "🔥",
+            "improveEndurance": "🏃",
+            "maintainHealth": "❤️",
+            "flexibility": "🧘",
+            "other": "🎯",
         }
         label = goal_labels.get(current_user.fitness_goal, current_user.fitness_goal)
         icon = goal_icons.get(current_user.fitness_goal, "🎯")
