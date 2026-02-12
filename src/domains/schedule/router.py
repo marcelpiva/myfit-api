@@ -34,6 +34,7 @@ from .schemas import (
     AvailableSlotsResponse,
     ConflictCheckResponse,
     ConflictDetail,
+    DuplicateWeekRequest,
     RecurringAppointmentCreate,
     StudentBookSessionRequest,
     TrainerAvailabilityCreate,
@@ -890,6 +891,100 @@ async def auto_generate_schedule(
         appointments_created = list(result.scalars().all())
 
     return [_appointment_to_response(a) for a in appointments_created]
+
+
+# --- Duplicate week ---
+
+
+@router.post("/duplicate-week")
+async def duplicate_week(
+    request: DuplicateWeekRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Duplicate all non-cancelled appointments from one week to another."""
+    source_start = datetime.combine(request.source_week_start, datetime.min.time())
+    source_end = datetime.combine(request.source_week_start + timedelta(days=6), datetime.max.time())
+
+    # Fetch all non-cancelled appointments in the source week for this trainer
+    source_query = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.trainer_id == current_user.id,
+                Appointment.status != AppointmentStatus.CANCELLED,
+                Appointment.date_time >= source_start,
+                Appointment.date_time <= source_end,
+            )
+        )
+        .order_by(Appointment.date_time)
+    )
+    result = await db.execute(source_query)
+    source_appointments = list(result.scalars().all())
+
+    total_source = len(source_appointments)
+    day_offset = (request.target_week_start - request.source_week_start).days
+
+    created = 0
+    skipped = 0
+
+    for apt in source_appointments:
+        target_datetime = apt.date_time + timedelta(days=day_offset)
+
+        # Conflict check (unless skip_conflicts is True)
+        if not request.skip_conflicts:
+            target_end = target_datetime + timedelta(minutes=apt.duration_minutes)
+            # Check trainer overlap in target slot
+            conflict_query = (
+                select(Appointment)
+                .where(
+                    and_(
+                        Appointment.trainer_id == current_user.id,
+                        Appointment.status.in_([AppointmentStatus.PENDING, AppointmentStatus.CONFIRMED]),
+                        Appointment.date_time.between(
+                            target_datetime - timedelta(minutes=240),
+                            target_end,
+                        ),
+                    )
+                )
+            )
+            conflict_result = await db.execute(conflict_query)
+            existing = list(conflict_result.scalars().all())
+
+            has_conflict = False
+            for ex in existing:
+                ex_end = ex.date_time + timedelta(minutes=ex.duration_minutes)
+                if ex.date_time < target_end and ex_end > target_datetime:
+                    has_conflict = True
+                    break
+
+            if has_conflict:
+                skipped += 1
+                continue
+
+        new_apt = Appointment(
+            trainer_id=current_user.id,
+            student_id=apt.student_id,
+            organization_id=apt.organization_id,
+            date_time=target_datetime,
+            duration_minutes=apt.duration_minutes,
+            workout_type=apt.workout_type,
+            notes=apt.notes,
+            status=AppointmentStatus.PENDING,
+            session_type=SessionType.SCHEDULED,
+            service_plan_id=apt.service_plan_id,
+            is_complimentary=apt.is_complimentary,
+        )
+        db.add(new_apt)
+        created += 1
+
+    await db.commit()
+
+    return {
+        "created": created,
+        "skipped": skipped,
+        "total_source": total_source,
+    }
 
 
 # --- Self-service booking endpoints ---

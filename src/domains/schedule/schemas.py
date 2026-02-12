@@ -247,3 +247,11 @@ class AttendanceUpdate(BaseModel):
     attendance_status: AttendanceStatus
     grant_makeup: bool = False
     notes: str | None = None
+
+
+class DuplicateWeekRequest(BaseModel):
+    """Request to duplicate a week of appointments to another week."""
+
+    source_week_start: date
+    target_week_start: date
+    skip_conflicts: bool = False

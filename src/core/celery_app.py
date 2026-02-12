@@ -107,6 +107,12 @@ celery_app.conf.beat_schedule = {
         "task": "src.tasks.notifications.mark_missed_appointments",
         "schedule": crontab(minute=0, hour=23),
     },
+
+    # Send appointment reminders (24h + 1h) - every hour at :15
+    "send-appointment-reminders-hourly": {
+        "task": "src.tasks.notifications.send_appointment_reminders",
+        "schedule": crontab(minute=15),
+    },
 }
 
 

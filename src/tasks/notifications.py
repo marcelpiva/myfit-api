@@ -670,6 +670,291 @@ async def _send_notification_async_impl(user_id: str, notification_type: str, ti
 
 
 @celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
+def send_appointment_reminders(self):
+    """Send reminders for upcoming appointments.
+
+    Sends two types of reminders:
+    - 24h before: "Sessão amanhã" notification
+    - 1h before: "Sessão em breve!" notification
+
+    Both trainer and student receive notifications.
+    Respects user notification preferences.
+
+    Runs every hour at :15.
+    """
+    logger.info("Starting appointment reminders check")
+    return run_async(_send_appointment_reminders_async())
+
+
+async def _send_appointment_reminders_async():
+    """Async implementation of appointment reminders."""
+    from sqlalchemy import select, and_
+    from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession
+    from sqlalchemy.orm import sessionmaker
+    import os
+    from zoneinfo import ZoneInfo
+
+    from src.domains.schedule.models import (
+        Appointment,
+        AppointmentStatus,
+    )
+    from src.domains.users.models import User
+    from src.domains.notifications.models import NotificationType
+    from src.domains.notifications.schemas import NotificationCreate
+    from src.domains.notifications.router import (
+        create_notification,
+        should_send_notification,
+        notify_appointment_reminder,
+    )
+    from src.domains.notifications.push_service import send_push_notification
+
+    database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./myfit.db")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif database_url.startswith("postgresql://") and "+asyncpg" not in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    engine = create_async_engine(database_url)
+    async_session = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+    sp_tz = ZoneInfo("America/Sao_Paulo")
+    sent_24h = 0
+    sent_1h = 0
+    skipped = 0
+
+    async with async_session() as db:
+        try:
+            now = datetime.now(timezone.utc)
+
+            # --- 24h reminders ---
+            window_24h_start = now + timedelta(hours=23)
+            window_24h_end = now + timedelta(hours=25)
+
+            query_24h = (
+                select(Appointment)
+                .where(
+                    and_(
+                        Appointment.date_time >= window_24h_start,
+                        Appointment.date_time <= window_24h_end,
+                        Appointment.status.in_([
+                            AppointmentStatus.PENDING,
+                            AppointmentStatus.CONFIRMED,
+                        ]),
+                        Appointment.reminder_24h_sent == False,
+                    )
+                )
+            )
+            result = await db.execute(query_24h)
+            appointments_24h = result.scalars().all()
+
+            for appt in appointments_24h:
+                try:
+                    # Format time in São Paulo timezone
+                    appt_sp = appt.date_time.astimezone(sp_tz)
+                    time_str = appt_sp.strftime("%H:%M")
+
+                    # Get names
+                    trainer_query = select(User.name).where(User.id == appt.trainer_id)
+                    result = await db.execute(trainer_query)
+                    trainer_name = result.scalar() or "Personal"
+
+                    student_query = select(User.name).where(User.id == appt.student_id)
+                    result = await db.execute(student_query)
+                    student_name = result.scalar() or "Aluno"
+
+                    # Notify student
+                    should_send_student = await should_send_notification(
+                        db=db,
+                        user_id=appt.student_id,
+                        notification_type=NotificationType.APPOINTMENT_REMINDER,
+                        channel="push",
+                        respect_dnd=True,
+                    )
+
+                    if should_send_student:
+                        await notify_appointment_reminder(
+                            db=db,
+                            user_id=appt.student_id,
+                            appointment_id=appt.id,
+                            trainer_name=trainer_name,
+                            appointment_time=f"amanhã às {time_str}",
+                            organization_id=appt.organization_id,
+                        )
+
+                        await send_push_notification(
+                            db=db,
+                            user_id=appt.student_id,
+                            title="Lembrete: sessão amanhã",
+                            body=f"Sessão com {trainer_name} amanhã às {time_str}",
+                            data={
+                                "type": "appointment_reminder_24h",
+                                "appointment_id": str(appt.id),
+                            },
+                        )
+                    else:
+                        skipped += 1
+
+                    # Notify trainer
+                    should_send_trainer = await should_send_notification(
+                        db=db,
+                        user_id=appt.trainer_id,
+                        notification_type=NotificationType.APPOINTMENT_REMINDER,
+                        channel="push",
+                        respect_dnd=True,
+                    )
+
+                    if should_send_trainer:
+                        await notify_appointment_reminder(
+                            db=db,
+                            user_id=appt.trainer_id,
+                            appointment_id=appt.id,
+                            trainer_name=student_name,
+                            appointment_time=f"amanhã às {time_str}",
+                            organization_id=appt.organization_id,
+                        )
+
+                        await send_push_notification(
+                            db=db,
+                            user_id=appt.trainer_id,
+                            title="Lembrete: sessão amanhã",
+                            body=f"Sessão com {student_name} amanhã às {time_str}",
+                            data={
+                                "type": "appointment_reminder_24h",
+                                "appointment_id": str(appt.id),
+                            },
+                        )
+                    else:
+                        skipped += 1
+
+                    # Mark as sent
+                    appt.reminder_24h_sent = True
+                    sent_24h += 1
+
+                except Exception as e:
+                    logger.error(f"Error sending 24h reminder for appointment {appt.id}: {e}")
+                    continue
+
+            # --- 1h reminders ---
+            window_1h_start = now + timedelta(minutes=30)
+            window_1h_end = now + timedelta(minutes=90)
+
+            query_1h = (
+                select(Appointment)
+                .where(
+                    and_(
+                        Appointment.date_time >= window_1h_start,
+                        Appointment.date_time <= window_1h_end,
+                        Appointment.status.in_([
+                            AppointmentStatus.PENDING,
+                            AppointmentStatus.CONFIRMED,
+                        ]),
+                        Appointment.reminder_1h_sent == False,
+                    )
+                )
+            )
+            result = await db.execute(query_1h)
+            appointments_1h = result.scalars().all()
+
+            for appt in appointments_1h:
+                try:
+                    # Format time in São Paulo timezone
+                    appt_sp = appt.date_time.astimezone(sp_tz)
+                    time_str = appt_sp.strftime("%H:%M")
+                    minutes_until = int((appt.date_time - now).total_seconds() / 60)
+
+                    # Get names
+                    trainer_query = select(User.name).where(User.id == appt.trainer_id)
+                    result = await db.execute(trainer_query)
+                    trainer_name = result.scalar() or "Personal"
+
+                    student_query = select(User.name).where(User.id == appt.student_id)
+                    result = await db.execute(student_query)
+                    student_name = result.scalar() or "Aluno"
+
+                    # Notify student
+                    should_send_student = await should_send_notification(
+                        db=db,
+                        user_id=appt.student_id,
+                        notification_type=NotificationType.APPOINTMENT_REMINDER,
+                        channel="push",
+                        respect_dnd=False,  # Don't respect DND for imminent sessions
+                    )
+
+                    if should_send_student:
+                        await notify_appointment_reminder(
+                            db=db,
+                            user_id=appt.student_id,
+                            appointment_id=appt.id,
+                            trainer_name=trainer_name,
+                            appointment_time=f"em {minutes_until}min às {time_str}",
+                            organization_id=appt.organization_id,
+                        )
+
+                        await send_push_notification(
+                            db=db,
+                            user_id=appt.student_id,
+                            title="Sessão em breve!",
+                            body=f"Sessão com {trainer_name} em {minutes_until}min às {time_str}",
+                            data={
+                                "type": "appointment_reminder_1h",
+                                "appointment_id": str(appt.id),
+                            },
+                        )
+                    else:
+                        skipped += 1
+
+                    # Notify trainer
+                    should_send_trainer = await should_send_notification(
+                        db=db,
+                        user_id=appt.trainer_id,
+                        notification_type=NotificationType.APPOINTMENT_REMINDER,
+                        channel="push",
+                        respect_dnd=False,  # Don't respect DND for imminent sessions
+                    )
+
+                    if should_send_trainer:
+                        await notify_appointment_reminder(
+                            db=db,
+                            user_id=appt.trainer_id,
+                            appointment_id=appt.id,
+                            trainer_name=student_name,
+                            appointment_time=f"em {minutes_until}min às {time_str}",
+                            organization_id=appt.organization_id,
+                        )
+
+                        await send_push_notification(
+                            db=db,
+                            user_id=appt.trainer_id,
+                            title="Sessão em breve!",
+                            body=f"Sessão com {student_name} em {minutes_until}min às {time_str}",
+                            data={
+                                "type": "appointment_reminder_1h",
+                                "appointment_id": str(appt.id),
+                            },
+                        )
+                    else:
+                        skipped += 1
+
+                    # Mark as sent
+                    appt.reminder_1h_sent = True
+                    sent_1h += 1
+
+                except Exception as e:
+                    logger.error(f"Error sending 1h reminder for appointment {appt.id}: {e}")
+                    continue
+
+            await db.commit()
+
+        except Exception as e:
+            logger.error(f"Error in appointment reminders: {e}")
+            await db.rollback()
+            raise
+
+    logger.info(f"Appointment reminders: 24h={sent_24h}, 1h={sent_1h}, skipped={skipped}")
+    return {"sent_24h": sent_24h, "sent_1h": sent_1h, "skipped": skipped}
+
+
+@celery_app.task(bind=True, max_retries=3, default_retry_delay=60)
 def mark_missed_appointments(self):
     """Mark no-show appointments as MISSED.
 

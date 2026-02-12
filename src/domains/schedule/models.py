@@ -132,6 +132,14 @@ class Appointment(Base, UUIDMixin, TimestampMixin):
         Boolean, default=False, nullable=False, server_default="false",
     )
 
+    # Reminder tracking
+    reminder_24h_sent: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+    reminder_1h_sent: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+
     # Relationships
     trainer = relationship("User", foreign_keys=[trainer_id], lazy="selectin")
     student = relationship("User", foreign_keys=[student_id], lazy="selectin")
