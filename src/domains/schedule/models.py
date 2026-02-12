@@ -342,5 +342,5 @@ class SessionEvaluation(Base, UUIDMixin, TimestampMixin):
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Relationships
-    appointment = relationship("Appointment", lazy="selectin")
+    appointment = relationship("Appointment", lazy="selectin", overlaps="evaluations")
     evaluator = relationship("User", lazy="selectin")
