@@ -51,6 +51,7 @@ async def run_pending_migrations():
         ("add_late_cancel_policy", "src.migrations.add_late_cancel_policy"),
         ("add_group_sessions", "src.migrations.add_group_sessions"),
         ("add_session_evaluations", "src.migrations.add_session_evaluations"),
+        ("add_waitlist_templates", "src.migrations.add_waitlist_templates"),
     ]
 
     for name, module_path in migrations:
@@ -118,9 +119,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         print(f"Warning: Could not seed exercises: {type(e).__name__}: {e}")
 
+    # Start background scheduler
+    from src.core.scheduler import scheduler
+    try:
+        await scheduler.start()
+        print("Background scheduler started")
+    except Exception as e:
+        print(f"Warning: Could not start scheduler: {type(e).__name__}: {e}")
+
     yield
     # Shutdown
     print(f"Shutting down {settings.APP_NAME}...")
+    # Stop background scheduler
+    try:
+        await scheduler.stop()
+        print("Background scheduler stopped")
+    except Exception as e:
+        print(f"Warning: Could not stop scheduler: {type(e).__name__}: {e}")
 
 
 def create_app() -> FastAPI:

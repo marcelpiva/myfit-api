@@ -113,7 +113,10 @@ from src.domains.schedule.models import (
     DifficultyLevel,
     EvaluatorRole,
     SessionEvaluation,
+    SessionTemplate,
     SessionType,
+    WaitlistEntry,
+    WaitlistStatus,
 )
 
 # Trainers domain
@@ -234,7 +237,10 @@ __all__ = [
     "DifficultyLevel",
     "EvaluatorRole",
     "SessionEvaluation",
+    "SessionTemplate",
     "SessionType",
+    "WaitlistEntry",
+    "WaitlistStatus",
     # Trainers
     "StudentNote",
     # Chat

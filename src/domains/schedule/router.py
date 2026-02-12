@@ -17,14 +17,18 @@ from .models import (
     Appointment,
     AppointmentParticipant,
     AppointmentStatus,
+    AppointmentType,
     AttendanceStatus,
     DifficultyLevel,
     EvaluatorRole,
     SessionEvaluation,
+    SessionTemplate,
     SessionType,
     TrainerAvailability,
     TrainerBlockedSlot,
     TrainerSettings,
+    WaitlistEntry,
+    WaitlistStatus,
 )
 from .schemas import (
     AddParticipantsRequest,
@@ -34,6 +38,7 @@ from .schemas import (
     AppointmentReschedule,
     AppointmentResponse,
     AppointmentUpdate,
+    ApplyTemplateRequest,
     AttendanceUpdate,
     AutoGenerateScheduleRequest,
     AvailableSlotResponse,
@@ -50,6 +55,9 @@ from .schemas import (
     ScheduleAnalyticsResponse,
     SessionEvaluationCreate,
     SessionEvaluationResponse,
+    SessionTemplateCreate,
+    SessionTemplateResponse,
+    SessionTemplateUpdate,
     StudentAnalytics,
     StudentBookSessionRequest,
     StudentReliability,
@@ -63,7 +71,12 @@ from .schemas import (
     TrainerSettingsResponse,
     TrainerSettingsUpdate,
     UpcomingAppointmentsResponse,
+    WaitlistEntryCreate,
+    WaitlistEntryResponse,
+    WaitlistOfferRequest,
 )
+
+from src.domains.notifications.push_service import send_push_notification
 
 router = APIRouter(prefix="/schedule", tags=["schedule"])
 
@@ -739,6 +752,17 @@ async def cancel_appointment(
     await db.commit()
     await db.refresh(appointment)
 
+    # Send push notification to student
+    try:
+        await send_push_notification(
+            db, appointment.student_id,
+            "Sessão Cancelada",
+            f"Sua sessão de {appointment.date_time.strftime('%d/%m às %H:%M')} foi cancelada.",
+            data={"type": "APPOINTMENT_CANCELLED", "appointment_id": str(appointment.id)},
+        )
+    except Exception:
+        pass  # Don't fail the cancel if notification fails
+
     return _appointment_to_response(appointment)
 
 
@@ -772,6 +796,19 @@ async def confirm_appointment(
 
     await db.commit()
     await db.refresh(appointment)
+
+    # Send push notification about confirmation
+    try:
+        # Notify the other party (if trainer confirmed, notify student and vice versa)
+        notify_user_id = appointment.student_id if current_user.id == appointment.trainer_id else appointment.trainer_id
+        await send_push_notification(
+            db, notify_user_id,
+            "Sessão Confirmada",
+            f"Sessão de {appointment.date_time.strftime('%d/%m às %H:%M')} foi confirmada.",
+            data={"type": "APPOINTMENT_CONFIRMED", "appointment_id": str(appointment.id)},
+        )
+    except Exception:
+        pass  # Don't fail the confirm if notification fails
 
     return _appointment_to_response(appointment)
 
@@ -1822,6 +1859,17 @@ async def update_attendance(
     except Exception:
         pass
 
+    # Send push notification for attendance update
+    try:
+        await send_push_notification(
+            db, appointment.student_id,
+            label,
+            f"{label}{makeup_note} para sessão de {appointment.date_time.strftime('%d/%m %H:%M')}",
+            data={"type": "ATTENDANCE_MARKED", "appointment_id": str(appointment.id)},
+        )
+    except Exception:
+        pass  # Don't fail the attendance update if notification fails
+
     return _appointment_to_response(appointment)
 
 
@@ -2367,3 +2415,514 @@ async def export_schedule_calendar(
             "Content-Disposition": f'attachment; filename="agenda-{from_date}-{to_date}.ics"',
         },
     )
+
+
+# --- Waitlist ---
+
+
+@router.post("/waitlist", response_model=WaitlistEntryResponse, status_code=status.HTTP_201_CREATED)
+async def create_waitlist_entry(
+    request: WaitlistEntryCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WaitlistEntryResponse:
+    """Student creates a waitlist entry for a trainer."""
+    # Verify the trainer exists
+    trainer = await db.get(User, request.trainer_id)
+    if not trainer:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Treinador não encontrado",
+        )
+
+    entry = WaitlistEntry(
+        student_id=current_user.id,
+        trainer_id=request.trainer_id,
+        preferred_day_of_week=request.preferred_day_of_week,
+        preferred_time_start=request.preferred_time_start,
+        preferred_time_end=request.preferred_time_end,
+        notes=request.notes,
+        status=WaitlistStatus.WAITING,
+        organization_id=request.organization_id,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+
+    # Notify trainer about new waitlist entry
+    try:
+        student_name = current_user.name or "Aluno"
+        await send_push_notification(
+            db, request.trainer_id,
+            "Nova entrada na lista de espera",
+            f"{student_name} está na lista de espera para horário.",
+            data={"type": "WAITLIST_NEW", "waitlist_id": str(entry.id)},
+        )
+    except Exception:
+        pass
+
+    return WaitlistEntryResponse(
+        id=entry.id,
+        student_id=entry.student_id,
+        student_name=current_user.name,
+        trainer_id=entry.trainer_id,
+        trainer_name=trainer.name if trainer else None,
+        preferred_day_of_week=entry.preferred_day_of_week,
+        preferred_time_start=entry.preferred_time_start,
+        preferred_time_end=entry.preferred_time_end,
+        notes=entry.notes,
+        status=entry.status.value if hasattr(entry.status, "value") else str(entry.status),
+        offered_appointment_id=entry.offered_appointment_id,
+        organization_id=entry.organization_id,
+        created_at=entry.created_at,
+    )
+
+
+@router.get("/waitlist", response_model=list[WaitlistEntryResponse])
+async def list_waitlist(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    day_of_week: Annotated[int | None, Query(ge=0, le=6)] = None,
+    waitlist_status: Annotated[str | None, Query(alias="status")] = None,
+) -> list[WaitlistEntryResponse]:
+    """Trainer lists their waitlist entries with optional filters."""
+    filters = [WaitlistEntry.trainer_id == current_user.id]
+
+    if day_of_week is not None:
+        filters.append(WaitlistEntry.preferred_day_of_week == day_of_week)
+    if waitlist_status:
+        try:
+            ws = WaitlistStatus(waitlist_status)
+            filters.append(WaitlistEntry.status == ws)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Status inválido: {waitlist_status}. Use: waiting, offered, accepted, expired",
+            )
+
+    query = select(WaitlistEntry).where(and_(*filters)).order_by(WaitlistEntry.created_at.desc())
+    result = await db.execute(query)
+    entries = list(result.scalars().all())
+
+    return [
+        WaitlistEntryResponse(
+            id=e.id,
+            student_id=e.student_id,
+            student_name=e.student.name if e.student else None,
+            trainer_id=e.trainer_id,
+            trainer_name=e.trainer.name if e.trainer else None,
+            preferred_day_of_week=e.preferred_day_of_week,
+            preferred_time_start=e.preferred_time_start,
+            preferred_time_end=e.preferred_time_end,
+            notes=e.notes,
+            status=e.status.value if hasattr(e.status, "value") else str(e.status),
+            offered_appointment_id=e.offered_appointment_id,
+            organization_id=e.organization_id,
+            created_at=e.created_at,
+        )
+        for e in entries
+    ]
+
+
+@router.delete("/waitlist/{waitlist_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_waitlist_entry(
+    waitlist_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Remove a waitlist entry."""
+    entry = await db.get(WaitlistEntry, waitlist_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entrada na lista de espera não encontrada",
+        )
+
+    # Both student and trainer can remove
+    if entry.student_id != current_user.id and entry.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Acesso negado",
+        )
+
+    await db.delete(entry)
+    await db.commit()
+
+
+@router.post("/waitlist/{waitlist_id}/offer", response_model=WaitlistEntryResponse)
+async def offer_waitlist_slot(
+    waitlist_id: UUID,
+    request: WaitlistOfferRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WaitlistEntryResponse:
+    """Trainer offers a slot to a waitlist entry (creates pending appointment)."""
+    entry = await db.get(WaitlistEntry, waitlist_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entrada na lista de espera não encontrada",
+        )
+
+    if entry.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o treinador pode oferecer horários",
+        )
+
+    if entry.status != WaitlistStatus.WAITING:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta entrada não está em estado de espera",
+        )
+
+    # Parse workout type if provided
+    workout_type_value = None
+    if request.workout_type:
+        try:
+            workout_type_value = AppointmentType(request.workout_type)
+        except ValueError:
+            pass
+
+    # Create a pending appointment for the offer
+    appointment = Appointment(
+        trainer_id=current_user.id,
+        student_id=entry.student_id,
+        organization_id=entry.organization_id,
+        date_time=request.date_time,
+        duration_minutes=request.duration_minutes,
+        workout_type=workout_type_value,
+        status=AppointmentStatus.PENDING,
+        notes=f"Oferta da lista de espera",
+    )
+    db.add(appointment)
+    await db.flush()
+
+    # Update waitlist entry
+    entry.status = WaitlistStatus.OFFERED
+    entry.offered_appointment_id = appointment.id
+
+    await db.commit()
+    await db.refresh(entry)
+
+    # Notify student about the offer
+    try:
+        dt_str = request.date_time.strftime("%d/%m às %H:%M")
+        await send_push_notification(
+            db, entry.student_id,
+            "Horário Disponível!",
+            f"Um horário foi oferecido para você: {dt_str}. Aceite agora!",
+            data={"type": "WAITLIST_OFFER", "waitlist_id": str(entry.id), "appointment_id": str(appointment.id)},
+        )
+    except Exception:
+        pass
+
+    return WaitlistEntryResponse(
+        id=entry.id,
+        student_id=entry.student_id,
+        student_name=entry.student.name if entry.student else None,
+        trainer_id=entry.trainer_id,
+        trainer_name=entry.trainer.name if entry.trainer else None,
+        preferred_day_of_week=entry.preferred_day_of_week,
+        preferred_time_start=entry.preferred_time_start,
+        preferred_time_end=entry.preferred_time_end,
+        notes=entry.notes,
+        status=entry.status.value if hasattr(entry.status, "value") else str(entry.status),
+        offered_appointment_id=entry.offered_appointment_id,
+        organization_id=entry.organization_id,
+        created_at=entry.created_at,
+    )
+
+
+@router.patch("/waitlist/{waitlist_id}/accept", response_model=WaitlistEntryResponse)
+async def accept_waitlist_offer(
+    waitlist_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> WaitlistEntryResponse:
+    """Student accepts a waitlist offer (confirms the appointment)."""
+    entry = await db.get(WaitlistEntry, waitlist_id)
+    if not entry:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Entrada na lista de espera não encontrada",
+        )
+
+    if entry.student_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o aluno pode aceitar a oferta",
+        )
+
+    if entry.status != WaitlistStatus.OFFERED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta entrada não tem uma oferta pendente",
+        )
+
+    if not entry.offered_appointment_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Nenhuma sessão vinculada a esta oferta",
+        )
+
+    # Confirm the appointment
+    appointment = await db.get(Appointment, entry.offered_appointment_id)
+    if appointment:
+        appointment.status = AppointmentStatus.CONFIRMED
+
+    # Update waitlist entry
+    entry.status = WaitlistStatus.ACCEPTED
+
+    await db.commit()
+    await db.refresh(entry)
+
+    # Notify trainer that offer was accepted
+    try:
+        student_name = current_user.name or "Aluno"
+        await send_push_notification(
+            db, entry.trainer_id,
+            "Oferta Aceita",
+            f"{student_name} aceitou o horário oferecido da lista de espera.",
+            data={"type": "WAITLIST_ACCEPTED", "waitlist_id": str(entry.id)},
+        )
+    except Exception:
+        pass
+
+    return WaitlistEntryResponse(
+        id=entry.id,
+        student_id=entry.student_id,
+        student_name=entry.student.name if entry.student else None,
+        trainer_id=entry.trainer_id,
+        trainer_name=entry.trainer.name if entry.trainer else None,
+        preferred_day_of_week=entry.preferred_day_of_week,
+        preferred_time_start=entry.preferred_time_start,
+        preferred_time_end=entry.preferred_time_end,
+        notes=entry.notes,
+        status=entry.status.value if hasattr(entry.status, "value") else str(entry.status),
+        offered_appointment_id=entry.offered_appointment_id,
+        organization_id=entry.organization_id,
+        created_at=entry.created_at,
+    )
+
+
+# --- Session Templates ---
+
+
+@router.post("/templates", response_model=SessionTemplateResponse, status_code=status.HTTP_201_CREATED)
+async def create_template(
+    request: SessionTemplateCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionTemplateResponse:
+    """Trainer creates a reusable session template."""
+    # Parse workout type if provided
+    workout_type_value = None
+    if request.workout_type:
+        try:
+            workout_type_value = AppointmentType(request.workout_type)
+        except ValueError:
+            pass
+
+    template = SessionTemplate(
+        trainer_id=current_user.id,
+        name=request.name,
+        day_of_week=request.day_of_week,
+        start_time=request.start_time,
+        duration_minutes=request.duration_minutes,
+        workout_type=workout_type_value,
+        is_group=request.is_group,
+        max_participants=request.max_participants,
+        notes=request.notes,
+        organization_id=request.organization_id,
+    )
+    db.add(template)
+    await db.commit()
+    await db.refresh(template)
+
+    return SessionTemplateResponse(
+        id=template.id,
+        trainer_id=template.trainer_id,
+        name=template.name,
+        day_of_week=template.day_of_week,
+        start_time=template.start_time,
+        duration_minutes=template.duration_minutes,
+        workout_type=template.workout_type.value if template.workout_type else None,
+        is_group=template.is_group,
+        max_participants=template.max_participants,
+        notes=template.notes,
+        is_active=template.is_active,
+        organization_id=template.organization_id,
+        created_at=template.created_at,
+    )
+
+
+@router.get("/templates", response_model=list[SessionTemplateResponse])
+async def list_templates(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    active_only: Annotated[bool, Query()] = True,
+) -> list[SessionTemplateResponse]:
+    """List trainer's session templates."""
+    filters = [SessionTemplate.trainer_id == current_user.id]
+    if active_only:
+        filters.append(SessionTemplate.is_active == True)
+
+    query = select(SessionTemplate).where(and_(*filters)).order_by(SessionTemplate.day_of_week, SessionTemplate.start_time)
+    result = await db.execute(query)
+    templates = list(result.scalars().all())
+
+    return [
+        SessionTemplateResponse(
+            id=t.id,
+            trainer_id=t.trainer_id,
+            name=t.name,
+            day_of_week=t.day_of_week,
+            start_time=t.start_time,
+            duration_minutes=t.duration_minutes,
+            workout_type=t.workout_type.value if t.workout_type else None,
+            is_group=t.is_group,
+            max_participants=t.max_participants,
+            notes=t.notes,
+            is_active=t.is_active,
+            organization_id=t.organization_id,
+            created_at=t.created_at,
+        )
+        for t in templates
+    ]
+
+
+@router.put("/templates/{template_id}", response_model=SessionTemplateResponse)
+async def update_template(
+    template_id: UUID,
+    request: SessionTemplateUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionTemplateResponse:
+    """Update a session template."""
+    template = await db.get(SessionTemplate, template_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Template não encontrado",
+        )
+
+    if template.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o treinador pode editar este template",
+        )
+
+    # Update fields that were provided
+    update_data = request.model_dump(exclude_unset=True)
+    for field, value in update_data.items():
+        if field == "workout_type" and value is not None:
+            try:
+                value = AppointmentType(value)
+            except ValueError:
+                value = None
+        setattr(template, field, value)
+
+    await db.commit()
+    await db.refresh(template)
+
+    return SessionTemplateResponse(
+        id=template.id,
+        trainer_id=template.trainer_id,
+        name=template.name,
+        day_of_week=template.day_of_week,
+        start_time=template.start_time,
+        duration_minutes=template.duration_minutes,
+        workout_type=template.workout_type.value if template.workout_type else None,
+        is_group=template.is_group,
+        max_participants=template.max_participants,
+        notes=template.notes,
+        is_active=template.is_active,
+        organization_id=template.organization_id,
+        created_at=template.created_at,
+    )
+
+
+@router.delete("/templates/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_template(
+    template_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Delete a session template."""
+    template = await db.get(SessionTemplate, template_id)
+    if not template:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Template não encontrado",
+        )
+
+    if template.trainer_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Apenas o treinador pode excluir este template",
+        )
+
+    await db.delete(template)
+    await db.commit()
+
+
+@router.post("/templates/apply", response_model=list[AppointmentResponse], status_code=status.HTTP_201_CREATED)
+async def apply_templates(
+    request: ApplyTemplateRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[AppointmentResponse]:
+    """Apply templates to a specific week, creating appointments in bulk."""
+    created_appointments = []
+
+    for template_id in request.template_ids:
+        template = await db.get(SessionTemplate, template_id)
+        if not template:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Template não encontrado: {template_id}",
+            )
+
+        if template.trainer_id != current_user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Acesso negado ao template: {template_id}",
+            )
+
+        if not template.is_active:
+            continue  # Skip inactive templates
+
+        # Calculate the date_time from week_start_date + day_of_week offset + start_time
+        target_date = request.week_start_date + timedelta(days=template.day_of_week)
+        target_datetime = datetime.combine(target_date, template.start_time)
+
+        # For the apply templates endpoint, we need at least a student
+        # Since templates don't have a student, we create the appointment with
+        # trainer as both trainer and student (placeholder) - the trainer can assign students later
+        # Actually, create as trainer's own placeholder appointment
+        appointment = Appointment(
+            trainer_id=current_user.id,
+            student_id=current_user.id,  # Placeholder - trainer assigns student later
+            organization_id=template.organization_id,
+            date_time=target_datetime,
+            duration_minutes=template.duration_minutes,
+            workout_type=template.workout_type,
+            status=AppointmentStatus.CONFIRMED if request.auto_confirm else AppointmentStatus.PENDING,
+            notes=f"Criado do template: {template.name}",
+            is_group=template.is_group,
+            max_participants=template.max_participants,
+        )
+        db.add(appointment)
+        await db.flush()
+        created_appointments.append(appointment)
+
+    await db.commit()
+
+    # Refresh all appointments to load relationships
+    responses = []
+    for apt in created_appointments:
+        await db.refresh(apt)
+        responses.append(_appointment_to_response(apt, trainer_name=current_user.name))
+
+    return responses

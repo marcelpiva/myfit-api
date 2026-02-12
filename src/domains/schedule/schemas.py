@@ -405,3 +405,97 @@ class StudentReliabilityResponse(BaseModel):
     """Student reliability scores response."""
 
     students: list[StudentReliability]
+
+
+# --- Waitlist schemas ---
+
+
+class WaitlistEntryCreate(BaseModel):
+    """Schema for creating a waitlist entry."""
+    trainer_id: UUID
+    preferred_day_of_week: int | None = Field(default=None, ge=0, le=6)
+    preferred_time_start: time | None = None
+    preferred_time_end: time | None = None
+    notes: str | None = None
+    organization_id: UUID | None = None
+
+
+class WaitlistEntryResponse(BaseModel):
+    """Schema for waitlist entry response."""
+    id: UUID
+    student_id: UUID
+    student_name: str | None = None
+    trainer_id: UUID
+    trainer_name: str | None = None
+    preferred_day_of_week: int | None = None
+    preferred_time_start: time | None = None
+    preferred_time_end: time | None = None
+    notes: str | None = None
+    status: str = "waiting"
+    offered_appointment_id: UUID | None = None
+    organization_id: UUID | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WaitlistOfferRequest(BaseModel):
+    """Schema for offering a slot to a waitlist entry."""
+    date_time: datetime
+    duration_minutes: int = Field(default=60, ge=15, le=240)
+    workout_type: str | None = None
+
+
+# --- Session template schemas ---
+
+
+class SessionTemplateCreate(BaseModel):
+    """Schema for creating a session template."""
+    name: str = Field(max_length=200)
+    day_of_week: int = Field(ge=0, le=6)
+    start_time: time
+    duration_minutes: int = Field(default=60, ge=15, le=240)
+    workout_type: str | None = None
+    is_group: bool = False
+    max_participants: int | None = Field(default=None, ge=2, le=50)
+    notes: str | None = None
+    organization_id: UUID | None = None
+
+
+class SessionTemplateUpdate(BaseModel):
+    """Schema for updating a session template."""
+    name: str | None = Field(default=None, max_length=200)
+    day_of_week: int | None = Field(default=None, ge=0, le=6)
+    start_time: time | None = None
+    duration_minutes: int | None = Field(default=None, ge=15, le=240)
+    workout_type: str | None = None
+    is_group: bool | None = None
+    max_participants: int | None = None
+    notes: str | None = None
+    is_active: bool | None = None
+
+
+class SessionTemplateResponse(BaseModel):
+    """Schema for session template response."""
+    id: UUID
+    trainer_id: UUID
+    name: str
+    day_of_week: int
+    start_time: time
+    duration_minutes: int
+    workout_type: str | None = None
+    is_group: bool = False
+    max_participants: int | None = None
+    notes: str | None = None
+    is_active: bool = True
+    organization_id: UUID | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ApplyTemplateRequest(BaseModel):
+    """Schema for applying templates to a specific week."""
+    week_start_date: date
+    template_ids: list[UUID]
+    auto_confirm: bool = False

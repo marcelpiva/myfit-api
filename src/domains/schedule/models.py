@@ -344,3 +344,104 @@ class SessionEvaluation(Base, UUIDMixin, TimestampMixin):
     # Relationships
     appointment = relationship("Appointment", lazy="selectin", overlaps="evaluations")
     evaluator = relationship("User", lazy="selectin")
+
+
+class WaitlistStatus(str, enum.Enum):
+    """Status of a waitlist entry."""
+    WAITING = "waiting"
+    OFFERED = "offered"
+    ACCEPTED = "accepted"
+    EXPIRED = "expired"
+
+
+class WaitlistEntry(Base, UUIDMixin, TimestampMixin):
+    """Student waiting for a slot with a trainer."""
+
+    __tablename__ = "waitlist_entries"
+
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    preferred_day_of_week: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    preferred_time_start: Mapped[time | None] = mapped_column(
+        Time, nullable=True,
+    )
+    preferred_time_end: Mapped[time | None] = mapped_column(
+        Time, nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[WaitlistStatus] = mapped_column(
+        Enum(WaitlistStatus),
+        default=WaitlistStatus.WAITING,
+        nullable=False,
+        server_default="waiting",
+    )
+    offered_appointment_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("appointments.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Relationships
+    student = relationship("User", foreign_keys=[student_id], lazy="selectin")
+    trainer = relationship("User", foreign_keys=[trainer_id], lazy="selectin")
+    offered_appointment = relationship("Appointment", lazy="selectin")
+    organization = relationship("Organization", lazy="selectin")
+
+
+class SessionTemplate(Base, UUIDMixin, TimestampMixin):
+    """Reusable session template for quick scheduling."""
+
+    __tablename__ = "session_templates"
+
+    trainer_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    name: Mapped[str] = mapped_column(String(200), nullable=False)
+    day_of_week: Mapped[int] = mapped_column(Integer, nullable=False)
+    start_time: Mapped[time] = mapped_column(Time, nullable=False)
+    duration_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=60,
+    )
+    workout_type: Mapped[AppointmentType | None] = mapped_column(
+        Enum(AppointmentType, create_constraint=False, native_enum=False),
+        nullable=True,
+    )
+    is_group: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+    max_participants: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, default=True, nullable=False, server_default="true",
+    )
+    organization_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("organizations.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    # Relationships
+    trainer = relationship("User", lazy="selectin")
+    organization = relationship("Organization", lazy="selectin")
