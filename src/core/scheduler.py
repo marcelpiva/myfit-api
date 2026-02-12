@@ -158,7 +158,7 @@ class BackgroundScheduler:
 
         query = select(ServicePlan).where(
             and_(
-                ServicePlan.status == "active",
+                ServicePlan.is_active == True,
                 ServicePlan.plan_type == ServicePlanType.PACKAGE,
                 ServicePlan.remaining_sessions.isnot(None),
                 ServicePlan.remaining_sessions <= 2,
