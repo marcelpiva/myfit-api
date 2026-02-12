@@ -382,7 +382,7 @@ class WaitlistEntry(Base, UUIDMixin, TimestampMixin):
     )
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
     status: Mapped[WaitlistStatus] = mapped_column(
-        Enum(WaitlistStatus),
+        Enum(WaitlistStatus, create_constraint=False, native_enum=False),
         default=WaitlistStatus.WAITING,
         nullable=False,
         server_default="waiting",

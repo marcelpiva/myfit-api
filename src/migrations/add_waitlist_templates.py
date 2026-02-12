@@ -30,6 +30,9 @@ async def migrate(database_url: str) -> None:
                     await conn.commit()
                     return
 
+            # Drop stale native enum if a previous failed deploy created it
+            await conn.execute(text("DROP TYPE IF EXISTS waitliststatus CASCADE"))
+
             await conn.execute(text("""
                 CREATE TABLE IF NOT EXISTS waitlist_entries (
                     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
