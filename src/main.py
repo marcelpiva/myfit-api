@@ -47,6 +47,8 @@ async def run_pending_migrations():
         ("add_checkin_acceptance", "src.migrations.add_checkin_acceptance"),
         ("add_checkin_training_mode", "src.migrations.add_checkin_training_mode"),
         ("add_service_plans", "src.migrations.add_service_plans"),
+        ("add_appointment_reminders", "src.migrations.add_appointment_reminders"),
+        ("add_late_cancel_policy", "src.migrations.add_late_cancel_policy"),
     ]
 
     for name, module_path in migrations:
