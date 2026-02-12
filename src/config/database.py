@@ -144,6 +144,9 @@ async def _run_pending_migrations() -> None:
         ("training_mode", "check_ins", "VARCHAR(20)", None),
         # Workout session pause tracking
         ("paused_at", "workout_sessions", "TIMESTAMP WITH TIME ZONE", None),
+        # Group session fields
+        ("is_group", "appointments", "BOOLEAN", "FALSE"),
+        ("max_participants", "appointments", "INTEGER", None),
     ]
 
     # Create a separate engine for migrations to avoid connection state issues

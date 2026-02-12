@@ -106,9 +106,13 @@ from src.domains.marketplace.models import (
 # Schedule domain
 from src.domains.schedule.models import (
     Appointment,
+    AppointmentParticipant,
     AppointmentStatus,
     AppointmentType,
     AttendanceStatus,
+    DifficultyLevel,
+    EvaluatorRole,
+    SessionEvaluation,
     SessionType,
 )
 
@@ -223,10 +227,14 @@ __all__ = [
     "PayoutMethod",
     # Schedule
     "Appointment",
+    "AppointmentParticipant",
     "AppointmentStatus",
     "AppointmentType",
-    "SessionType",
     "AttendanceStatus",
+    "DifficultyLevel",
+    "EvaluatorRole",
+    "SessionEvaluation",
+    "SessionType",
     # Trainers
     "StudentNote",
     # Chat

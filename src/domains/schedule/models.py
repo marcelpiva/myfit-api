@@ -59,6 +59,21 @@ class AttendanceStatus(str, enum.Enum):
     LATE_CANCELLED = "late_cancelled"  # Cancelled too close to session time
 
 
+class DifficultyLevel(str, enum.Enum):
+    """Difficulty level for session feedback."""
+
+    TOO_EASY = "too_easy"
+    JUST_RIGHT = "just_right"
+    TOO_HARD = "too_hard"
+
+
+class EvaluatorRole(str, enum.Enum):
+    """Role of the person evaluating a session."""
+
+    TRAINER = "trainer"
+    STUDENT = "student"
+
+
 class Appointment(Base, UUIDMixin, TimestampMixin):
     """Trainer-student appointment/session."""
 
@@ -141,12 +156,22 @@ class Appointment(Base, UUIDMixin, TimestampMixin):
         Boolean, default=False, nullable=False, server_default="false",
     )
 
+    # Group session fields
+    is_group: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+    max_participants: Mapped[int | None] = mapped_column(
+        Integer, nullable=True,
+    )
+
     # Relationships
     trainer = relationship("User", foreign_keys=[trainer_id], lazy="selectin")
     student = relationship("User", foreign_keys=[student_id], lazy="selectin")
     organization = relationship("Organization", lazy="selectin")
     service_plan = relationship("ServicePlan", lazy="selectin")
     payment = relationship("Payment", lazy="selectin")
+    participants = relationship("AppointmentParticipant", lazy="selectin", cascade="all, delete-orphan")
+    evaluations = relationship("SessionEvaluation", lazy="selectin", cascade="all, delete-orphan")
 
 
 class TrainerAvailability(Base, UUIDMixin, TimestampMixin):
@@ -242,3 +267,80 @@ class TrainerSettings(Base, UUIDMixin, TimestampMixin):
 
     # Relationships
     trainer = relationship("User", lazy="selectin")
+
+
+class AppointmentParticipant(Base, UUIDMixin, TimestampMixin):
+    """Participant in a group session."""
+
+    __tablename__ = "appointment_participants"
+
+    appointment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("appointments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    student_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    attendance_status: Mapped[AttendanceStatus] = mapped_column(
+        Enum(AttendanceStatus, create_constraint=False, native_enum=False),
+        default=AttendanceStatus.SCHEDULED,
+        nullable=False,
+        server_default="scheduled",
+    )
+    service_plan_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("service_plans.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    is_complimentary: Mapped[bool] = mapped_column(
+        Boolean, default=False, nullable=False, server_default="false",
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    student = relationship("User", lazy="selectin")
+    service_plan = relationship("ServicePlan", lazy="selectin")
+
+
+class SessionEvaluation(Base, UUIDMixin, TimestampMixin):
+    """Post-session feedback/evaluation."""
+
+    __tablename__ = "session_evaluations"
+
+    appointment_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("appointments.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    evaluator_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    evaluator_role: Mapped[EvaluatorRole] = mapped_column(
+        Enum(EvaluatorRole),
+        nullable=False,
+    )
+    overall_rating: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+    )
+    difficulty: Mapped[DifficultyLevel | None] = mapped_column(
+        Enum(DifficultyLevel),
+        nullable=True,
+    )
+    energy_level: Mapped[int | None] = mapped_column(
+        Integer,
+        nullable=True,
+    )
+    notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Relationships
+    appointment = relationship("Appointment", lazy="selectin")
+    evaluator = relationship("User", lazy="selectin")

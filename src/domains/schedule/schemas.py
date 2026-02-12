@@ -74,6 +74,17 @@ class AppointmentResponse(BaseModel):
     student_name: str | None = None
     service_plan_name: str | None = None
 
+    # Group session fields
+    is_group: bool = False
+    max_participants: int | None = None
+    participants: list["ParticipantResponse"] = []
+    participant_count: int = 0
+
+    # Evaluation fields
+    has_evaluation: bool = False
+    trainer_rating: int | None = None
+    student_rating: int | None = None
+
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -251,6 +262,73 @@ class AttendanceUpdate(BaseModel):
     attendance_status: AttendanceStatus
     grant_makeup: bool = False
     notes: str | None = None
+
+
+class GroupSessionCreate(BaseModel):
+    """Schema for creating a group session."""
+
+    student_ids: list[UUID]
+    date_time: datetime
+    duration_minutes: int = Field(default=60, ge=15, le=240)
+    workout_type: AppointmentType | None = None
+    notes: str | None = None
+    organization_id: UUID | None = None
+    max_participants: int = Field(default=10, ge=2, le=50)
+
+
+class ParticipantResponse(BaseModel):
+    """Schema for a group session participant."""
+
+    id: UUID
+    student_id: UUID
+    student_name: str | None = None
+    student_avatar_url: str | None = None
+    attendance_status: str = "scheduled"
+    service_plan_id: UUID | None = None
+    is_complimentary: bool = False
+    notes: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ParticipantAttendanceUpdate(BaseModel):
+    """Update attendance for a single participant in a group session."""
+
+    attendance_status: AttendanceStatus
+    grant_makeup: bool = False
+    notes: str | None = None
+
+
+class AddParticipantsRequest(BaseModel):
+    """Request to add participants to a group session."""
+
+    student_ids: list[UUID]
+
+
+class SessionEvaluationCreate(BaseModel):
+    """Schema for creating a session evaluation."""
+
+    overall_rating: int = Field(ge=1, le=5)
+    difficulty: str | None = None  # too_easy, just_right, too_hard
+    energy_level: int | None = Field(default=None, ge=1, le=5)
+    notes: str | None = None
+
+
+class SessionEvaluationResponse(BaseModel):
+    """Schema for session evaluation response."""
+
+    id: UUID
+    appointment_id: UUID
+    evaluator_id: UUID
+    evaluator_role: str
+    evaluator_name: str | None = None
+    overall_rating: int
+    difficulty: str | None = None
+    energy_level: int | None = None
+    notes: str | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
 
 
 class DuplicateWeekRequest(BaseModel):

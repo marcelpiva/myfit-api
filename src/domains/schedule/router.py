@@ -5,6 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import and_, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,14 +15,19 @@ from src.domains.users.models import User
 
 from .models import (
     Appointment,
+    AppointmentParticipant,
     AppointmentStatus,
     AttendanceStatus,
+    DifficultyLevel,
+    EvaluatorRole,
+    SessionEvaluation,
     SessionType,
     TrainerAvailability,
     TrainerBlockedSlot,
     TrainerSettings,
 )
 from .schemas import (
+    AddParticipantsRequest,
     AppointmentCancel,
     AppointmentComplete,
     AppointmentCreate,
@@ -36,9 +42,14 @@ from .schemas import (
     ConflictDetail,
     DayOfWeekAnalytics,
     DuplicateWeekRequest,
+    GroupSessionCreate,
     HourAnalytics,
+    ParticipantAttendanceUpdate,
+    ParticipantResponse,
     RecurringAppointmentCreate,
     ScheduleAnalyticsResponse,
+    SessionEvaluationCreate,
+    SessionEvaluationResponse,
     StudentAnalytics,
     StudentBookSessionRequest,
     StudentReliability,
@@ -63,6 +74,34 @@ def _appointment_to_response(
     student_name: str | None = None,
 ) -> AppointmentResponse:
     """Convert appointment model to response."""
+    # Build participants list for group sessions
+    participants_list = []
+    if hasattr(appointment, "participants") and appointment.participants:
+        for p in appointment.participants:
+            participants_list.append(ParticipantResponse(
+                id=p.id,
+                student_id=p.student_id,
+                student_name=p.student.name if p.student else None,
+                student_avatar_url=p.student.avatar_url if p.student and hasattr(p.student, "avatar_url") else None,
+                attendance_status=p.attendance_status.value if hasattr(p.attendance_status, "value") else str(p.attendance_status),
+                service_plan_id=p.service_plan_id,
+                is_complimentary=p.is_complimentary,
+                notes=p.notes,
+            ))
+
+    # Evaluation data
+    has_evaluation = False
+    trainer_rating = None
+    student_rating = None
+    if hasattr(appointment, "evaluations") and appointment.evaluations:
+        has_evaluation = True
+        for ev in appointment.evaluations:
+            role = ev.evaluator_role.value if hasattr(ev.evaluator_role, "value") else str(ev.evaluator_role)
+            if role == "trainer":
+                trainer_rating = ev.overall_rating
+            elif role == "student":
+                student_rating = ev.overall_rating
+
     return AppointmentResponse(
         id=appointment.id,
         trainer_id=appointment.trainer_id,
@@ -84,6 +123,13 @@ def _appointment_to_response(
         trainer_name=trainer_name or (appointment.trainer.name if appointment.trainer else None),
         student_name=student_name or (appointment.student.name if appointment.student else None),
         service_plan_name=appointment.service_plan.name if hasattr(appointment, "service_plan") and appointment.service_plan else None,
+        is_group=getattr(appointment, "is_group", False) or False,
+        max_participants=getattr(appointment, "max_participants", None),
+        participants=participants_list,
+        participant_count=len(participants_list),
+        has_evaluation=has_evaluation,
+        trainer_rating=trainer_rating,
+        student_rating=student_rating,
     )
 
 
@@ -1777,3 +1823,547 @@ async def update_attendance(
         pass
 
     return _appointment_to_response(appointment)
+
+
+# --- Group Sessions ---
+
+
+@router.post("/appointments/group", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
+async def create_group_session(
+    request: GroupSessionCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> AppointmentResponse:
+    """Create a group session with multiple participants."""
+    if len(request.student_ids) < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Pelo menos 1 aluno é necessário para sessão em grupo",
+        )
+
+    if len(request.student_ids) > request.max_participants:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Número de alunos ({len(request.student_ids)}) excede o máximo de participantes ({request.max_participants})",
+        )
+
+    # Validate all student_ids exist
+    students = []
+    for sid in request.student_ids:
+        student = await db.get(User, sid)
+        if not student:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Aluno não encontrado: {sid}",
+            )
+        students.append(student)
+
+    # Create the group appointment (student_id = first student for backwards compat)
+    appointment = Appointment(
+        trainer_id=current_user.id,
+        student_id=request.student_ids[0],
+        organization_id=request.organization_id,
+        date_time=request.date_time,
+        duration_minutes=request.duration_minutes,
+        workout_type=request.workout_type,
+        notes=request.notes,
+        status=AppointmentStatus.PENDING,
+        is_group=True,
+        max_participants=request.max_participants,
+    )
+    db.add(appointment)
+    await db.flush()  # Get appointment.id
+
+    # Create participant rows
+    for student in students:
+        participant = AppointmentParticipant(
+            appointment_id=appointment.id,
+            student_id=student.id,
+            attendance_status=AttendanceStatus.SCHEDULED,
+        )
+        db.add(participant)
+
+    await db.commit()
+    await db.refresh(appointment)
+
+    return _appointment_to_response(
+        appointment,
+        trainer_name=current_user.name,
+    )
+
+
+@router.post("/appointments/{appointment_id}/participants", response_model=list[ParticipantResponse])
+async def add_participants(
+    appointment_id: UUID,
+    request: AddParticipantsRequest,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[ParticipantResponse]:
+    """Add participants to an existing group session."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    if appointment.trainer_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o treinador pode adicionar participantes")
+
+    if not appointment.is_group:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta sessão não é um grupo. Converta para grupo primeiro.",
+        )
+
+    # Check max_participants limit
+    current_count = len(appointment.participants) if appointment.participants else 0
+    max_p = appointment.max_participants or 50
+    if current_count + len(request.student_ids) > max_p:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Limite de participantes excedido. Atual: {current_count}, Máximo: {max_p}",
+        )
+
+    # Check for duplicates
+    existing_student_ids = {p.student_id for p in (appointment.participants or [])}
+
+    new_participants = []
+    for sid in request.student_ids:
+        if sid in existing_student_ids:
+            continue  # Skip duplicates
+
+        student = await db.get(User, sid)
+        if not student:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Aluno não encontrado: {sid}",
+            )
+
+        participant = AppointmentParticipant(
+            appointment_id=appointment.id,
+            student_id=sid,
+            attendance_status=AttendanceStatus.SCHEDULED,
+        )
+        db.add(participant)
+        new_participants.append(participant)
+
+    await db.commit()
+
+    # Refresh to get relationships
+    await db.refresh(appointment)
+
+    return [
+        ParticipantResponse(
+            id=p.id,
+            student_id=p.student_id,
+            student_name=p.student.name if p.student else None,
+            student_avatar_url=p.student.avatar_url if p.student and hasattr(p.student, "avatar_url") else None,
+            attendance_status=p.attendance_status.value if hasattr(p.attendance_status, "value") else str(p.attendance_status),
+            service_plan_id=p.service_plan_id,
+            is_complimentary=p.is_complimentary,
+            notes=p.notes,
+        )
+        for p in (appointment.participants or [])
+    ]
+
+
+@router.delete("/appointments/{appointment_id}/participants/{student_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def remove_participant(
+    appointment_id: UUID,
+    student_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> None:
+    """Remove a participant from a group session."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    if appointment.trainer_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o treinador pode remover participantes")
+
+    if not appointment.is_group:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta sessão não é um grupo",
+        )
+
+    # Find the participant
+    participant = None
+    for p in (appointment.participants or []):
+        if p.student_id == student_id:
+            participant = p
+            break
+
+    if not participant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Participante não encontrado nesta sessão",
+        )
+
+    await db.delete(participant)
+    await db.commit()
+
+
+@router.patch(
+    "/appointments/{appointment_id}/participants/{student_id}/attendance",
+    response_model=ParticipantResponse,
+)
+async def update_participant_attendance(
+    appointment_id: UUID,
+    student_id: UUID,
+    request: ParticipantAttendanceUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> ParticipantResponse:
+    """Mark attendance for a single participant in a group session."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    if appointment.trainer_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o treinador pode marcar presença")
+
+    if not appointment.is_group:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta sessão não é um grupo. Use o endpoint de presença padrão.",
+        )
+
+    # Find the participant
+    participant = None
+    for p in (appointment.participants or []):
+        if p.student_id == student_id:
+            participant = p
+            break
+
+    if not participant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Participante não encontrado nesta sessão",
+        )
+
+    participant.attendance_status = request.attendance_status
+    if request.notes:
+        participant.notes = f"{participant.notes or ''}\nPresença: {request.notes}".strip()
+
+    # Handle billing per participant's service_plan
+    if request.attendance_status == AttendanceStatus.ATTENDED:
+        if participant.service_plan_id and not participant.is_complimentary:
+            from src.domains.billing.models import Payment, PaymentStatus, PaymentType, ServicePlan, ServicePlanType
+
+            plan = await db.get(ServicePlan, participant.service_plan_id)
+            if plan:
+                if plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
+                    plan.remaining_sessions = max(0, plan.remaining_sessions - 1)
+                elif plan.plan_type == ServicePlanType.DROP_IN and plan.per_session_cents:
+                    payment = Payment(
+                        payer_id=participant.student_id,
+                        payee_id=appointment.trainer_id,
+                        organization_id=appointment.organization_id,
+                        payment_type=PaymentType.SESSION,
+                        description=f"Sessão em grupo - {appointment.date_time.strftime('%d/%m/%Y %H:%M')}",
+                        amount_cents=plan.per_session_cents,
+                        status=PaymentStatus.PENDING,
+                        due_date=appointment.date_time.date(),
+                        service_plan_id=plan.id,
+                    )
+                    db.add(payment)
+
+    # If missed + grant_makeup, create makeup placeholder
+    if request.attendance_status == AttendanceStatus.MISSED and request.grant_makeup:
+        makeup = Appointment(
+            trainer_id=appointment.trainer_id,
+            student_id=student_id,
+            organization_id=appointment.organization_id,
+            date_time=datetime.now() + timedelta(days=7),
+            duration_minutes=appointment.duration_minutes,
+            workout_type=appointment.workout_type,
+            status=AppointmentStatus.PENDING,
+            service_plan_id=participant.service_plan_id,
+            session_type=SessionType.MAKEUP,
+            notes="Reposição de falta (sessão em grupo)",
+        )
+        db.add(makeup)
+
+    await db.commit()
+    await db.refresh(participant)
+
+    return ParticipantResponse(
+        id=participant.id,
+        student_id=participant.student_id,
+        student_name=participant.student.name if participant.student else None,
+        student_avatar_url=participant.student.avatar_url if participant.student and hasattr(participant.student, "avatar_url") else None,
+        attendance_status=participant.attendance_status.value if hasattr(participant.attendance_status, "value") else str(participant.attendance_status),
+        service_plan_id=participant.service_plan_id,
+        is_complimentary=participant.is_complimentary,
+        notes=participant.notes,
+    )
+
+
+@router.get("/appointments/{appointment_id}/participants", response_model=list[ParticipantResponse])
+async def list_participants(
+    appointment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[ParticipantResponse]:
+    """List participants of a group session."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    # Check access
+    if appointment.trainer_id != current_user.id and appointment.student_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+
+    return [
+        ParticipantResponse(
+            id=p.id,
+            student_id=p.student_id,
+            student_name=p.student.name if p.student else None,
+            student_avatar_url=p.student.avatar_url if p.student and hasattr(p.student, "avatar_url") else None,
+            attendance_status=p.attendance_status.value if hasattr(p.attendance_status, "value") else str(p.attendance_status),
+            service_plan_id=p.service_plan_id,
+            is_complimentary=p.is_complimentary,
+            notes=p.notes,
+        )
+        for p in (appointment.participants or [])
+    ]
+
+
+# --- Post-Session Feedback ---
+
+
+@router.post("/appointments/{appointment_id}/evaluate", response_model=SessionEvaluationResponse, status_code=status.HTTP_201_CREATED)
+async def create_evaluation(
+    appointment_id: UUID,
+    request: SessionEvaluationCreate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionEvaluationResponse:
+    """Create a post-session evaluation/feedback."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    # Check access
+    if appointment.trainer_id != current_user.id and appointment.student_id != current_user.id:
+        # Also check if user is a participant in group sessions
+        is_participant = False
+        if appointment.is_group and appointment.participants:
+            is_participant = any(p.student_id == current_user.id for p in appointment.participants)
+        if not is_participant:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+
+    # Must be completed
+    if appointment.status != AppointmentStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Só é possível avaliar sessões concluídas",
+        )
+
+    # Determine evaluator role
+    if current_user.id == appointment.trainer_id:
+        evaluator_role = EvaluatorRole.TRAINER
+    else:
+        evaluator_role = EvaluatorRole.STUDENT
+
+    # Check for duplicate evaluation (same appointment + same evaluator)
+    existing_query = select(SessionEvaluation).where(
+        and_(
+            SessionEvaluation.appointment_id == appointment_id,
+            SessionEvaluation.evaluator_id == current_user.id,
+        )
+    )
+    result = await db.execute(existing_query)
+    if result.scalar():
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Você já avaliou esta sessão",
+        )
+
+    # Parse difficulty if provided
+    difficulty_value = None
+    if request.difficulty:
+        try:
+            difficulty_value = DifficultyLevel(request.difficulty)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Dificuldade inválida. Use: too_easy, just_right, too_hard",
+            )
+
+    evaluation = SessionEvaluation(
+        appointment_id=appointment_id,
+        evaluator_id=current_user.id,
+        evaluator_role=evaluator_role,
+        overall_rating=request.overall_rating,
+        difficulty=difficulty_value,
+        energy_level=request.energy_level,
+        notes=request.notes,
+    )
+    db.add(evaluation)
+    await db.commit()
+    await db.refresh(evaluation)
+
+    return SessionEvaluationResponse(
+        id=evaluation.id,
+        appointment_id=evaluation.appointment_id,
+        evaluator_id=evaluation.evaluator_id,
+        evaluator_role=evaluation.evaluator_role.value,
+        evaluator_name=current_user.name,
+        overall_rating=evaluation.overall_rating,
+        difficulty=evaluation.difficulty.value if evaluation.difficulty else None,
+        energy_level=evaluation.energy_level,
+        notes=evaluation.notes,
+        created_at=evaluation.created_at,
+    )
+
+
+@router.get("/appointments/{appointment_id}/evaluations", response_model=list[SessionEvaluationResponse])
+async def list_evaluations(
+    appointment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> list[SessionEvaluationResponse]:
+    """List evaluations for a session."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    # Check access
+    if appointment.trainer_id != current_user.id and appointment.student_id != current_user.id:
+        is_participant = False
+        if appointment.is_group and appointment.participants:
+            is_participant = any(p.student_id == current_user.id for p in appointment.participants)
+        if not is_participant:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+
+    query = select(SessionEvaluation).where(
+        SessionEvaluation.appointment_id == appointment_id
+    ).order_by(SessionEvaluation.created_at)
+    result = await db.execute(query)
+    evaluations = list(result.scalars().all())
+
+    return [
+        SessionEvaluationResponse(
+            id=ev.id,
+            appointment_id=ev.appointment_id,
+            evaluator_id=ev.evaluator_id,
+            evaluator_role=ev.evaluator_role.value if hasattr(ev.evaluator_role, "value") else str(ev.evaluator_role),
+            evaluator_name=ev.evaluator.name if ev.evaluator else None,
+            overall_rating=ev.overall_rating,
+            difficulty=ev.difficulty.value if ev.difficulty else None,
+            energy_level=ev.energy_level,
+            notes=ev.notes,
+            created_at=ev.created_at,
+        )
+        for ev in evaluations
+    ]
+
+
+# --- Calendar Export (.ics) ---
+
+
+def _generate_ics(appointments: list) -> str:
+    """Generate iCalendar (.ics) content from a list of appointments."""
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//MyFit//Schedule//PT",
+        "CALSCALE:GREGORIAN",
+        "METHOD:PUBLISH",
+    ]
+    for apt in appointments:
+        dt_start = apt.date_time.strftime("%Y%m%dT%H%M%S")
+        dt_end = (apt.date_time + timedelta(minutes=apt.duration_minutes)).strftime("%Y%m%dT%H%M%S")
+
+        is_group = getattr(apt, "is_group", False) or False
+        if is_group and hasattr(apt, "participants") and apt.participants:
+            names = ", ".join(
+                p.student.name if p.student else "Aluno"
+                for p in apt.participants[:3]
+            )
+            if len(apt.participants) > 3:
+                names += f" +{len(apt.participants) - 3}"
+            summary = f"Grupo ({len(apt.participants)}) - {apt.workout_type.value if apt.workout_type else 'Treino'}"
+        else:
+            summary = f"{apt.student.name if apt.student else 'Sessao'} - {apt.workout_type.value if apt.workout_type else 'Treino'}"
+
+        location = apt.organization.name if apt.organization else ""
+        description = (apt.notes or "").replace("\n", "\\n")
+
+        lines.extend([
+            "BEGIN:VEVENT",
+            f"UID:{apt.id}@myfit.app",
+            f"DTSTART:{dt_start}",
+            f"DTEND:{dt_end}",
+            f"SUMMARY:{summary}",
+            f"LOCATION:{location}",
+            f"DESCRIPTION:{description}",
+            f"STATUS:{'CANCELLED' if apt.status == AppointmentStatus.CANCELLED else 'CONFIRMED'}",
+            "END:VEVENT",
+        ])
+    lines.append("END:VCALENDAR")
+    return "\r\n".join(lines)
+
+
+@router.get("/appointments/{appointment_id}/calendar")
+async def export_appointment_calendar(
+    appointment_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> Response:
+    """Export a single appointment as .ics calendar file."""
+    appointment = await db.get(Appointment, appointment_id)
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sessão não encontrada")
+
+    # Check access
+    if appointment.trainer_id != current_user.id and appointment.student_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso negado")
+
+    ics_content = _generate_ics([appointment])
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": f'attachment; filename="sessao-{appointment_id}.ics"',
+        },
+    )
+
+
+@router.get("/export")
+async def export_schedule_calendar(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: Annotated[date, Query()],
+    to_date: Annotated[date, Query()],
+) -> Response:
+    """Export all appointments in a date range as .ics calendar file."""
+    start_dt = datetime.combine(from_date, datetime.min.time())
+    end_dt = datetime.combine(to_date, datetime.max.time())
+
+    query = (
+        select(Appointment)
+        .where(
+            and_(
+                Appointment.trainer_id == current_user.id,
+                Appointment.date_time >= start_dt,
+                Appointment.date_time <= end_dt,
+            )
+        )
+        .order_by(Appointment.date_time)
+    )
+
+    result = await db.execute(query)
+    appointments = list(result.scalars().all())
+
+    ics_content = _generate_ics(appointments)
+
+    return Response(
+        content=ics_content,
+        media_type="text/calendar",
+        headers={
+            "Content-Disposition": f'attachment; filename="agenda-{from_date}-{to_date}.ics"',
+        },
+    )
