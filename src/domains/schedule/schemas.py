@@ -220,6 +220,8 @@ class TrainerSettingsUpdate(BaseModel):
     default_end_time: time | None = None
     session_duration_minutes: int | None = Field(default=None, ge=15, le=240)
     slot_interval_minutes: int | None = Field(default=None, ge=15, le=60)
+    late_cancel_window_hours: int | None = Field(default=None, ge=0, le=168)
+    late_cancel_policy: str | None = None  # charge, warn, block
 
 
 class TrainerSettingsResponse(BaseModel):
@@ -230,6 +232,8 @@ class TrainerSettingsResponse(BaseModel):
     default_end_time: time
     session_duration_minutes: int
     slot_interval_minutes: int
+    late_cancel_window_hours: int = 24
+    late_cancel_policy: str = "warn"
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -255,3 +259,71 @@ class DuplicateWeekRequest(BaseModel):
     source_week_start: date
     target_week_start: date
     skip_conflicts: bool = False
+
+
+# --- Analytics schemas ---
+
+
+class StudentAnalytics(BaseModel):
+    """Per-student analytics breakdown."""
+
+    student_id: str
+    student_name: str
+    total: int
+    attended: int
+    missed: int
+    rate: float
+
+
+class DayOfWeekAnalytics(BaseModel):
+    """Analytics breakdown by day of week."""
+
+    day: int  # 0=Monday...6=Sunday
+    total: int
+    attended: int
+
+
+class HourAnalytics(BaseModel):
+    """Analytics breakdown by hour."""
+
+    hour: int  # 0-23
+    total: int
+    attended: int
+
+
+class ScheduleAnalyticsResponse(BaseModel):
+    """Full schedule analytics response."""
+
+    total: int
+    attended: int
+    missed: int
+    late_cancelled: int
+    cancelled: int
+    pending: int
+    attendance_rate: float
+    by_student: list[StudentAnalytics]
+    by_day_of_week: list[DayOfWeekAnalytics]
+    by_hour: list[HourAnalytics]
+
+
+# --- Student reliability schemas ---
+
+
+class StudentReliability(BaseModel):
+    """Reliability score for a single student."""
+
+    student_id: str
+    student_name: str
+    total_sessions: int
+    attended: int
+    missed: int
+    late_cancelled: int
+    attendance_rate: float
+    reliability_score: str  # "high", "medium", "low"
+    trend: str  # "improving", "stable", "declining"
+
+
+class StudentReliabilityResponse(BaseModel):
+    """Student reliability scores response."""
+
+    students: list[StudentReliability]

@@ -10,6 +10,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Integer,
+    String,
     Text,
     Time,
 )
@@ -231,6 +232,12 @@ class TrainerSettings(Base, UUIDMixin, TimestampMixin):
     )
     slot_interval_minutes: Mapped[int] = mapped_column(
         Integer, nullable=False, default=30,
+    )
+    late_cancel_window_hours: Mapped[int] = mapped_column(
+        Integer, default=24, nullable=False, server_default="24",
+    )
+    late_cancel_policy: Mapped[str] = mapped_column(
+        String(10), default="warn", nullable=False, server_default="warn",
     )
 
     # Relationships

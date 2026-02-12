@@ -5,7 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, select
+from sqlalchemy import and_, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -34,9 +34,15 @@ from .schemas import (
     AvailableSlotsResponse,
     ConflictCheckResponse,
     ConflictDetail,
+    DayOfWeekAnalytics,
     DuplicateWeekRequest,
+    HourAnalytics,
     RecurringAppointmentCreate,
+    ScheduleAnalyticsResponse,
+    StudentAnalytics,
     StudentBookSessionRequest,
+    StudentReliability,
+    StudentReliabilityResponse,
     TrainerAvailabilityCreate,
     TrainerAvailabilityResponse,
     TrainerAvailabilitySlot,
@@ -79,6 +85,226 @@ def _appointment_to_response(
         student_name=student_name or (appointment.student.name if appointment.student else None),
         service_plan_name=appointment.service_plan.name if hasattr(appointment, "service_plan") and appointment.service_plan else None,
     )
+
+
+@router.get("/analytics", response_model=ScheduleAnalyticsResponse)
+async def get_schedule_analytics(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    from_date: Annotated[date, Query()],
+    to_date: Annotated[date, Query()],
+    student_id: Annotated[UUID | None, Query()] = None,
+) -> ScheduleAnalyticsResponse:
+    """Get schedule analytics for a date range."""
+    start_dt = datetime.combine(from_date, datetime.min.time())
+    end_dt = datetime.combine(to_date, datetime.max.time())
+
+    # Base filter: trainer's appointments in date range
+    filters = [
+        Appointment.trainer_id == current_user.id,
+        Appointment.date_time >= start_dt,
+        Appointment.date_time <= end_dt,
+    ]
+    if student_id:
+        filters.append(Appointment.student_id == student_id)
+
+    # Fetch all matching appointments with student info
+    query = (
+        select(Appointment)
+        .where(and_(*filters))
+        .order_by(Appointment.date_time)
+    )
+    result = await db.execute(query)
+    appointments = list(result.scalars().all())
+
+    # Aggregate totals
+    total = len(appointments)
+    attended = sum(1 for a in appointments if a.attendance_status == AttendanceStatus.ATTENDED)
+    missed = sum(1 for a in appointments if a.attendance_status == AttendanceStatus.MISSED)
+    late_cancelled = sum(1 for a in appointments if a.attendance_status == AttendanceStatus.LATE_CANCELLED)
+    cancelled = sum(1 for a in appointments if a.status == AppointmentStatus.CANCELLED)
+    pending = sum(1 for a in appointments if a.attendance_status == AttendanceStatus.SCHEDULED)
+
+    denominator = attended + missed + late_cancelled
+    attendance_rate = round((attended / denominator * 100), 1) if denominator > 0 else 0.0
+
+    # By student
+    student_map: dict[UUID, dict] = {}
+    for a in appointments:
+        sid = a.student_id
+        if sid not in student_map:
+            student_name = a.student.name if a.student else "Unknown"
+            student_map[sid] = {
+                "student_id": str(sid),
+                "student_name": student_name,
+                "total": 0,
+                "attended": 0,
+                "missed": 0,
+            }
+        student_map[sid]["total"] += 1
+        if a.attendance_status == AttendanceStatus.ATTENDED:
+            student_map[sid]["attended"] += 1
+        elif a.attendance_status == AttendanceStatus.MISSED:
+            student_map[sid]["missed"] += 1
+
+    by_student = []
+    for s in student_map.values():
+        s_denom = s["attended"] + s["missed"]
+        s["rate"] = round((s["attended"] / s_denom * 100), 1) if s_denom > 0 else 0.0
+        by_student.append(StudentAnalytics(**s))
+
+    # By day of week (0=Monday...6=Sunday)
+    day_map: dict[int, dict] = {i: {"day": i, "total": 0, "attended": 0} for i in range(7)}
+    for a in appointments:
+        dow = a.date_time.weekday()
+        day_map[dow]["total"] += 1
+        if a.attendance_status == AttendanceStatus.ATTENDED:
+            day_map[dow]["attended"] += 1
+    by_day_of_week = [
+        DayOfWeekAnalytics(**d) for d in day_map.values() if d["total"] > 0
+    ]
+
+    # By hour (0-23)
+    hour_map: dict[int, dict] = {}
+    for a in appointments:
+        h = a.date_time.hour
+        if h not in hour_map:
+            hour_map[h] = {"hour": h, "total": 0, "attended": 0}
+        hour_map[h]["total"] += 1
+        if a.attendance_status == AttendanceStatus.ATTENDED:
+            hour_map[h]["attended"] += 1
+    by_hour = [
+        HourAnalytics(**h) for h in sorted(hour_map.values(), key=lambda x: x["hour"])
+    ]
+
+    return ScheduleAnalyticsResponse(
+        total=total,
+        attended=attended,
+        missed=missed,
+        late_cancelled=late_cancelled,
+        cancelled=cancelled,
+        pending=pending,
+        attendance_rate=attendance_rate,
+        by_student=by_student,
+        by_day_of_week=by_day_of_week,
+        by_hour=by_hour,
+    )
+
+
+@router.get("/student-reliability", response_model=StudentReliabilityResponse)
+async def get_student_reliability(
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    student_id: Annotated[UUID | None, Query()] = None,
+) -> StudentReliabilityResponse:
+    """Get reliability scores for trainer's students."""
+    now = datetime.now()
+    window_90_start = now - timedelta(days=90)
+    window_30_mid = now - timedelta(days=30)
+    window_60_start = now - timedelta(days=60)
+
+    # Base filter: trainer's appointments in the last 90 days
+    filters = [
+        Appointment.trainer_id == current_user.id,
+        Appointment.date_time >= window_90_start,
+        Appointment.date_time <= now,
+    ]
+    if student_id:
+        filters.append(Appointment.student_id == student_id)
+
+    query = select(Appointment).where(and_(*filters))
+    result = await db.execute(query)
+    appointments = list(result.scalars().all())
+
+    # Group by student
+    student_data: dict[UUID, dict] = {}
+    for a in appointments:
+        sid = a.student_id
+        if sid not in student_data:
+            student_name = a.student.name if a.student else "Unknown"
+            student_data[sid] = {
+                "student_id": str(sid),
+                "student_name": student_name,
+                "total_sessions": 0,
+                "attended": 0,
+                "missed": 0,
+                "late_cancelled": 0,
+                # For trend: last 30 days vs prior 30 days (days 31-60)
+                "recent_attended": 0,
+                "recent_total": 0,
+                "prior_attended": 0,
+                "prior_total": 0,
+            }
+
+        student_data[sid]["total_sessions"] += 1
+
+        if a.attendance_status == AttendanceStatus.ATTENDED:
+            student_data[sid]["attended"] += 1
+        elif a.attendance_status == AttendanceStatus.MISSED:
+            student_data[sid]["missed"] += 1
+        elif a.attendance_status == AttendanceStatus.LATE_CANCELLED:
+            student_data[sid]["late_cancelled"] += 1
+
+        # Trend buckets
+        apt_dt = a.date_time if isinstance(a.date_time, datetime) else datetime.combine(a.date_time, datetime.min.time())
+        if apt_dt >= window_30_mid:
+            # Last 30 days
+            student_data[sid]["recent_total"] += 1
+            if a.attendance_status == AttendanceStatus.ATTENDED:
+                student_data[sid]["recent_attended"] += 1
+        elif apt_dt >= window_60_start:
+            # Prior 30 days (days 31-60)
+            student_data[sid]["prior_total"] += 1
+            if a.attendance_status == AttendanceStatus.ATTENDED:
+                student_data[sid]["prior_attended"] += 1
+
+    students = []
+    for s in student_data.values():
+        denom = s["attended"] + s["missed"] + s["late_cancelled"]
+        attendance_rate = round((s["attended"] / denom * 100), 1) if denom > 0 else 0.0
+
+        # Reliability score
+        if attendance_rate >= 90:
+            reliability_score = "high"
+        elif attendance_rate >= 70:
+            reliability_score = "medium"
+        else:
+            reliability_score = "low"
+
+        # Trend: compare recent rate vs prior rate
+        recent_rate = (
+            (s["recent_attended"] / s["recent_total"] * 100)
+            if s["recent_total"] > 0
+            else 0.0
+        )
+        prior_rate = (
+            (s["prior_attended"] / s["prior_total"] * 100)
+            if s["prior_total"] > 0
+            else 0.0
+        )
+
+        if s["recent_total"] == 0 or s["prior_total"] == 0:
+            trend = "stable"
+        elif recent_rate - prior_rate > 5:
+            trend = "improving"
+        elif prior_rate - recent_rate > 5:
+            trend = "declining"
+        else:
+            trend = "stable"
+
+        students.append(StudentReliability(
+            student_id=s["student_id"],
+            student_name=s["student_name"],
+            total_sessions=s["total_sessions"],
+            attended=s["attended"],
+            missed=s["missed"],
+            late_cancelled=s["late_cancelled"],
+            attendance_rate=attendance_rate,
+            reliability_score=reliability_score,
+            trend=trend,
+        ))
+
+    return StudentReliabilityResponse(students=students)
 
 
 @router.get("/appointments", response_model=list[AppointmentResponse])
@@ -431,6 +657,35 @@ async def cancel_appointment(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Cannot cancel a session that is already cancelled or completed",
         )
+
+    # Late cancellation policy check
+    now = datetime.now()
+    is_late = False
+    trainer_settings = await _get_or_create_trainer_settings(db, appointment.trainer_id)
+    hours_until = (appointment.date_time.replace(tzinfo=None) - now).total_seconds() / 3600
+
+    if hours_until <= trainer_settings.late_cancel_window_hours:
+        is_late = True
+        policy = trainer_settings.late_cancel_policy
+
+        if policy == "block":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Cancelamento não permitido dentro de {trainer_settings.late_cancel_window_hours} horas da sessão",
+            )
+
+        if policy == "charge":
+            appointment.attendance_status = AttendanceStatus.LATE_CANCELLED
+            # Consume service plan credit for late cancellation
+            if appointment.service_plan_id and not appointment.is_complimentary:
+                from src.domains.billing.models import ServicePlan, ServicePlanType
+
+                plan = await db.get(ServicePlan, appointment.service_plan_id)
+                if plan and plan.plan_type == ServicePlanType.PACKAGE and plan.remaining_sessions is not None:
+                    plan.remaining_sessions = max(0, plan.remaining_sessions - 1)
+
+        if policy == "warn":
+            appointment.attendance_status = AttendanceStatus.LATE_CANCELLED
 
     appointment.status = AppointmentStatus.CANCELLED
     appointment.cancellation_reason = request.reason
@@ -1005,6 +1260,8 @@ async def _get_or_create_trainer_settings(
             default_end_time=time(21, 0),
             session_duration_minutes=60,
             slot_interval_minutes=30,
+            late_cancel_window_hours=24,
+            late_cancel_policy="warn",
         )
         db.add(settings)
         await db.commit()
@@ -1238,6 +1495,8 @@ async def get_trainer_full_availability(
             default_end_time=settings.default_end_time,
             session_duration_minutes=settings.session_duration_minutes,
             slot_interval_minutes=settings.slot_interval_minutes,
+            late_cancel_window_hours=settings.late_cancel_window_hours,
+            late_cancel_policy=settings.late_cancel_policy,
         ),
         blocked_slots=[
             TrainerBlockedSlotResponse(
@@ -1338,6 +1597,15 @@ async def update_trainer_settings(
         settings.session_duration_minutes = request.session_duration_minutes
     if request.slot_interval_minutes is not None:
         settings.slot_interval_minutes = request.slot_interval_minutes
+    if request.late_cancel_window_hours is not None:
+        settings.late_cancel_window_hours = request.late_cancel_window_hours
+    if request.late_cancel_policy is not None:
+        if request.late_cancel_policy not in ("charge", "warn", "block"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="late_cancel_policy must be 'charge', 'warn', or 'block'",
+            )
+        settings.late_cancel_policy = request.late_cancel_policy
 
     await db.commit()
     await db.refresh(settings)
@@ -1348,6 +1616,8 @@ async def update_trainer_settings(
         default_end_time=settings.default_end_time,
         session_duration_minutes=settings.session_duration_minutes,
         slot_interval_minutes=settings.slot_interval_minutes,
+        late_cancel_window_hours=settings.late_cancel_window_hours,
+        late_cancel_policy=settings.late_cancel_policy,
     )
 
 
