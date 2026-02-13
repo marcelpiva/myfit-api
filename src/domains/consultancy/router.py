@@ -155,6 +155,7 @@ async def list_professional_profiles(
 
     query = (
         select(ProfessionalProfile)
+        .options(selectinload(ProfessionalProfile.user))
         .where(and_(*base_filter))
         .order_by(
             ProfessionalProfile.is_featured.desc(),
@@ -177,7 +178,9 @@ async def get_my_profile(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProfessionalProfileResponse:
     """Get or create the current user's professional profile."""
-    query = select(ProfessionalProfile).where(
+    query = select(ProfessionalProfile).options(
+        selectinload(ProfessionalProfile.user)
+    ).where(
         ProfessionalProfile.user_id == current_user.id
     )
     result = await db.execute(query)
@@ -261,7 +264,9 @@ async def get_profile(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProfessionalProfileResponse:
     """Get a specific professional's public profile."""
-    query = select(ProfessionalProfile).where(
+    query = select(ProfessionalProfile).options(
+        selectinload(ProfessionalProfile.user)
+    ).where(
         ProfessionalProfile.user_id == user_id,
         ProfessionalProfile.is_public == True,  # noqa: E712
     )
