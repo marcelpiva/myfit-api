@@ -5,6 +5,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
@@ -329,6 +330,9 @@ async def list_consultancies(
 
     query = (
         select(ConsultancyListing)
+        .options(
+            selectinload(ConsultancyListing.professional).selectinload(ProfessionalProfile.user)
+        )
         .where(and_(*base_filter))
         .order_by(order_by)
         .limit(limit)
@@ -351,8 +355,18 @@ async def list_my_consultancies(
     include_inactive: Annotated[bool, Query()] = False,
 ) -> ConsultancyListingListResponse:
     """List current user's own consultancy listings."""
+    # Look up the user's professional profile
+    prof_query = select(ProfessionalProfile.id).where(
+        ProfessionalProfile.user_id == current_user.id
+    )
+    prof_result = await db.execute(prof_query)
+    prof_id = prof_result.scalar_one_or_none()
+
+    if not prof_id:
+        return ConsultancyListingListResponse(listings=[], total=0)
+
     base_filter = [
-        ConsultancyListing.professional_id == current_user.id,
+        ConsultancyListing.professional_id == prof_id,
         ConsultancyListing.deleted_at.is_(None),
     ]
 
@@ -365,6 +379,9 @@ async def list_my_consultancies(
 
     query = (
         select(ConsultancyListing)
+        .options(
+            selectinload(ConsultancyListing.professional).selectinload(ProfessionalProfile.user)
+        )
         .where(and_(*base_filter))
         .order_by(ConsultancyListing.created_at.desc())
     )
@@ -421,7 +438,15 @@ async def get_listing(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ConsultancyListingResponse:
     """Get a specific consultancy listing."""
-    listing = await db.get(ConsultancyListing, listing_id)
+    query = (
+        select(ConsultancyListing)
+        .options(
+            selectinload(ConsultancyListing.professional).selectinload(ProfessionalProfile.user)
+        )
+        .where(ConsultancyListing.id == listing_id)
+    )
+    result = await db.execute(query)
+    listing = result.scalar_one_or_none()
 
     if not listing or listing.deleted_at:
         raise HTTPException(
