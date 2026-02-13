@@ -36,6 +36,18 @@ class SubscriptionUpgradeRequest(BaseModel):
     source: SubscriptionSource = SubscriptionSource.DIRECT
 
 
+class SubscriptionCheckoutResponse(BaseModel):
+    """Schema for subscription checkout with PIX payment."""
+
+    subscription_id: UUID
+    amount_cents: int
+    price_display: str
+    payment_provider: str
+    status: str  # "pending", "active"
+    pix_qr_code: str | None = None
+    pix_copy_paste: str | None = None
+
+
 class FeatureCheckResponse(BaseModel):
     """Response for checking feature access."""
 

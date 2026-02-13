@@ -1,5 +1,6 @@
 """Subscription router for platform tier management."""
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,6 +12,7 @@ from .models import PlatformTier, SubscriptionSource
 from .schemas import (
     FeatureCheckResponse,
     FeatureDefinitionResponse,
+    SubscriptionCheckoutResponse,
     SubscriptionResponse,
     SubscriptionUpgradeRequest,
     TierInfoResponse,
@@ -62,13 +64,13 @@ async def check_feature(
     return await service.check_feature_access(current_user.id, feature_key)
 
 
-@router.post("/upgrade", response_model=SubscriptionResponse)
+@router.post("/upgrade", response_model=SubscriptionCheckoutResponse)
 async def upgrade_to_pro(
     request: SubscriptionUpgradeRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> SubscriptionResponse:
-    """Upgrade current user to Pro tier."""
+) -> SubscriptionCheckoutResponse:
+    """Upgrade current user to Pro tier via PIX checkout."""
     service = SubscriptionService(db)
 
     # Check if already Pro
@@ -78,29 +80,63 @@ async def upgrade_to_pro(
             detail="User is already on Pro tier",
         )
 
+    use_pix = request.payment_provider == "pix"
+
     sub = await service.upgrade_to_pro(
         user_id=current_user.id,
         source=request.source,
         external_subscription_id=request.external_payment_id,
         payment_provider=request.payment_provider,
+        pending=use_pix,
     )
 
-    return SubscriptionResponse(
-        id=sub.id,
-        user_id=sub.user_id,
-        tier=sub.tier,
-        status=sub.status,
-        source=sub.source,
+    pix_copy_paste = None
+    pix_qr_code = None
+    if use_pix:
+        pix_copy_paste = (
+            f"00020126580014br.gov.bcb.pix0136{sub.id}"
+            f"5204000053039865802BR5913MyFit Pro6009SAO PAULO"
+            f"62070503***6304"
+        )
+        pix_qr_code = pix_copy_paste
+
+    return SubscriptionCheckoutResponse(
+        subscription_id=sub.id,
         amount_cents=sub.amount_cents,
-        currency=sub.currency,
-        started_at=sub.started_at,
-        expires_at=sub.expires_at,
-        trial_ends_at=sub.trial_ends_at,
-        is_founder=sub.is_founder,
-        is_active=sub.is_active,
-        is_pro=sub.is_pro,
-        created_at=sub.created_at,
+        price_display="R$ 19,90/mês",
+        payment_provider=request.payment_provider or "direct",
+        status=sub.status.value,
+        pix_qr_code=pix_qr_code,
+        pix_copy_paste=pix_copy_paste,
     )
+
+
+@router.get("/{subscription_id}/status")
+async def get_subscription_status(
+    subscription_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Get subscription payment status (for polling)."""
+    service = SubscriptionService(db)
+    sub = await service.get_subscription_by_id(subscription_id)
+
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Subscription not found",
+        )
+
+    if sub.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not your subscription",
+        )
+
+    return {
+        "status": sub.status.value,
+        "subscription_id": str(sub.id),
+    }
 
 
 @router.post("/cancel", response_model=SubscriptionResponse)

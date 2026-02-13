@@ -189,6 +189,13 @@ class ConsultancyTransactionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ConsultancyCheckoutResponse(ConsultancyTransactionResponse):
+    """Schema for consultancy checkout with PIX payment data."""
+
+    pix_qr_code: str | None = None
+    pix_copy_paste: str | None = None
+
+
 class ConsultancyTransactionListResponse(BaseModel):
     """Schema for transaction list response."""
 

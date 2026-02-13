@@ -20,6 +20,7 @@ from .models import (
     TransactionStatus,
 )
 from .schemas import (
+    ConsultancyCheckoutResponse,
     ConsultancyListingCreate,
     ConsultancyListingListResponse,
     ConsultancyListingResponse,
@@ -497,13 +498,13 @@ async def delete_listing(
 # --- Transactions ---
 
 
-@router.post("/purchase", response_model=ConsultancyTransactionResponse, status_code=status.HTTP_201_CREATED)
+@router.post("/purchase", response_model=ConsultancyCheckoutResponse, status_code=status.HTTP_201_CREATED)
 async def purchase_consultancy(
     request: ConsultancyPurchaseRequest,
     current_user: CurrentUser,
     db: Annotated[AsyncSession, Depends(get_db)],
-) -> ConsultancyTransactionResponse:
-    """Purchase a consultancy service."""
+) -> ConsultancyCheckoutResponse:
+    """Purchase a consultancy service with PIX checkout."""
     listing = await db.get(ConsultancyListing, request.listing_id)
 
     if not listing or not listing.is_active or listing.deleted_at:
@@ -548,7 +549,50 @@ async def purchase_consultancy(
     result = await db.execute(query)
     txn = result.scalar_one()
 
-    return _transaction_to_response(txn)
+    # Generate PIX data if payment_provider is pix
+    pix_copy_paste = None
+    pix_qr_code = None
+    if request.payment_provider == "pix":
+        pix_copy_paste = (
+            f"00020126580014br.gov.bcb.pix0136{txn.id}"
+            f"5204000053039865802BR5925{listing.title[:25]}"
+            f"6009SAO PAULO62070503***6304"
+        )
+        pix_qr_code = pix_copy_paste
+
+    base = _transaction_to_response(txn)
+    return ConsultancyCheckoutResponse(
+        **base.model_dump(),
+        pix_qr_code=pix_qr_code,
+        pix_copy_paste=pix_copy_paste,
+    )
+
+
+@router.get("/transactions/{transaction_id}/status")
+async def get_transaction_status(
+    transaction_id: UUID,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """Get transaction payment status (for polling)."""
+    txn = await db.get(ConsultancyTransaction, transaction_id)
+
+    if not txn:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+
+    if txn.buyer_id != current_user.id and txn.seller_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to view this transaction",
+        )
+
+    return {
+        "status": txn.status.value,
+        "transaction_id": str(txn.id),
+    }
 
 
 @router.get("/transactions", response_model=ConsultancyTransactionListResponse)

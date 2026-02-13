@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-13
+
+### Added
+- **Subscription PIX Checkout** - PIX payment flow for Pro upgrades
+  - `POST /subscriptions/upgrade` now returns `SubscriptionCheckoutResponse` with PIX data when `payment_provider=pix`
+  - Subscription created with `PENDING` status until payment confirmed
+  - `GET /subscriptions/{id}/status` endpoint for payment status polling
+  - PIX placeholder BRCODE generation (gateway integration TBD)
+  - `PENDING` added to `SubscriptionStatus` enum
+- **Consultancy PIX Checkout** - PIX payment flow for consultancy purchases
+  - `POST /consultancy/purchase` now returns `ConsultancyCheckoutResponse` with PIX data
+  - `GET /consultancy/transactions/{id}/status` endpoint for payment status polling
+  - PIX placeholder BRCODE generation matching marketplace pattern
+
+### Changed
+- `SubscriptionCheckoutResponse` schema added with `pix_qr_code`, `pix_copy_paste`, `subscription_id`, `amount_cents`, `price_display`
+- `ConsultancyCheckoutResponse` schema extends `ConsultancyTransactionResponse` with PIX fields
+- `_sync_enum_values()` now includes `subscription_status_enum` with `pending` value
+
+---
+
 ## [0.8.0] - 2026-02-11
 
 ### Added

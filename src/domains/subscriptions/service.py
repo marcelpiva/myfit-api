@@ -195,6 +195,7 @@ class SubscriptionService:
         is_founder: bool = False,
         external_subscription_id: str | None = None,
         payment_provider: str | None = None,
+        pending: bool = False,
     ) -> PlatformSubscription:
         """Upgrade a user to Pro tier."""
         # Deactivate existing subscription if any
@@ -206,7 +207,7 @@ class SubscriptionService:
         sub = PlatformSubscription(
             user_id=user_id,
             tier=PlatformTier.PRO,
-            status=SubscriptionStatus.ACTIVE,
+            status=SubscriptionStatus.PENDING if pending else SubscriptionStatus.ACTIVE,
             source=source,
             amount_cents=amount_cents,
             started_at=datetime.now(timezone.utc),
@@ -220,6 +221,10 @@ class SubscriptionService:
         await self.db.commit()
         await self.db.refresh(sub)
         return sub
+
+    async def get_subscription_by_id(self, subscription_id: uuid.UUID) -> PlatformSubscription | None:
+        """Get a subscription by its ID."""
+        return await self.db.get(PlatformSubscription, subscription_id)
 
     async def grant_trial(
         self, user_id: uuid.UUID, days: int = 7, source: SubscriptionSource = SubscriptionSource.REFERRAL

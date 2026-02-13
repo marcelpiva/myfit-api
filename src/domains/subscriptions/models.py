@@ -30,6 +30,7 @@ class PlatformTier(str, enum.Enum):
 class SubscriptionStatus(str, enum.Enum):
     """Subscription status."""
 
+    PENDING = "pending"
     ACTIVE = "active"
     CANCELLED = "cancelled"
     EXPIRED = "expired"
@@ -113,7 +114,7 @@ class PlatformSubscription(Base, UUIDMixin, TimestampMixin):
     @property
     def is_active(self) -> bool:
         """Check if subscription is currently active."""
-        if self.status in (SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED):
+        if self.status in (SubscriptionStatus.PENDING, SubscriptionStatus.CANCELLED, SubscriptionStatus.EXPIRED):
             return False
         if self.expires_at and datetime.now(self.expires_at.tzinfo or None) > self.expires_at:
             return False

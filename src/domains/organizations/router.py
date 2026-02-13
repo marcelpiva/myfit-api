@@ -28,6 +28,8 @@ from src.domains.organizations.service import OrganizationService
 from src.domains.users.service import UserService
 from src.domains.notifications.push_service import send_push_notification
 from src.domains.notifications.router import create_notification
+from src.domains.subscriptions.service import SubscriptionService
+from src.domains.subscriptions.models import PlatformTier
 from src.domains.notifications.schemas import NotificationCreate
 from src.domains.notifications.models import NotificationType
 
@@ -466,6 +468,23 @@ async def add_member(
             detail="Admin permission required",
         )
 
+    # Check student limit if adding a student
+    if request.role == UserRole.student:
+        sub_service = SubscriptionService(db)
+        can_add, current_count, limit = await sub_service.can_add_student(current_user.id)
+        if not can_add:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "student_limit_reached",
+                    "message": f"Você atingiu o limite de {limit} alunos no plano gratuito. Faça upgrade para Pro para alunos ilimitados.",
+                    "current_count": current_count,
+                    "limit": limit,
+                    "current_tier": PlatformTier.FREE.value,
+                    "upgrade_required": True,
+                },
+            )
+
     # Check if user exists
     user_service = UserService(db)
     user = await user_service.get_user_by_id(request.user_id)
@@ -682,6 +701,23 @@ async def create_invite(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Professional permission required",
         )
+
+    # Check student limit if inviting a student
+    if request.role == UserRole.student:
+        sub_service = SubscriptionService(db)
+        can_add, current_count, limit = await sub_service.can_add_student(current_user.id)
+        if not can_add:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "error": "student_limit_reached",
+                    "message": f"Você atingiu o limite de {limit} alunos no plano gratuito. Faça upgrade para Pro para alunos ilimitados.",
+                    "current_count": current_count,
+                    "limit": limit,
+                    "current_tier": PlatformTier.FREE.value,
+                    "upgrade_required": True,
+                },
+            )
 
     # Self-invite is allowed - trainer can add themselves as a student
     # to follow their own training plans
