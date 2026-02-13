@@ -390,14 +390,15 @@ async def create_listing(
         ProfessionalProfile.user_id == current_user.id
     )
     prof_result = await db.execute(prof_query)
-    if not prof_result.scalar_one_or_none():
+    profile = prof_result.scalar_one_or_none()
+    if not profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Create a professional profile first before listing consultancies",
         )
 
     listing = ConsultancyListing(
-        professional_id=current_user.id,
+        professional_id=profile.id,
         commission_rate=0,  # 0% during launch phase
         **request.model_dump(),
     )
