@@ -279,6 +279,14 @@ class SessionComplete(BaseModel):
     student_feedback: str | None = None
 
 
+class SessionFeedbackUpdate(BaseModel):
+    """Post-completion feedback update."""
+
+    rating: int | None = Field(None, ge=1, le=5)
+    student_feedback: str | None = None
+    trainer_notes: str | None = None
+
+
 class SessionResponse(BaseModel):
     """Session response."""
 

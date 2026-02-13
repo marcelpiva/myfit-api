@@ -152,6 +152,35 @@ from src.domains.billing.models import (
     ServicePlanType,
 )
 
+# Subscriptions domain
+from src.domains.subscriptions.models import (
+    FeatureDefinition,
+    PlatformSubscription,
+    PlatformTier,
+    SubscriptionSource,
+    SubscriptionStatus,
+)
+
+# Consultancy domain
+from src.domains.consultancy.models import (
+    ConsultancyCategory,
+    ConsultancyFormat,
+    ConsultancyListing,
+    ConsultancyReview,
+    ConsultancyTransaction,
+    ProfessionalProfile,
+    TransactionStatus,
+)
+
+# Referrals domain
+from src.domains.referrals.models import (
+    Referral,
+    ReferralCode,
+    ReferralReward,
+    RewardStatus,
+    RewardType,
+)
+
 __all__ = [
     # Users
     "User",
@@ -262,4 +291,24 @@ __all__ = [
     "RecurrenceType",
     "ServicePlan",
     "ServicePlanType",
+    # Subscriptions
+    "PlatformSubscription",
+    "FeatureDefinition",
+    "PlatformTier",
+    "SubscriptionStatus",
+    "SubscriptionSource",
+    # Consultancy
+    "ProfessionalProfile",
+    "ConsultancyListing",
+    "ConsultancyTransaction",
+    "ConsultancyReview",
+    "ConsultancyCategory",
+    "ConsultancyFormat",
+    "TransactionStatus",
+    # Referrals
+    "ReferralCode",
+    "Referral",
+    "ReferralReward",
+    "RewardType",
+    "RewardStatus",
 ]

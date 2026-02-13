@@ -11,13 +11,16 @@ from src.domains.auth.router import router as auth_router
 from src.domains.billing.router import router as billing_router
 from src.domains.chat.router import router as chat_router
 from src.domains.checkin.router import router as checkin_router
+from src.domains.consultancy.router import router as consultancy_router
 from src.domains.gamification.router import router as gamification_router
 from src.domains.marketplace.router import router as marketplace_router
 from src.domains.notifications.router import router as notifications_router
 from src.domains.nutrition.router import router as nutrition_router
 from src.domains.organizations.router import router as organizations_router
 from src.domains.progress.router import router as progress_router
+from src.domains.referrals.router import router as referrals_router
 from src.domains.schedule.router import router as schedule_router
+from src.domains.subscriptions.router import router as subscriptions_router
 from src.domains.trainers.router import router as trainers_router
 from src.domains.users.router import router as users_router
 from src.domains.workouts.router import router as workouts_router
@@ -178,6 +181,9 @@ def create_app() -> FastAPI:
     app.include_router(billing_router, prefix=f"{settings.API_V1_PREFIX}/billing", tags=["Billing"])
     app.include_router(chat_router, prefix=f"{settings.API_V1_PREFIX}/chat", tags=["Chat"])
     app.include_router(notifications_router, prefix=f"{settings.API_V1_PREFIX}/notifications", tags=["Notifications"])
+    app.include_router(subscriptions_router, prefix=f"{settings.API_V1_PREFIX}/subscriptions", tags=["Subscriptions"])
+    app.include_router(consultancy_router, prefix=f"{settings.API_V1_PREFIX}/consultancy", tags=["Consultancy"])
+    app.include_router(referrals_router, prefix=f"{settings.API_V1_PREFIX}/referrals", tags=["Referrals"])
 
     # Legacy routes without /api/v1 prefix (for backwards compatibility)
     app.include_router(organizations_router, prefix="/organizations", tags=["Organizations (Legacy)"])

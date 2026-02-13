@@ -59,6 +59,7 @@ from src.domains.workouts.schemas import (
     PlanVersionUpdateRequest,
     PlanWorkoutInput,
     SessionComplete,
+    SessionFeedbackUpdate,
     SessionJoinResponse,
     SessionListResponse,
     SessionMessageCreate,
@@ -945,6 +946,44 @@ async def complete_session(
     )
 
     return SessionResponse.model_validate(completed)
+
+
+@router.patch("/sessions/{session_id}/feedback", response_model=SessionResponse)
+async def update_session_feedback(
+    session_id: UUID,
+    request: SessionFeedbackUpdate,
+    current_user: CurrentUser,
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> SessionResponse:
+    """Update feedback/rating on a completed session."""
+    workout_service = WorkoutService(db)
+    session = await workout_service.get_session_by_id(session_id)
+
+    if not session:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Session not found",
+        )
+
+    # Student can update rating/feedback, trainer can update notes
+    is_student = session.user_id == current_user.id
+    is_trainer = session.trainer_id == current_user.id
+    if not is_student and not is_trainer:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Access denied",
+        )
+
+    if request.rating is not None and is_student:
+        session.rating = request.rating
+    if request.student_feedback is not None and is_student:
+        session.student_feedback = request.student_feedback
+    if request.trainer_notes is not None and is_trainer:
+        session.trainer_notes = request.trainer_notes
+
+    await db.commit()
+    await db.refresh(session)
+    return SessionResponse.model_validate(session)
 
 
 @router.post("/sessions/{session_id}/sets", response_model=SessionSetResponse, status_code=status.HTTP_201_CREATED)
