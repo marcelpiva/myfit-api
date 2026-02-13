@@ -55,6 +55,8 @@ async def run_pending_migrations():
         ("add_group_sessions", "src.migrations.add_group_sessions"),
         ("add_session_evaluations", "src.migrations.add_session_evaluations"),
         ("add_waitlist_templates", "src.migrations.add_waitlist_templates"),
+        ("add_business_model", "src.migrations.add_business_model"),
+        ("fix_consultancy_listing_fk", "src.migrations.fix_consultancy_listing_fk"),
     ]
 
     for name, module_path in migrations:

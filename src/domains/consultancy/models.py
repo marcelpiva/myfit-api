@@ -132,7 +132,7 @@ class ConsultancyListing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
 
     professional_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("users.id", ondelete="CASCADE"),
+        ForeignKey("professional_profiles.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
