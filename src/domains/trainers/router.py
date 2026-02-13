@@ -737,7 +737,7 @@ async def reinvite_former_student(
             data={"type": "reinvite", "invite_id": str(invite.id)},
             db=db,
         )
-    except Exception as e:
+    except (ConnectionError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to send push notification for reinvite: {e}")
 
     # Send invite email in background
@@ -975,7 +975,7 @@ async def generate_trainer_bio(
 ) -> dict:
     """Generate a professional bio for a trainer using AI."""
     import os
-    from openai import AsyncOpenAI
+    from openai import AsyncOpenAI, OpenAIError
 
     name = request.get("name", current_user.name or "")
     specialties = request.get("specialties", "")
@@ -1003,9 +1003,9 @@ async def generate_trainer_bio(
         )
         bio = response.choices[0].message.content.strip().strip('"')
         return {"bio": bio}
-    except Exception as e:
+    except (OpenAIError, ValueError, KeyError) as e:
         logger.error(f"AI bio generation failed: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Falha ao gerar bio com IA",
-        )
+        ) from e

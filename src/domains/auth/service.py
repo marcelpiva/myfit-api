@@ -280,7 +280,7 @@ class AuthService:
                     "email_verified": data.get("email_verified") == "true",
                 }
 
-        except Exception as e:
+        except (httpx.HTTPError, KeyError, ValueError) as e:
             logger.error(f"Error verifying Google token: {e}")
             return None
 
@@ -296,7 +296,11 @@ class AuthService:
         try:
             import jwt
             from jwt import PyJWKClient
+        except ImportError as e:
+            logger.error(f"PyJWT not installed, cannot verify Apple token: {e}")
+            return None
 
+        try:
             # Get Apple's public keys
             jwks_client = PyJWKClient("https://appleid.apple.com/auth/keys")
             signing_key = jwks_client.get_signing_key_from_jwt(id_token)
@@ -316,7 +320,7 @@ class AuthService:
                 "email_verified": data.get("email_verified", False),
             }
 
-        except Exception as e:
+        except (jwt.PyJWTError, KeyError, ValueError, ConnectionError) as e:
             logger.error(f"Error verifying Apple token: {e}")
             return None
 

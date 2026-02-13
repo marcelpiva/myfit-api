@@ -5,6 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -184,7 +185,7 @@ async def create_organization(
                 invited_by=None,
             )
         return response
-    except Exception as e:
+    except (SQLAlchemyError, ValueError) as e:
         logger.error("create_org_failed", error=str(e), type=type(e).__name__, exc_info=True)
         raise
 
@@ -228,7 +229,7 @@ async def create_autonomous_organization(
                 invited_by=None,
             )
         return response
-    except Exception as e:
+    except (SQLAlchemyError, ValueError) as e:
         logger.error("create_autonomous_failed", error=str(e), type=type(e).__name__, exc_info=True)
         raise
 
@@ -389,7 +390,7 @@ async def reactivate_organization(
                         body=f"{org.name} retomou as atividades.",
                         data={"organization_id": str(org_id), "type": "organization_reactivated"},
                     )
-                except Exception:
+                except (ConnectionError, OSError, RuntimeError):
                     # Don't fail if push notification fails
                     pass
 

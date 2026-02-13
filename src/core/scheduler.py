@@ -4,6 +4,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import and_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import AsyncSessionLocal
@@ -43,7 +44,7 @@ class BackgroundScheduler:
                 async with AsyncSessionLocal() as db:
                     await self._send_24h_reminders(db)
                     await self._send_1h_reminders(db)
-            except Exception as e:
+            except Exception as e:  # catch-all for logging: background loop must not crash
                 logger.error("Reminder loop error: %s", e)
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=300)  # 5 min
@@ -57,7 +58,7 @@ class BackgroundScheduler:
             try:
                 async with AsyncSessionLocal() as db:
                     await self._send_package_expiry_alerts(db)
-            except Exception as e:
+            except Exception as e:  # catch-all for logging: background loop must not crash
                 logger.error("Package expiry loop error: %s", e)
             try:
                 await asyncio.wait_for(self._stop_event.wait(), timeout=3600)  # 1 hour
@@ -105,7 +106,7 @@ class BackgroundScheduler:
                 appt.reminder_24h_sent = True
                 await db.commit()
                 logger.info("Sent 24h reminder for appointment %s", appt.id)
-            except Exception as e:
+            except (SQLAlchemyError, OSError, RuntimeError) as e:
                 logger.error("Failed to send 24h reminder for %s: %s", appt.id, e)
                 await db.rollback()
 
@@ -147,7 +148,7 @@ class BackgroundScheduler:
                 appt.reminder_1h_sent = True
                 await db.commit()
                 logger.info("Sent 1h reminder for appointment %s", appt.id)
-            except Exception as e:
+            except (SQLAlchemyError, OSError, RuntimeError) as e:
                 logger.error("Failed to send 1h reminder for %s: %s", appt.id, e)
                 await db.rollback()
 
@@ -185,7 +186,7 @@ class BackgroundScheduler:
                         data={"type": "PACKAGE_EXPIRY", "service_plan_id": str(plan.id)},
                     )
                 logger.info("Sent package expiry alert for plan %s (%d remaining)", plan.id, remaining)
-            except Exception as e:
+            except (SQLAlchemyError, OSError, RuntimeError) as e:
                 logger.error("Failed to send package expiry alert for %s: %s", plan.id, e)
 
 

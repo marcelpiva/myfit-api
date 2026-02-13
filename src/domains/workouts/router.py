@@ -19,6 +19,7 @@ def _str_to_uuid(value: str | UUID | None) -> UUID | None:
     except (ValueError, TypeError):
         return None
 from fastapi.responses import StreamingResponse
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -894,7 +895,7 @@ async def start_session(
                     "is_shared": str(request.is_shared).lower(),
                 },
             )
-        except Exception as e:
+        except (ConnectionError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to send notifications to trainer {trainer_id}: {e}")
 
         # If co-training requested, also send SSE notification
@@ -1413,7 +1414,7 @@ async def create_plan_assignment(
                 "trainer_name": current_user.name or current_user.email,
             },
         )
-    except Exception as e:
+    except (ConnectionError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to send notifications to student {request.student_id}: {e}")
 
     return PlanAssignmentResponse(
@@ -1565,7 +1566,7 @@ async def create_batch_plan_assignment(
                         "trainer_name": current_user.name or current_user.email,
                     },
                 )
-            except Exception as e:
+            except (ConnectionError, OSError, RuntimeError) as e:
                 logger.warning(f"Failed to send notifications to student {student_id}: {e}")
 
             results.append(BatchPlanAssignmentResult(
@@ -1576,7 +1577,7 @@ async def create_batch_plan_assignment(
             ))
             successful += 1
 
-        except Exception as e:
+        except (SQLAlchemyError, ValueError, RuntimeError) as e:
             logger.error(f"Error assigning plan to student {student_id}: {e}")
             student = await user_service.get_user_by_id(student_id)
             results.append(BatchPlanAssignmentResult(
@@ -1689,7 +1690,7 @@ async def respond_to_plan_assignment(
                     "plan_name": plan.name if plan else "",
                 },
             )
-        except Exception as e:
+        except (ConnectionError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to send notification to trainer {assignment.trainer_id}: {e}")
 
     version = getattr(assignment, 'version', 1)
@@ -1789,7 +1790,7 @@ async def acknowledge_plan_assignment(
                     "plan_name": plan.name if plan else "",
                 },
             )
-        except Exception as e:
+        except (ConnectionError, OSError, RuntimeError) as e:
             logger.warning(f"Failed to send notification to trainer {acknowledged.trainer_id}: {e}")
 
     version = getattr(acknowledged, 'version', 1)
@@ -2126,7 +2127,7 @@ async def update_plan_assignment_with_version(
                 data={"assignment_id": str(assignment_id), "version": assignment.version},
             ),
         )
-    except Exception as e:
+    except (ConnectionError, OSError, RuntimeError) as e:
         logger.warning(f"Failed to create notification for plan update: {e}")
 
     return PlanAssignmentResponse(
@@ -2947,7 +2948,7 @@ async def create_exercise_feedback(
                     },
                 )
                 logger.info(f"Push notification sent to trainer {membership.invited_by_id} for swap request")
-        except Exception as e:
+        except (ConnectionError, OSError, RuntimeError) as e:
             # Don't fail the request if notification fails
             logger.error(f"Failed to send swap notification: {e}")
 
@@ -3128,7 +3129,7 @@ async def respond_to_exercise_feedback(
             },
         )
         logger.info(f"Push notification sent to student {feedback.student_id} for feedback response")
-    except Exception as e:
+    except (ConnectionError, OSError, RuntimeError) as e:
         # Don't fail the request if notification fails
         logger.error(f"Failed to send feedback response notification: {e}")
 
@@ -3411,9 +3412,9 @@ async def update_workout(
                         "workout_name": updated.name,
                     },
                 )
-            except Exception as e:
+            except (ConnectionError, OSError, RuntimeError) as e:
                 logger.warning(f"Failed to send push notification to student {student_id}: {e}")
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         logger.error(f"Failed to notify students about workout update: {e}")
 
     return WorkoutResponse.model_validate(updated)
@@ -3570,9 +3571,9 @@ async def add_exercise(
                         "workout_name": workout.name,
                     },
                 )
-            except Exception as e:
+            except (ConnectionError, OSError, RuntimeError) as e:
                 logger.warning(f"Failed to send push notification to student {student_id}: {e}")
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         logger.error(f"Failed to notify students about workout update: {e}")
 
     return WorkoutResponse.model_validate(workout)
@@ -3629,9 +3630,9 @@ async def remove_exercise(
                         "workout_name": workout.name,
                     },
                 )
-            except Exception as e:
+            except (ConnectionError, OSError, RuntimeError) as e:
                 logger.warning(f"Failed to send push notification to student {student_id}: {e}")
-    except Exception as e:
+    except (SQLAlchemyError, RuntimeError) as e:
         logger.error(f"Failed to notify students about workout update: {e}")
 
 

@@ -15,6 +15,7 @@ from typing import BinaryIO, Literal
 
 import aiofiles
 import aiofiles.os
+from botocore.exceptions import BotoCoreError, ClientError
 
 from src.config.settings import settings
 
@@ -194,9 +195,9 @@ class StorageService:
             # AWS S3 URL
             return f"https://{settings.S3_BUCKET_NAME}.s3.{settings.AWS_REGION}.amazonaws.com/{path}"
 
-        except Exception as e:
+        except (BotoCoreError, ClientError, OSError) as e:
             logger.error(f"Failed to upload to S3: {e}")
-            raise StorageError(f"Failed to upload file: {e}")
+            raise StorageError(f"Failed to upload file: {e}") from e
 
     async def upload_avatar(
         self,
@@ -317,7 +318,7 @@ class StorageService:
             logger.info(f"Deleted S3 file: {path}")
             return True
 
-        except Exception as e:
+        except (BotoCoreError, ClientError, OSError) as e:
             logger.error(f"Failed to delete file: {e}")
             return False
 
@@ -375,9 +376,9 @@ class StorageService:
 
             return upload_url, final_url
 
-        except Exception as e:
+        except (BotoCoreError, ClientError, OSError) as e:
             logger.error(f"Failed to generate presigned URL: {e}")
-            raise StorageError(f"Failed to generate upload URL: {e}")
+            raise StorageError(f"Failed to generate upload URL: {e}") from e
 
 
 # Singleton instance

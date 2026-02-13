@@ -115,8 +115,8 @@ class SessionManager:
             for queue in self._subscribers[session_id]:
                 try:
                     await queue.put(event)
-                except Exception:
-                    pass
+                except (asyncio.QueueFull, RuntimeError):
+                    pass  # Best-effort broadcast to subscribers
 
     def update_state(self, session_id: uuid.UUID, state: dict) -> None:
         """Update cached session state."""

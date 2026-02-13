@@ -1,5 +1,6 @@
 """Schedule router for appointment management."""
 import json
+import logging
 from datetime import date, datetime, time, timedelta
 from typing import Annotated
 from uuid import UUID
@@ -8,6 +9,8 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import Response
 from sqlalchemy import and_, extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+
+schedule_logger = logging.getLogger(__name__)
 
 from src.config.database import get_db
 from src.domains.auth.dependencies import CurrentUser
@@ -760,8 +763,8 @@ async def cancel_appointment(
             f"Sua sessão de {appointment.date_time.strftime('%d/%m às %H:%M')} foi cancelada.",
             data={"type": "APPOINTMENT_CANCELLED", "appointment_id": str(appointment.id)},
         )
-    except Exception:
-        pass  # Don't fail the cancel if notification fails
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Push notification failed on cancel: %s", e)
 
     return _appointment_to_response(appointment)
 
@@ -807,8 +810,8 @@ async def confirm_appointment(
             f"Sessão de {appointment.date_time.strftime('%d/%m às %H:%M')} foi confirmada.",
             data={"type": "APPOINTMENT_CONFIRMED", "appointment_id": str(appointment.id)},
         )
-    except Exception:
-        pass  # Don't fail the confirm if notification fails
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Push notification failed on confirm: %s", e)
 
     return _appointment_to_response(appointment)
 
@@ -1548,8 +1551,8 @@ async def student_book_session(
                 sender_id=current_user.id,
             ),
         )
-    except Exception:
-        pass  # Don't fail booking if notification fails
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Push notification failed on booking: %s", e)
 
     return _appointment_to_response(appointment)
 
@@ -1807,8 +1810,8 @@ async def update_attendance(
                             reference_id=_plan.id,
                         ),
                     )
-        except Exception:
-            pass  # Non-critical
+        except (ConnectionError, OSError, RuntimeError) as e:
+            schedule_logger.debug("Package expiry notification failed: %s", e)
 
     # If missed + grant_makeup, create a makeup appointment placeholder
     makeup_appointment = None
@@ -1856,8 +1859,8 @@ async def update_attendance(
                 sender_id=current_user.id,
             ),
         )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Attendance notification failed: %s", e)
 
     # Send push notification for attendance update
     try:
@@ -1867,8 +1870,8 @@ async def update_attendance(
             f"{label}{makeup_note} para sessão de {appointment.date_time.strftime('%d/%m %H:%M')}",
             data={"type": "ATTENDANCE_MARKED", "appointment_id": str(appointment.id)},
         )
-    except Exception:
-        pass  # Don't fail the attendance update if notification fails
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Push notification failed on attendance update: %s", e)
 
     return _appointment_to_response(appointment)
 
@@ -2458,8 +2461,8 @@ async def create_waitlist_entry(
             f"{student_name} está na lista de espera para horário.",
             data={"type": "WAITLIST_NEW", "waitlist_id": str(entry.id)},
         )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Waitlist notification failed: %s", e)
 
     return WaitlistEntryResponse(
         id=entry.id,
@@ -2614,8 +2617,8 @@ async def offer_waitlist_slot(
             f"Um horário foi oferecido para você: {dt_str}. Aceite agora!",
             data={"type": "WAITLIST_OFFER", "waitlist_id": str(entry.id), "appointment_id": str(appointment.id)},
         )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Waitlist offer notification failed: %s", e)
 
     return WaitlistEntryResponse(
         id=entry.id,
@@ -2686,8 +2689,8 @@ async def accept_waitlist_offer(
             f"{student_name} aceitou o horário oferecido da lista de espera.",
             data={"type": "WAITLIST_ACCEPTED", "waitlist_id": str(entry.id)},
         )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError) as e:
+        schedule_logger.debug("Waitlist accepted notification failed: %s", e)
 
     return WaitlistEntryResponse(
         id=entry.id,

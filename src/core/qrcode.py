@@ -53,7 +53,7 @@ def generate_qr_code_base64(
     except ImportError:
         logger.warning("qrcode library not installed. QR code generation unavailable.")
         return None
-    except Exception as e:
+    except (ValueError, OSError) as e:
         logger.error(f"Error generating QR code: {e}")
         return None
 

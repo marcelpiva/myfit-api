@@ -6,6 +6,13 @@ from src.config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Redis-specific exception type for narrowed catch blocks
+_RedisError: type = Exception  # fallback
+try:
+    from redis.exceptions import RedisError as _RedisError  # type: ignore[assignment]
+except ImportError:
+    pass
+
 # In-memory fallback for development when Redis is not available
 _memory_store: dict[str, tuple[str, float | None]] = {}
 _use_memory_fallback = False
@@ -28,7 +35,7 @@ async def get_redis():
         client = redis.Redis(connection_pool=pool)
         await client.ping()
         return client
-    except Exception as e:
+    except (ImportError, OSError, ConnectionError, _RedisError) as e:
         logger.warning(f"Redis not available, using in-memory fallback: {e}")
         _use_memory_fallback = True
         return None

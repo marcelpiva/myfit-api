@@ -67,7 +67,7 @@ def _init_firebase():
         logger.warning(f"🔔 ❌ firebase-admin package not installed: {e}")
         logger.warning("🔔 Run: pip install firebase-admin")
         return None
-    except Exception as e:
+    except (ValueError, json.JSONDecodeError, FileNotFoundError, OSError) as e:
         logger.error(f"🔔 ❌ Failed to initialize Firebase Admin SDK: {e}")
         import traceback
         logger.error(f"🔔 Traceback: {traceback.format_exc()}")
@@ -105,7 +105,7 @@ def get_firebase_status() -> dict:
         status["firebase_initialized"] = True
         try:
             status["project_id"] = app.project_id
-        except Exception:
+        except AttributeError:
             pass
 
     return status
@@ -235,7 +235,7 @@ async def send_push_notification(
             logger.error(f"🔔 [PUSH] ❌ Invalid argument error: {e}")
             logger.error("🔔 [PUSH] This might indicate an invalid token format")
 
-        except Exception as e:
+        except (messaging.FirebaseError, ConnectionError, OSError) as e:
             logger.error(f"🔔 [PUSH] ❌ Failed to send push notification: {e}")
             import traceback
             logger.error(f"🔔 [PUSH] Traceback: {traceback.format_exc()}")
@@ -314,6 +314,6 @@ async def send_push_to_topic(
         logger.info(f"Topic notification sent to '{topic}': {response}")
         return True
 
-    except Exception as e:
+    except (messaging.FirebaseError, ConnectionError, OSError) as e:
         logger.error(f"Failed to send topic notification: {e}")
         return False

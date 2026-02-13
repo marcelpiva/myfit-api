@@ -5,7 +5,7 @@ import uuid
 from typing import Any
 
 import structlog
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from src.config.settings import settings
 from src.domains.workouts.models import Difficulty, WorkoutGoal
@@ -84,7 +84,7 @@ class AIExerciseService:
                     allow_advanced_techniques=allow_advanced_techniques,
                     allowed_techniques=allowed_techniques,
                 )
-            except Exception as e:
+            except (OpenAIError, json.JSONDecodeError, KeyError, ValueError) as e:
                 logger.warning("ai_suggestion_fallback", error=str(e), type=type(e).__name__)
 
         # Fallback to rule-based selection
@@ -1509,7 +1509,7 @@ Responda APENAS com um JSON valido no formato:
                 preferences=preferences,
                 duration_weeks=duration_weeks,
             )
-        except Exception as e:
+        except (OpenAIError, json.JSONDecodeError, KeyError, ValueError) as e:
             logger.warning("ai_plan_generation_failed", error=str(e), type=type(e).__name__)
             return None
 

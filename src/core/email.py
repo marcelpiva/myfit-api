@@ -52,7 +52,7 @@ class EmailService:
             logger.info(f"Email sent successfully to {to_email}, id: {email.get('id')}")
             return True
 
-        except Exception as e:
+        except (resend.exceptions.ResendError, ConnectionError, OSError) as e:
             logger.error(f"Failed to send email to {to_email}: {e}")
             return False
 

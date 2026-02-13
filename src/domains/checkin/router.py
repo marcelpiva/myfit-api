@@ -5,6 +5,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, Header, HTTPException, Query, status
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.config.database import get_db
@@ -113,8 +114,8 @@ async def _auto_mark_attendance(db: AsyncSession, appointment_id: UUID, trainer_
                                 icon="package-minus",
                             ),
                         )
-                except Exception:
-                    pass  # Non-critical
+                except (ConnectionError, OSError, RuntimeError):
+                    pass  # Non-critical: notification delivery is best-effort
 
             elif plan.plan_type == ServicePlanType.DROP_IN and plan.per_session_cents:
                 payment = Payment(
@@ -453,7 +454,7 @@ async def checkout(
                 body=f"{current_user.name} encerrou a sessão",
                 data={"type": "checkin_ended", "checkin_id": str(checkin.id)},
             )
-    except Exception:
+    except (ConnectionError, OSError, RuntimeError):
         pass  # Push failure should not block checkout
 
     return CheckInResponse.model_validate(checkin)
@@ -506,8 +507,8 @@ async def checkout_by_id(
                 body=f"{current_user.name} encerrou sua sessão",
                 data={"type": "checkin_ended", "checkin_id": str(checkin.id)},
             )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError):
+        pass  # Push failure should not block checkout
 
     return CheckInResponse.model_validate(checkin)
 
@@ -644,7 +645,7 @@ async def respond_to_request(
                 "request_id": str(request_id),
             },
         )
-    except Exception:
+    except (ConnectionError, OSError, RuntimeError):
         pass  # Don't fail the response if push fails
 
     return CheckInRequestResponse.model_validate(updated_req)
@@ -782,8 +783,8 @@ async def manual_checkin_for_student(
                     "checkin_id": str(checkin.id),
                 },
             )
-        except Exception:
-            pass
+        except (ConnectionError, OSError, RuntimeError):
+            pass  # Push failure should not block checkin
 
     checkin = await service.get_checkin_by_id(checkin.id)
     return CheckInResponse.model_validate(checkin)
@@ -1022,15 +1023,14 @@ async def accept_checkin(
                             detail=f"Você está a {int(distance)}m do trainer. Aproxime-se (máx. 200m)",
                         )
 
-    logger = logging.getLogger(__name__)
     try:
         checkin = await service.accept_checkin(checkin)
-    except Exception as e:
+    except (SQLAlchemyError, ValueError, RuntimeError) as e:
         logger.exception(f"accept_checkin FAILED for checkin_id={checkin_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao aceitar check-in: {str(e)}",
-        )
+        ) from e
 
     # Send push notification to initiator
     try:
@@ -1044,13 +1044,13 @@ async def accept_checkin(
                 "checkin_id": str(checkin.id),
             },
         )
-    except Exception:
-        pass
+    except (ConnectionError, OSError, RuntimeError):
+        pass  # Push failure should not block accept
 
     try:
         checkin = await service.get_checkin_by_id(checkin.id)
         return CheckInResponse.model_validate(checkin)
-    except Exception as e:
+    except (SQLAlchemyError, ValueError) as e:
         logger.exception(f"accept_checkin serialization FAILED for checkin_id={checkin_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1087,15 +1087,14 @@ async def reject_checkin(
             detail="Você não tem permissão para rejeitar este check-in",
         )
 
-    logger = logging.getLogger(__name__)
     try:
         checkin = await service.reject_checkin(checkin)
-    except Exception as e:
+    except (SQLAlchemyError, ValueError, RuntimeError) as e:
         logger.exception(f"reject_checkin FAILED for checkin_id={checkin_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Erro ao rejeitar check-in: {str(e)}",
-        )
+        ) from e
 
     # Notify the other party
     notify_user_id = checkin.initiated_by if current_user.id != checkin.initiated_by else (
@@ -1113,13 +1112,13 @@ async def reject_checkin(
                     "checkin_id": str(checkin.id),
                 },
             )
-        except Exception:
-            pass
+        except (ConnectionError, OSError, RuntimeError):
+            pass  # Push failure should not block reject
 
     try:
         checkin = await service.get_checkin_by_id(checkin.id)
         return CheckInResponse.model_validate(checkin)
-    except Exception as e:
+    except (SQLAlchemyError, ValueError) as e:
         logger.exception(f"reject_checkin serialization FAILED for checkin_id={checkin_id}: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -1215,7 +1214,7 @@ async def end_training_session(
                 body=f"{current_user.name} encerrou a sessão de treino",
                 data={"type": "checkin_ended"},
             )
-        except Exception:
+        except (ConnectionError, OSError, RuntimeError):
             pass  # Push failure should not block session end
 
     return {"status": "ended"}
