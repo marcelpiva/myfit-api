@@ -8,9 +8,12 @@ For new installations, these columns will be created automatically by create_all
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -53,58 +56,58 @@ async def upgrade():
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN include_diet BOOLEAN DEFAULT FALSE NOT NULL")
             )
-            print("Added column: include_diet")
+            logger.info("added_column", column="include_diet")
 
         # Add diet_type column
         if "diet_type" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN diet_type VARCHAR(50)")
             )
-            print("Added column: diet_type")
+            logger.info("added_column", column="diet_type")
 
         # Add daily_calories column
         if "daily_calories" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN daily_calories INTEGER")
             )
-            print("Added column: daily_calories")
+            logger.info("added_column", column="daily_calories")
 
         # Add protein_grams column
         if "protein_grams" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN protein_grams INTEGER")
             )
-            print("Added column: protein_grams")
+            logger.info("added_column", column="protein_grams")
 
         # Add carbs_grams column
         if "carbs_grams" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN carbs_grams INTEGER")
             )
-            print("Added column: carbs_grams")
+            logger.info("added_column", column="carbs_grams")
 
         # Add fat_grams column
         if "fat_grams" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN fat_grams INTEGER")
             )
-            print("Added column: fat_grams")
+            logger.info("added_column", column="fat_grams")
 
         # Add meals_per_day column
         if "meals_per_day" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN meals_per_day INTEGER")
             )
-            print("Added column: meals_per_day")
+            logger.info("added_column", column="meals_per_day")
 
         # Add diet_notes column
         if "diet_notes" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_programs ADD COLUMN diet_notes TEXT")
             )
-            print("Added column: diet_notes")
+            logger.info("added_column", column="diet_notes")
 
-    print("Diet fields migration completed successfully!")
+    logger.info("diet_fields_migration_completed_successfully")
 
 
 if __name__ == "__main__":

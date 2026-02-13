@@ -8,9 +8,12 @@ For new installations, these columns will be created automatically by create_all
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -53,37 +56,37 @@ async def upgrade():
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN execution_instructions TEXT")
             )
-            print("Added column: execution_instructions")
+            logger.info("added_column", column="execution_instructions")
 
         # Add isometric_seconds column
         if "isometric_seconds" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN isometric_seconds INTEGER")
             )
-            print("Added column: isometric_seconds")
+            logger.info("added_column", column="isometric_seconds")
 
         # Add technique_type column with default value
         if "technique_type" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN technique_type VARCHAR(20) DEFAULT 'normal' NOT NULL")
             )
-            print("Added column: technique_type")
+            logger.info("added_column", column="technique_type")
 
         # Add exercise_group_id column
         if "exercise_group_id" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN exercise_group_id VARCHAR(50)")
             )
-            print("Added column: exercise_group_id")
+            logger.info("added_column", column="exercise_group_id")
 
         # Add exercise_group_order column with default value
         if "exercise_group_order" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN exercise_group_order INTEGER DEFAULT 0 NOT NULL")
             )
-            print("Added column: exercise_group_order")
+            logger.info("added_column", column="exercise_group_order")
 
-    print("Migration completed successfully!")
+    logger.info("migration_completed_successfully")
 
 
 if __name__ == "__main__":

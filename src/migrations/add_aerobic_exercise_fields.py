@@ -10,9 +10,12 @@ For new installations, these columns will be created automatically by create_all
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -68,11 +71,11 @@ async def upgrade():
                 await conn.execute(
                     text("CREATE TYPE exercise_mode_enum AS ENUM ('strength', 'duration', 'interval', 'distance')")
                 )
-                print("Created enum: exercise_mode_enum")
+                logger.info("created_enum", enum_name="exercise_mode_enum")
             except Exception as e:
                 # SQLite doesn't support enums, skip
                 if "syntax" not in str(e).lower():
-                    print(f"Note: Could not create enum (may be SQLite): {e}")
+                    logger.info("could_not_create_enum", enum_name="exercise_mode_enum", reason="may be SQLite", error=str(e))
 
         # Add exercise_mode column
         if "exercise_mode" not in existing_columns:
@@ -86,74 +89,74 @@ async def upgrade():
                 await conn.execute(
                     text("ALTER TABLE workout_exercises ADD COLUMN exercise_mode VARCHAR(20) DEFAULT 'strength' NOT NULL")
                 )
-            print("Added column: exercise_mode")
+            logger.info("added_column", column="exercise_mode")
         else:
-            print("Column exercise_mode already exists, skipping.")
+            logger.info("column_already_exists", column="exercise_mode")
 
         # Add duration_minutes column (Duration mode: total time in minutes)
         if "duration_minutes" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN duration_minutes INTEGER")
             )
-            print("Added column: duration_minutes")
+            logger.info("added_column", column="duration_minutes")
         else:
-            print("Column duration_minutes already exists, skipping.")
+            logger.info("column_already_exists", column="duration_minutes")
 
         # Add intensity column (Duration mode: low, moderate, high, max)
         if "intensity" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN intensity VARCHAR(20)")
             )
-            print("Added column: intensity")
+            logger.info("added_column", column="intensity")
         else:
-            print("Column intensity already exists, skipping.")
+            logger.info("column_already_exists", column="intensity")
 
         # Add work_seconds column (Interval mode: work interval duration)
         if "work_seconds" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN work_seconds INTEGER")
             )
-            print("Added column: work_seconds")
+            logger.info("added_column", column="work_seconds")
         else:
-            print("Column work_seconds already exists, skipping.")
+            logger.info("column_already_exists", column="work_seconds")
 
         # Add interval_rest_seconds column (Interval mode: rest between intervals)
         if "interval_rest_seconds" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN interval_rest_seconds INTEGER")
             )
-            print("Added column: interval_rest_seconds")
+            logger.info("added_column", column="interval_rest_seconds")
         else:
-            print("Column interval_rest_seconds already exists, skipping.")
+            logger.info("column_already_exists", column="interval_rest_seconds")
 
         # Add rounds column (Interval mode: number of rounds)
         if "rounds" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN rounds INTEGER")
             )
-            print("Added column: rounds")
+            logger.info("added_column", column="rounds")
         else:
-            print("Column rounds already exists, skipping.")
+            logger.info("column_already_exists", column="rounds")
 
         # Add distance_km column (Distance mode: distance in kilometers)
         if "distance_km" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN distance_km FLOAT")
             )
-            print("Added column: distance_km")
+            logger.info("added_column", column="distance_km")
         else:
-            print("Column distance_km already exists, skipping.")
+            logger.info("column_already_exists", column="distance_km")
 
         # Add target_pace_min_per_km column (Distance mode: target pace)
         if "target_pace_min_per_km" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE workout_exercises ADD COLUMN target_pace_min_per_km FLOAT")
             )
-            print("Added column: target_pace_min_per_km")
+            logger.info("added_column", column="target_pace_min_per_km")
         else:
-            print("Column target_pace_min_per_km already exists, skipping.")
+            logger.info("column_already_exists", column="target_pace_min_per_km")
 
-    print("Migration completed successfully!")
+    logger.info("migration_completed_successfully")
 
 
 if __name__ == "__main__":

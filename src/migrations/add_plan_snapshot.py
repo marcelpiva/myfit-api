@@ -11,9 +11,12 @@ For new installations, this column will be created automatically by create_all()
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -64,11 +67,11 @@ async def upgrade():
                 await conn.execute(
                     text("ALTER TABLE plan_assignments ADD COLUMN plan_snapshot JSON")
                 )
-            print("Added column: plan_snapshot")
+            logger.info("added_column", column="plan_snapshot")
         else:
-            print("Column plan_snapshot already exists")
+            logger.info("column_already_exists", column="plan_snapshot")
 
-    print("Plan snapshot migration completed successfully!")
+    logger.info("plan_snapshot_migration_completed_successfully")
 
 
 if __name__ == "__main__":

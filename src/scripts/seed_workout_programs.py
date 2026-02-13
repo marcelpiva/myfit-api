@@ -17,6 +17,10 @@ import asyncio
 import sys
 from pathlib import Path
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -2483,13 +2487,13 @@ async def seed_workout_programs(session: AsyncSession, clear_existing: bool = Fa
     # Get system user for created_by
     user = await get_system_user(session)
     if not user:
-        print("ERROR: No user found in database. Please create a user first.")
+        logger.error("no_user_found", hint="Please create a user first")
         return {"plans": 0, "workouts": 0, "exercises_linked": 0}
 
-    print(f"Using user: {user.email} (id: {user.id})")
+    logger.info("using_user", email=user.email, user_id=str(user.id))
 
     if clear_existing:
-        print("Clearing existing programs and workouts...")
+        logger.info("clearing_existing_programs_and_workouts")
         await session.execute(delete(PlanWorkout))
         await session.execute(delete(WorkoutExercise))
         await session.execute(delete(TrainingPlan).where(TrainingPlan.is_template == True))
@@ -2501,7 +2505,7 @@ async def seed_workout_programs(session: AsyncSession, clear_existing: bool = Fa
             select(TrainingPlan).where(TrainingPlan.is_template == True).limit(1)
         )
         if result.scalar_one_or_none():
-            print("Template programs already exist. Use --clear to replace them.")
+            logger.info("template_programs_already_exist", hint="Use --clear to replace them")
             return {"plans": 0, "workouts": 0, "exercises_linked": 0}
 
     plans_count = 0
@@ -2509,7 +2513,7 @@ async def seed_workout_programs(session: AsyncSession, clear_existing: bool = Fa
     exercises_linked = 0
 
     for plan_data in PLANS:
-        print(f"\nCreating plan: {plan_data['name']}")
+        logger.info("creating_plan", plan_name=plan_data["name"])
 
         # Create the plan (no created_by_id for system templates)
         plan = TrainingPlan(
@@ -2529,7 +2533,7 @@ async def seed_workout_programs(session: AsyncSession, clear_existing: bool = Fa
 
         # Create workouts for this plan
         for order, workout_data in enumerate(plan_data["workouts"]):
-            print(f"  - Creating workout: {workout_data['name']}")
+            logger.info("creating_workout", workout_name=workout_data["name"])
 
             workout = Workout(
                 name=workout_data["name"],
@@ -2570,7 +2574,7 @@ async def seed_workout_programs(session: AsyncSession, clear_existing: bool = Fa
                     session.add(workout_exercise)
                     exercises_linked += 1
                 else:
-                    print(f"    WARNING: Exercise not found: {exercise_name}")
+                    logger.warning("exercise_not_found", exercise_name=exercise_name)
 
     await session.commit()
 
@@ -2589,19 +2593,17 @@ async def main():
     parser.add_argument("--clear", action="store_true", help="Clear existing templates first")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("Workout Programs Seed Script")
-    print("=" * 60)
+    logger.info("workout_programs_seed_script_started")
 
     async with AsyncSessionLocal() as session:
         result = await seed_workout_programs(session, clear_existing=args.clear)
 
-    print("\n" + "=" * 60)
-    print(f"Successfully seeded:")
-    print(f"  - {result['programs']} programs")
-    print(f"  - {result['workouts']} workouts")
-    print(f"  - {result['exercises_linked']} exercise links")
-    print("=" * 60)
+    logger.info(
+        "seed_completed",
+        programs=result["programs"],
+        workouts=result["workouts"],
+        exercises_linked=result["exercises_linked"],
+    )
 
 
 if __name__ == "__main__":

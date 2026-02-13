@@ -8,9 +8,12 @@ For new installations, this column will be created automatically by create_all()
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -53,11 +56,11 @@ async def upgrade():
             await conn.execute(
                 text("ALTER TABLE training_plans ADD COLUMN target_workout_minutes INTEGER")
             )
-            print("Added column: target_workout_minutes")
+            logger.info("added_column", column="target_workout_minutes")
         else:
-            print("Column target_workout_minutes already exists, skipping.")
+            logger.info("column_already_exists", column="target_workout_minutes")
 
-    print("Migration completed successfully!")
+    logger.info("migration_completed_successfully")
 
 
 if __name__ == "__main__":

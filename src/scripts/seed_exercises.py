@@ -13,6 +13,10 @@ import asyncio
 import sys
 from pathlib import Path
 
+import structlog
+
+logger = structlog.get_logger(__name__)
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -1330,14 +1334,14 @@ async def seed_exercises(session: AsyncSession, clear_existing: bool = False) ->
     """Seed the database with common exercises."""
 
     if clear_existing:
-        print("Clearing existing public exercises...")
+        logger.info("clearing_existing_public_exercises")
         await session.execute(delete(Exercise).where(Exercise.is_custom == False))
         await session.commit()
     else:
         # Check if exercises already exist
         result = await session.execute(select(Exercise).limit(1))
         if result.scalar_one_or_none():
-            print("Exercises already exist in database. Use --clear to replace them.")
+            logger.info("exercises_already_exist", hint="Use --clear to replace them")
             return 0
 
     # Track index per muscle group for image rotation
@@ -1379,19 +1383,15 @@ async def main():
     parser.add_argument("--clear", action="store_true", help="Clear existing public exercises first")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("Exercise Seed Script (54 exercicios em PT-BR com imagens)")
-    print("=" * 60)
+    logger.info("exercise_seed_script_started", description="54 exercicios em PT-BR com imagens")
 
     async with AsyncSessionLocal() as session:
         count = await seed_exercises(session, clear_existing=args.clear)
 
     if count > 0:
-        print("=" * 60)
-        print(f"Successfully seeded {count} exercises with images!")
-        print("=" * 60)
+        logger.info("exercises_seeded_successfully", count=count)
     else:
-        print("No exercises were seeded.")
+        logger.info("no_exercises_seeded")
 
 
 if __name__ == "__main__":

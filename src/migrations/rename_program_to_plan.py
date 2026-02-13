@@ -14,9 +14,12 @@ For new installations, the new names will be used automatically.
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def table_exists(conn, table_name: str) -> bool:
@@ -98,57 +101,57 @@ async def upgrade():
         has_new_tables = await table_exists(conn, "training_plans")
 
         if has_new_tables and not has_old_tables:
-            print("Migration already completed - new tables exist.")
+            logger.info("migration_already_completed", reason="new tables exist")
             return
 
         if not has_old_tables and not has_new_tables:
-            print("No tables to migrate - fresh installation will use new names.")
+            logger.info("no_tables_to_migrate", reason="fresh installation will use new names")
             return
 
-        print("Starting migration: program -> plan...")
+        logger.info("starting_migration", direction="program -> plan")
 
         # 1. Rename workout_programs -> training_plans
         if await table_exists(conn, "workout_programs"):
             await conn.execute(
                 text("ALTER TABLE workout_programs RENAME TO training_plans")
             )
-            print("Renamed table: workout_programs -> training_plans")
+            logger.info("renamed_table", old_name="workout_programs", new_name="training_plans")
 
         # 2. Rename program_workouts -> plan_workouts
         if await table_exists(conn, "program_workouts"):
             await conn.execute(
                 text("ALTER TABLE program_workouts RENAME TO plan_workouts")
             )
-            print("Renamed table: program_workouts -> plan_workouts")
+            logger.info("renamed_table", old_name="program_workouts", new_name="plan_workouts")
 
             # Rename program_id column in plan_workouts
             if await column_exists(conn, "plan_workouts", "program_id"):
                 await conn.execute(
                     text("ALTER TABLE plan_workouts RENAME COLUMN program_id TO plan_id")
                 )
-                print("Renamed column: plan_workouts.program_id -> plan_id")
+                logger.info("renamed_column", table="plan_workouts", old_name="program_id", new_name="plan_id")
 
         # 3. Rename program_assignments -> plan_assignments
         if await table_exists(conn, "program_assignments"):
             await conn.execute(
                 text("ALTER TABLE program_assignments RENAME TO plan_assignments")
             )
-            print("Renamed table: program_assignments -> plan_assignments")
+            logger.info("renamed_table", old_name="program_assignments", new_name="plan_assignments")
 
             # Rename program_id column in plan_assignments
             if await column_exists(conn, "plan_assignments", "program_id"):
                 await conn.execute(
                     text("ALTER TABLE plan_assignments RENAME COLUMN program_id TO plan_id")
                 )
-                print("Renamed column: plan_assignments.program_id -> plan_id")
+                logger.info("renamed_column", table="plan_assignments", old_name="program_id", new_name="plan_id")
 
-    print("Migration completed successfully!")
+    logger.info("migration_completed_successfully")
 
 
 async def downgrade():
     """Revert: rename plan tables back to program."""
     async with engine.begin() as conn:
-        print("Starting downgrade: plan -> program...")
+        logger.info("starting_downgrade", direction="plan -> program")
 
         # Revert plan_assignments -> program_assignments
         if await table_exists(conn, "plan_assignments"):
@@ -156,11 +159,11 @@ async def downgrade():
                 await conn.execute(
                     text("ALTER TABLE plan_assignments RENAME COLUMN plan_id TO program_id")
                 )
-                print("Renamed column: plan_assignments.plan_id -> program_id")
+                logger.info("renamed_column", table="plan_assignments", old_name="plan_id", new_name="program_id")
             await conn.execute(
                 text("ALTER TABLE plan_assignments RENAME TO program_assignments")
             )
-            print("Renamed table: plan_assignments -> program_assignments")
+            logger.info("renamed_table", old_name="plan_assignments", new_name="program_assignments")
 
         # Revert plan_workouts -> program_workouts
         if await table_exists(conn, "plan_workouts"):
@@ -168,20 +171,20 @@ async def downgrade():
                 await conn.execute(
                     text("ALTER TABLE plan_workouts RENAME COLUMN plan_id TO program_id")
                 )
-                print("Renamed column: plan_workouts.plan_id -> program_id")
+                logger.info("renamed_column", table="plan_workouts", old_name="plan_id", new_name="program_id")
             await conn.execute(
                 text("ALTER TABLE plan_workouts RENAME TO program_workouts")
             )
-            print("Renamed table: plan_workouts -> program_workouts")
+            logger.info("renamed_table", old_name="plan_workouts", new_name="program_workouts")
 
         # Revert training_plans -> workout_programs
         if await table_exists(conn, "training_plans"):
             await conn.execute(
                 text("ALTER TABLE training_plans RENAME TO workout_programs")
             )
-            print("Renamed table: training_plans -> workout_programs")
+            logger.info("renamed_table", old_name="training_plans", new_name="workout_programs")
 
-    print("Downgrade completed successfully!")
+    logger.info("downgrade_completed_successfully")
 
 
 if __name__ == "__main__":

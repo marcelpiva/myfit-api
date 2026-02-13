@@ -8,9 +8,12 @@ For new installations, these columns will be created automatically by create_all
 """
 import asyncio
 
+import structlog
 from sqlalchemy import text
 
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def get_existing_columns(conn, table_name: str) -> set:
@@ -86,27 +89,27 @@ async def upgrade():
             await conn.execute(
                 text("ALTER TABLE organization_invites ADD COLUMN student_info JSONB")
             )
-            print("Added column: student_info")
+            logger.info("added_column", column="student_info")
         else:
-            print("Column student_info already exists, skipping.")
+            logger.info("column_already_exists", column="student_info")
 
         # Add resend_count column
         if "resend_count" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE organization_invites ADD COLUMN resend_count INTEGER DEFAULT 0 NOT NULL")
             )
-            print("Added column: resend_count")
+            logger.info("added_column", column="resend_count")
         else:
-            print("Column resend_count already exists, skipping.")
+            logger.info("column_already_exists", column="resend_count")
 
         # Add last_resent_at column
         if "last_resent_at" not in existing_columns:
             await conn.execute(
                 text("ALTER TABLE organization_invites ADD COLUMN last_resent_at TIMESTAMP WITH TIME ZONE")
             )
-            print("Added column: last_resent_at")
+            logger.info("added_column", column="last_resent_at")
         else:
-            print("Column last_resent_at already exists, skipping.")
+            logger.info("column_already_exists", column="last_resent_at")
 
         # Add unique partial index for pending invites (PostgreSQL only)
         if not await index_exists(conn, "ix_unique_pending_invite"):
@@ -120,13 +123,13 @@ async def upgrade():
                         """
                     )
                 )
-                print("Added unique partial index: ix_unique_pending_invite")
+                logger.info("added_index", index_name="ix_unique_pending_invite")
             except Exception as e:
-                print(f"Could not create unique partial index (may not be supported): {e}")
+                logger.warning("could_not_create_index", index_name="ix_unique_pending_invite", error=str(e))
         else:
-            print("Index ix_unique_pending_invite already exists, skipping.")
+            logger.info("index_already_exists", index_name="ix_unique_pending_invite")
 
-    print("Migration completed successfully!")
+    logger.info("migration_completed_successfully")
 
 
 if __name__ == "__main__":
