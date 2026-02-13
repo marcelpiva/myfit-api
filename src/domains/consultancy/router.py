@@ -3,7 +3,7 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -263,11 +263,14 @@ async def get_profile(
     user_id: UUID,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ProfessionalProfileResponse:
-    """Get a specific professional's public profile."""
+    """Get a specific professional's public profile by user_id or profile id."""
     query = select(ProfessionalProfile).options(
         selectinload(ProfessionalProfile.user)
     ).where(
-        ProfessionalProfile.user_id == user_id,
+        or_(
+            ProfessionalProfile.user_id == user_id,
+            ProfessionalProfile.id == user_id,
+        ),
         ProfessionalProfile.is_public == True,  # noqa: E712
     )
     result = await db.execute(query)
