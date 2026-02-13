@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup
 
+logger = structlog.get_logger(__name__)
 
 WGER_API_URL = "https://wger.de/api/v2"
 
@@ -79,11 +81,11 @@ async def fetch_exercise_info() -> list[dict]:
         next_url = f"{WGER_API_URL}/exerciseinfo/?limit=50"
 
         while next_url:
-            print(f"Fetching from {next_url}...")
+            logger.info("fetching_exercises", url=next_url)
             response = await client.get(next_url)
 
             if response.status_code != 200:
-                print(f"ERROR: API returned status {response.status_code}")
+                logger.error("api_request_failed", status_code=response.status_code)
                 break
 
             data = response.json()
@@ -91,9 +93,9 @@ async def fetch_exercise_info() -> list[dict]:
             next_url = data.get("next")
 
             # Progress
-            print(f"  ... fetched {len(exercises)} so far")
+            logger.info("exercises_fetched_so_far", count=len(exercises))
 
-        print(f"Total: {len(exercises)} exercises from WGER API")
+        logger.info("total_exercises_fetched", count=len(exercises), source="WGER API")
         return exercises
 
 
@@ -183,7 +185,7 @@ async def seed_exercises_from_wger(session: AsyncSession, clear_existing: bool =
     """Seed the database with exercises from WGER API."""
 
     if clear_existing:
-        print("Clearing existing public exercises...")
+        logger.info("clearing_existing_exercises")
         await session.execute(delete(Exercise).where(Exercise.is_custom == False))
         await session.commit()
 
@@ -197,7 +199,7 @@ async def seed_exercises_from_wger(session: AsyncSession, clear_existing: bool =
     seen_names = set()
     errors = 0
 
-    print(f"Processing {len(exercises)} exercises...")
+    logger.info("processing_exercises", count=len(exercises))
     for ex in exercises:
         try:
             # Get English translation
@@ -250,15 +252,15 @@ async def seed_exercises_from_wger(session: AsyncSession, clear_existing: bool =
 
             if count % 50 == 0:
                 await session.commit()
-                print(f"  Inserted {count} exercises...")
+                logger.info("batch_inserted", count=count)
 
         except Exception as e:
             errors += 1
             if errors < 5:
-                print(f"Error processing exercise: {e}")
+                logger.error("exercise_processing_failed", error=str(e))
             continue
 
-    print(f"Final commit: {count} exercises, {errors} errors")
+    logger.info("final_commit", exercise_count=count, error_count=errors)
     await session.commit()
     return count
 
@@ -271,19 +273,15 @@ async def main():
     parser.add_argument("--clear", action="store_true", help="Clear existing public exercises first")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("WGER Exercise Seed Script (Free API)")
-    print("=" * 60)
+    logger.info("wger_seed_script_started")
 
     async with AsyncSessionLocal() as session:
         count = await seed_exercises_from_wger(session, clear_existing=args.clear)
 
     if count > 0:
-        print("=" * 60)
-        print(f"Successfully seeded {count} exercises with images!")
-        print("=" * 60)
+        logger.info("wger_seed_script_completed", exercise_count=count)
     else:
-        print("No exercises were seeded.")
+        logger.info("no_exercises_seeded")
 
 
 if __name__ == "__main__":

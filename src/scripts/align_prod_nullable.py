@@ -1,5 +1,5 @@
 """
-Script para alinhar constraints de nullable na produção com os modelos.
+Script para alinhar constraints de nullable na producao com os modelos.
 
 Baseado nos modelos SQLAlchemy:
 - workout_exercises.exercise_mode: NOT NULL (default='strength')
@@ -14,8 +14,11 @@ Uso:
 import asyncio
 import os
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+logger = structlog.get_logger(__name__)
 
 
 def get_async_url(url: str) -> str:
@@ -28,61 +31,62 @@ def get_async_url(url: str) -> str:
 
 
 async def main():
-    """Alinha nullable constraints na produção."""
+    """Alinha nullable constraints na producao."""
     prod_url = os.getenv("DATABASE_URL_PROD")
 
     if not prod_url:
-        print("Erro: DATABASE_URL_PROD não definida")
+        logger.error("database_url_not_set", variable="DATABASE_URL_PROD")
         return
 
     engine = create_async_engine(get_async_url(prod_url), echo=False)
 
-    print("=" * 60)
-    print("ALINHANDO NULLABLE CONSTRAINTS NA PRODUÇÃO")
-    print("=" * 60)
+    logger.info("aligning_nullable_constraints")
 
     async with engine.begin() as conn:
         # 1. workout_exercises.exercise_mode: deve ser NOT NULL (default='strength')
-        print("\n1. workout_exercises.exercise_mode -> NOT NULL")
+        logger.info("aligning_column", table="workout_exercises", column="exercise_mode", target="NOT NULL")
         try:
             # Primeiro, preenche valores NULL com default
             result = await conn.execute(
                 text("UPDATE workout_exercises SET exercise_mode = 'strength' WHERE exercise_mode IS NULL")
             )
-            print(f"   Atualizados {result.rowcount} registros com valor default 'strength'")
+            logger.info("null_values_updated", table="workout_exercises", column="exercise_mode",
+                       rows_updated=result.rowcount, default_value="strength")
 
             # Agora altera para NOT NULL
             await conn.execute(
                 text("ALTER TABLE workout_exercises ALTER COLUMN exercise_mode SET NOT NULL")
             )
-            print("   Constraint alterada para NOT NULL")
+            logger.info("constraint_set", table="workout_exercises", column="exercise_mode", constraint="NOT NULL")
         except Exception as e:
-            print(f"   Erro: {e}")
+            logger.error("constraint_alignment_failed", table="workout_exercises",
+                        column="exercise_mode", error=str(e))
 
-        # 2. workout_exercises.technique_type: já é NOT NULL na PROD (OK)
-        print("\n2. workout_exercises.technique_type -> NOT NULL (já está correto)")
+        # 2. workout_exercises.technique_type: ja e NOT NULL na PROD (OK)
+        logger.info("column_already_correct", table="workout_exercises",
+                   column="technique_type", constraint="NOT NULL")
 
-        # 3. workout_exercises.exercise_group_order: já é NOT NULL na PROD (OK)
-        print("\n3. workout_exercises.exercise_group_order -> NOT NULL (já está correto)")
+        # 3. workout_exercises.exercise_group_order: ja e NOT NULL na PROD (OK)
+        logger.info("column_already_correct", table="workout_exercises",
+                   column="exercise_group_order", constraint="NOT NULL")
 
         # 4. workouts.created_by_id: deve permitir NULL
-        print("\n4. workouts.created_by_id -> NULL (permitir)")
+        logger.info("aligning_column", table="workouts", column="created_by_id", target="NULL")
         try:
             await conn.execute(
                 text("ALTER TABLE workouts ALTER COLUMN created_by_id DROP NOT NULL")
             )
-            print("   Constraint alterada para permitir NULL")
+            logger.info("constraint_set", table="workouts", column="created_by_id", constraint="NULLABLE")
         except Exception as e:
             if "does not exist" in str(e).lower() or "no not-null" in str(e).lower():
-                print("   Já permite NULL")
+                logger.info("column_already_nullable", table="workouts", column="created_by_id")
             else:
-                print(f"   Erro: {e}")
+                logger.error("constraint_alignment_failed", table="workouts",
+                            column="created_by_id", error=str(e))
 
     await engine.dispose()
 
-    print("\n" + "=" * 60)
-    print("ALINHAMENTO CONCLUÍDO")
-    print("=" * 60)
+    logger.info("nullable_alignment_completed")
 
 
 if __name__ == "__main__":

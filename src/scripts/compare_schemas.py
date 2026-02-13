@@ -1,16 +1,16 @@
 """
-Script para comparar schemas entre banco local e produção.
+Script para comparar schemas entre banco local e producao.
 
 Compara:
 - Tabelas
 - Colunas (nome, tipo, nullable, default)
-- Índices
+- Indices
 - Constraints (PK, FK, UNIQUE)
 
 Uso:
     DATABASE_URL_PROD="postgresql://..." python -m src.scripts.compare_schemas
 
-Ou comparando dois bancos específicos:
+Ou comparando dois bancos especificos:
     DATABASE_URL_LOCAL="postgresql://..." DATABASE_URL_PROD="postgresql://..." python -m src.scripts.compare_schemas
 """
 
@@ -19,8 +19,11 @@ import os
 from dataclasses import dataclass
 from typing import Optional
 
+import structlog
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
+
+logger = structlog.get_logger(__name__)
 
 
 @dataclass
@@ -74,7 +77,7 @@ async def get_tables(conn) -> list[str]:
 
 
 async def get_columns(conn, table_name: str) -> dict[str, ColumnInfo]:
-    """Obtém informações das colunas de uma tabela."""
+    """Obtem informacoes das colunas de uma tabela."""
     result = await conn.execute(
         text("""
             SELECT column_name, data_type, is_nullable, column_default
@@ -98,7 +101,7 @@ async def get_columns(conn, table_name: str) -> dict[str, ColumnInfo]:
 
 
 async def get_primary_keys(conn, table_name: str) -> list[str]:
-    """Obtém primary keys de uma tabela."""
+    """Obtem primary keys de uma tabela."""
     result = await conn.execute(
         text("""
             SELECT kcu.column_name
@@ -117,7 +120,7 @@ async def get_primary_keys(conn, table_name: str) -> list[str]:
 
 
 async def get_foreign_keys(conn, table_name: str) -> list[dict]:
-    """Obtém foreign keys de uma tabela."""
+    """Obtem foreign keys de uma tabela."""
     result = await conn.execute(
         text("""
             SELECT
@@ -150,7 +153,7 @@ async def get_foreign_keys(conn, table_name: str) -> list[dict]:
 
 
 async def get_indexes(conn, table_name: str) -> list[dict]:
-    """Obtém índices de uma tabela."""
+    """Obtem indices de uma tabela."""
     result = await conn.execute(
         text("""
             SELECT
@@ -178,7 +181,7 @@ async def get_indexes(conn, table_name: str) -> list[dict]:
 
 
 async def get_schema_info(database_url: str) -> dict[str, TableInfo]:
-    """Obtém informações completas do schema."""
+    """Obtem informacoes completas do schema."""
     engine = create_async_engine(get_async_url(database_url), echo=False)
 
     schema = {}
@@ -204,7 +207,7 @@ async def get_schema_info(database_url: str) -> dict[str, TableInfo]:
 
 
 def compare_schemas(local_schema: dict[str, TableInfo], prod_schema: dict[str, TableInfo]) -> dict:
-    """Compara dois schemas e retorna diferenças."""
+    """Compara dois schemas e retorna diferencas."""
     differences = {
         "tables_missing_in_prod": [],
         "tables_extra_in_prod": [],
@@ -216,10 +219,10 @@ def compare_schemas(local_schema: dict[str, TableInfo], prod_schema: dict[str, T
     local_tables = set(local_schema.keys())
     prod_tables = set(prod_schema.keys())
 
-    # Tabelas faltando na produção
+    # Tabelas faltando na producao
     differences["tables_missing_in_prod"] = sorted(local_tables - prod_tables)
 
-    # Tabelas extras na produção
+    # Tabelas extras na producao
     differences["tables_extra_in_prod"] = sorted(prod_tables - local_tables)
 
     # Comparar colunas das tabelas em comum
@@ -247,7 +250,7 @@ def compare_schemas(local_schema: dict[str, TableInfo], prod_schema: dict[str, T
             local_col = local_table.columns[col_name]
             prod_col = prod_table.columns[col_name]
 
-            # Normalizar tipos para comparação
+            # Normalizar tipos para comparacao
             local_type = normalize_type(local_col.data_type)
             prod_type = normalize_type(prod_col.data_type)
 
@@ -271,7 +274,7 @@ def compare_schemas(local_schema: dict[str, TableInfo], prod_schema: dict[str, T
 
 
 def normalize_type(data_type: str) -> str:
-    """Normaliza tipos de dados para comparação."""
+    """Normaliza tipos de dados para comparacao."""
     # Mapeamentos comuns
     type_map = {
         "character varying": "varchar",
@@ -287,71 +290,53 @@ def normalize_type(data_type: str) -> str:
     return type_map.get(data_type.lower(), data_type.lower())
 
 
-def print_report(differences: dict, local_schema: dict, prod_schema: dict):
-    """Imprime relatório de diferenças."""
-    print("\n" + "=" * 60)
-    print("RELATÓRIO DE COMPARAÇÃO DE SCHEMAS")
-    print("=" * 60)
+def log_report(differences: dict, local_schema: dict, prod_schema: dict):
+    """Log relatorio de diferencas."""
+    logger.info("schema_comparison_report_started",
+                local_table_count=len(local_schema),
+                prod_table_count=len(prod_schema))
 
-    print(f"\nTabelas no banco LOCAL: {len(local_schema)}")
-    print(f"Tabelas no banco PRODUÇÃO: {len(prod_schema)}")
-
-    # Tabelas faltando na produção
+    # Tabelas faltando na producao
     if differences["tables_missing_in_prod"]:
-        print(f"\n{'='*60}")
-        print("TABELAS FALTANDO NA PRODUÇÃO:")
-        print("=" * 60)
         for table in differences["tables_missing_in_prod"]:
-            print(f"  - {table}")
-            if table in local_schema:
-                cols = list(local_schema[table].columns.keys())
-                print(f"    Colunas: {', '.join(cols[:5])}{'...' if len(cols) > 5 else ''}")
+            cols = list(local_schema[table].columns.keys()) if table in local_schema else []
+            logger.warning("table_missing_in_prod", table=table,
+                          columns=', '.join(cols[:5]) + ('...' if len(cols) > 5 else ''))
     else:
-        print("\n[OK] Todas as tabelas do local existem na produção")
+        logger.info("all_local_tables_exist_in_prod")
 
-    # Tabelas extras na produção
+    # Tabelas extras na producao
     if differences["tables_extra_in_prod"]:
-        print(f"\n{'='*60}")
-        print("TABELAS EXTRAS NA PRODUÇÃO (não existem no local):")
-        print("=" * 60)
         for table in differences["tables_extra_in_prod"]:
-            print(f"  - {table}")
+            logger.warning("table_extra_in_prod", table=table)
 
-    # Diferenças de colunas
+    # Diferencas de colunas
     if differences["column_differences"]:
-        print(f"\n{'='*60}")
-        print("DIFERENÇAS DE COLUNAS:")
-        print("=" * 60)
         for table, cols in differences["column_differences"].items():
-            print(f"\n  Tabela: {table}")
             if cols["missing_in_prod"]:
-                print(f"    Colunas faltando na PROD: {', '.join(cols['missing_in_prod'])}")
+                logger.warning("columns_missing_in_prod", table=table,
+                              columns=', '.join(cols['missing_in_prod']))
             if cols["extra_in_prod"]:
-                print(f"    Colunas extras na PROD: {', '.join(cols['extra_in_prod'])}")
+                logger.warning("columns_extra_in_prod", table=table,
+                              columns=', '.join(cols['extra_in_prod']))
     else:
-        print("\n[OK] Todas as colunas estão sincronizadas")
+        logger.info("all_columns_synchronized")
 
-    # Diferenças de tipos
+    # Diferencas de tipos
     if differences["type_differences"]:
-        print(f"\n{'='*60}")
-        print("DIFERENÇAS DE TIPOS:")
-        print("=" * 60)
         for table, cols in differences["type_differences"].items():
-            print(f"\n  Tabela: {table}")
             for col, types in cols.items():
-                print(f"    {col}: LOCAL={types['local']} vs PROD={types['prod']}")
+                logger.warning("type_difference", table=table, column=col,
+                              local_type=types['local'], prod_type=types['prod'])
 
-    # Diferenças de nullable
+    # Diferencas de nullable
     if differences["nullable_differences"]:
-        print(f"\n{'='*60}")
-        print("DIFERENÇAS DE NULLABLE:")
-        print("=" * 60)
         for table, cols in differences["nullable_differences"].items():
-            print(f"\n  Tabela: {table}")
             for col, nullable in cols.items():
                 local_n = "NULL" if nullable['local'] else "NOT NULL"
                 prod_n = "NULL" if nullable['prod'] else "NOT NULL"
-                print(f"    {col}: LOCAL={local_n} vs PROD={prod_n}")
+                logger.warning("nullable_difference", table=table, column=col,
+                              local=local_n, prod=prod_n)
 
     # Resumo
     has_issues = (
@@ -360,57 +345,49 @@ def print_report(differences: dict, local_schema: dict, prod_schema: dict):
         differences["type_differences"]
     )
 
-    print(f"\n{'='*60}")
-    print("RESUMO")
-    print("=" * 60)
     if has_issues:
-        print("\n[!] ATENÇÃO: Existem diferenças entre os schemas!")
-        print("    Execute as migrações necessárias na produção.")
+        logger.warning("schema_comparison_has_differences")
     else:
-        print("\n[OK] Os schemas estão compatíveis!")
-
-    print("\n")
+        logger.info("schemas_are_compatible")
 
 
 async def main():
-    """Executa comparação de schemas."""
+    """Executa comparacao de schemas."""
     # URLs dos bancos
     local_url = os.getenv("DATABASE_URL_LOCAL") or os.getenv("DATABASE_URL")
     prod_url = os.getenv("DATABASE_URL_PROD")
 
     if not local_url:
-        print("Erro: DATABASE_URL_LOCAL ou DATABASE_URL não definida")
-        print("Defina a variável de ambiente com a URL do banco local")
+        logger.error("database_url_not_set", variable="DATABASE_URL_LOCAL or DATABASE_URL")
         return
 
     if not prod_url:
-        print("Erro: DATABASE_URL_PROD não definida")
-        print("Defina a variável de ambiente com a URL do banco de produção")
+        logger.error("database_url_not_set", variable="DATABASE_URL_PROD")
         return
 
-    print("Conectando aos bancos de dados...")
+    logger.info("connecting_to_databases")
 
     try:
-        print("  - Obtendo schema do banco LOCAL...")
+        logger.info("fetching_schema", target="local")
         local_schema = await get_schema_info(local_url)
-        print(f"    Encontradas {len(local_schema)} tabelas")
+        logger.info("schema_fetched", target="local", table_count=len(local_schema))
     except Exception as e:
-        print(f"Erro ao conectar no banco LOCAL: {e}")
+        logger.error("schema_fetch_failed", target="local", error=str(e))
         return
 
     try:
-        print("  - Obtendo schema do banco PRODUÇÃO...")
+        logger.info("fetching_schema", target="production")
         prod_schema = await get_schema_info(prod_url)
-        print(f"    Encontradas {len(prod_schema)} tabelas")
+        logger.info("schema_fetched", target="production", table_count=len(prod_schema))
     except Exception as e:
-        print(f"Erro ao conectar no banco PRODUÇÃO: {e}")
+        logger.error("schema_fetch_failed", target="production", error=str(e))
         return
 
     # Comparar schemas
     differences = compare_schemas(local_schema, prod_schema)
 
-    # Imprimir relatório
-    print_report(differences, local_schema, prod_schema)
+    # Log relatorio
+    log_report(differences, local_schema, prod_schema)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -23,6 +24,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup
 
+logger = structlog.get_logger(__name__)
 
 PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "")
 PEXELS_API_URL = "https://api.pexels.com/videos/search"
@@ -96,25 +98,25 @@ EXERCISE_SEARCH_OVERRIDES = {
     "Burpee": "burpee workout",
     # Stretching
     "Alongamento de Posterior de Coxa": "hamstring stretch",
-    "Alongamento de Quadríceps": "quad stretch standing",
+    "Alongamento de Quadriceps": "quad stretch standing",
     "Alongamento de Panturrilha": "calf stretch wall",
-    "Alongamento de Glúteos": "glute stretch lying",
+    "Alongamento de Gluteos": "glute stretch lying",
     "Alongamento de Adutores (Borboleta)": "butterfly stretch",
     "Alongamento de Flexores do Quadril": "hip flexor stretch",
     "Alongamento de Peitoral na Parede": "chest stretch wall",
-    "Alongamento de Tríceps": "tricep stretch",
-    "Alongamento de Ombros (Braço Cruzado)": "shoulder stretch",
+    "Alongamento de Triceps": "tricep stretch",
+    "Alongamento de Ombros (Braco Cruzado)": "shoulder stretch",
     "Alongamento de Lombar (Joelhos ao Peito)": "lower back stretch",
     "Alongamento Lateral de Tronco": "side stretch standing",
-    "Alongamento de Pescoço Lateral": "neck stretch",
-    "Rotação de Coluna Sentado": "seated spinal twist",
+    "Alongamento de Pescoco Lateral": "neck stretch",
+    "Rotacao de Coluna Sentado": "seated spinal twist",
     "Cat-Cow (Gato-Vaca)": "cat cow stretch yoga",
     "Alongamento do Piriforme": "piriformis stretch",
-    "Child's Pose (Postura da Criança)": "child pose yoga",
+    "Child's Pose (Postura da Crianca)": "child pose yoga",
     "Downward Dog (Cachorro Olhando para Baixo)": "downward dog yoga",
-    "Alongamento de Antebraço": "forearm stretch wrist",
+    "Alongamento de Antebraco": "forearm stretch wrist",
     "Cobra Stretch (Postura da Cobra)": "cobra pose yoga",
-    "Alongamento de Trapézio": "trapezius stretch",
+    "Alongamento de Trapezio": "trapezius stretch",
 }
 
 
@@ -134,7 +136,7 @@ async def search_pexels_video(client: httpx.AsyncClient, query: str) -> str | No
         response = await client.get(PEXELS_API_URL, headers=headers, params=params)
 
         if response.status_code != 200:
-            print(f"  API error for '{query}': {response.status_code}")
+            logger.error("pexels_api_error", query=query, status_code=response.status_code)
             return None
 
         data = response.json()
@@ -167,7 +169,7 @@ async def search_pexels_video(client: httpx.AsyncClient, query: str) -> str | No
         return None
 
     except Exception as e:
-        print(f"  Error searching '{query}': {e}")
+        logger.error("pexels_search_failed", query=query, error=str(e))
         return None
 
 
@@ -242,17 +244,17 @@ async def add_videos_to_exercises(session: AsyncSession, replace_all: bool = Fal
     exercises = result.scalars().all()
 
     if not exercises:
-        print("All exercises already have Pexels videos.")
+        logger.info("all_exercises_have_videos")
         return 0
 
-    print(f"Found {len(exercises)} exercises to update")
+    logger.info("exercises_to_update", count=len(exercises))
 
     video_cache: dict[str, str] = {}
     updated = 0
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         for exercise in exercises:
-            print(f"Processing: {exercise.name}...")
+            logger.info("processing_exercise", name=exercise.name)
 
             video_url = await get_video_for_exercise(
                 client,
@@ -264,9 +266,9 @@ async def add_videos_to_exercises(session: AsyncSession, replace_all: bool = Fal
             if video_url:
                 exercise.video_url = video_url
                 updated += 1
-                print(f"  Added video!")
+                logger.info("video_added", name=exercise.name)
             else:
-                print(f"  No video found")
+                logger.debug("no_video_found", name=exercise.name)
 
             # Rate limiting
             await asyncio.sleep(0.3)
@@ -288,29 +290,16 @@ async def main():
     args = parser.parse_args()
 
     if not PEXELS_API_KEY:
-        print("=" * 60)
-        print("ERROR: PEXELS_API_KEY not set")
-        print("=" * 60)
-        print("\nGet your free API key at: https://www.pexels.com/api/")
-        print("\nThen run:")
-        print('  PEXELS_API_KEY="your-key" python -m src.scripts.add_pexels_videos')
-        print('  PEXELS_API_KEY="your-key" python -m src.scripts.add_pexels_videos --replace-all')
+        logger.error("pexels_api_key_not_set", help_url="https://www.pexels.com/api/")
         return
 
-    print("=" * 60)
-    print("Pexels Video Script")
-    if args.replace_all:
-        print("Mode: Replace ALL videos (including YouTube)")
-    else:
-        print("Mode: Add videos to exercises without videos only")
-    print("=" * 60)
+    mode = "replace_all" if args.replace_all else "add_missing_only"
+    logger.info("pexels_video_script_started", mode=mode)
 
     async with AsyncSessionLocal() as session:
         count = await add_videos_to_exercises(session, replace_all=args.replace_all)
 
-    print("=" * 60)
-    print(f"Updated {count} exercises with videos!")
-    print("=" * 60)
+    logger.info("pexels_video_script_completed", updated_count=count)
 
 
 if __name__ == "__main__":

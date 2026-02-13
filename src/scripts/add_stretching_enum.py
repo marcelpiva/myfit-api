@@ -10,11 +10,15 @@ import os
 import sys
 from pathlib import Path
 
+import structlog
+
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from sqlalchemy import text
 from src.config.database import engine
+
+logger = structlog.get_logger(__name__)
 
 
 async def add_stretching_enum():
@@ -33,21 +37,19 @@ async def add_stretching_enum():
         exists = result.scalar()
 
         if not exists:
-            print("Adding 'stretching' to exercise_mode_enum...")
+            logger.info("adding_enum_value", enum_type="exercise_mode_enum", value="stretching")
             await conn.execute(
                 text("ALTER TYPE exercise_mode_enum ADD VALUE 'stretching'")
             )
-            print("Successfully added 'stretching' to exercise_mode_enum")
+            logger.info("enum_value_added", enum_type="exercise_mode_enum", value="stretching")
         else:
-            print("'stretching' already exists in exercise_mode_enum")
+            logger.info("enum_value_exists", enum_type="exercise_mode_enum", value="stretching")
 
 
 async def main():
-    print("=" * 60)
-    print("Add Stretching Enum Value Script")
-    print("=" * 60)
+    logger.info("add_stretching_enum_script_started")
     await add_stretching_enum()
-    print("Done!")
+    logger.info("add_stretching_enum_script_completed")
 
 
 if __name__ == "__main__":

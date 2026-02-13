@@ -17,6 +17,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -24,6 +25,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup
 
+logger = structlog.get_logger(__name__)
 
 EXERCISEDB_API_URL = "https://exercisedb.p.rapidapi.com"
 EXERCISEDB_API_KEY = os.getenv("EXERCISEDB_API_KEY", "")
@@ -92,7 +94,7 @@ async def fetch_all_exercises(client: httpx.AsyncClient) -> list[dict]:
     limit = 100  # Max per request
 
     while True:
-        print(f"Fetching exercises offset={offset}...")
+        logger.info("fetching_exercises", offset=offset)
         response = await client.get(
             f"{EXERCISEDB_API_URL}/exercises",
             headers=headers,
@@ -100,8 +102,7 @@ async def fetch_all_exercises(client: httpx.AsyncClient) -> list[dict]:
         )
 
         if response.status_code != 200:
-            print(f"ERROR: API returned status {response.status_code}")
-            print(response.text)
+            logger.error("api_request_failed", status_code=response.status_code, response=response.text)
             break
 
         exercises = response.json()
@@ -109,7 +110,7 @@ async def fetch_all_exercises(client: httpx.AsyncClient) -> list[dict]:
             break
 
         all_exercises.extend(exercises)
-        print(f"  Got {len(exercises)} exercises, total: {len(all_exercises)}")
+        logger.info("exercises_batch_fetched", batch_size=len(exercises), total=len(all_exercises))
 
         if len(exercises) < limit:
             break
@@ -140,35 +141,31 @@ async def download_gif(client: httpx.AsyncClient, exercise_id: str, output_path:
             return False
 
     except Exception as e:
-        print(f"  Error downloading {exercise_id}: {e}")
+        logger.error("gif_download_failed", exercise_id=exercise_id, error=str(e))
         return False
 
 
 async def main():
     """Main function to download all exercise GIFs."""
     if not EXERCISEDB_API_KEY:
-        print("ERROR: EXERCISEDB_API_KEY environment variable not set")
+        logger.error("api_key_not_set", variable="EXERCISEDB_API_KEY")
         return
 
     # Create output directory
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"Output directory: {OUTPUT_DIR}")
+    logger.info("download_script_started", output_dir=str(OUTPUT_DIR))
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         # Fetch all exercises
-        print("\n" + "=" * 60)
-        print("Fetching exercises from ExerciseDB...")
-        print("=" * 60)
+        logger.info("fetching_exercises_from_api")
         exercises = await fetch_all_exercises(client)
-        print(f"\nTotal exercises: {len(exercises)}")
+        logger.info("total_exercises_fetched", count=len(exercises))
 
         if not exercises:
             return
 
         # Download GIFs
-        print("\n" + "=" * 60)
-        print("Downloading GIFs...")
-        print("=" * 60)
+        logger.info("downloading_gifs")
 
         downloaded = 0
         failed = 0
@@ -196,19 +193,16 @@ async def main():
 
             # Progress every 50
             if (i + 1) % 50 == 0:
-                print(f"Progress: {i + 1}/{len(exercises)} - Downloaded: {downloaded}, Failed: {failed}, Skipped: {skipped}")
+                logger.info("download_progress", processed=i + 1, total=len(exercises),
+                           downloaded=downloaded, failed=failed, skipped=skipped)
 
             # Rate limiting - be nice to the API
             await asyncio.sleep(0.1)
 
-        print(f"\n✅ Downloaded: {downloaded}")
-        print(f"❌ Failed: {failed}")
-        print(f"⏭️  Skipped (already exists): {skipped}")
+        logger.info("gif_download_completed", downloaded=downloaded, failed=failed, skipped=skipped)
 
         # Now update the database
-        print("\n" + "=" * 60)
-        print("Updating database...")
-        print("=" * 60)
+        logger.info("updating_database")
 
         async with AsyncSessionLocal() as session:
             # Clear existing public exercises
@@ -247,10 +241,10 @@ async def main():
 
                 if count % 100 == 0:
                     await session.commit()
-                    print(f"  Inserted {count} exercises...")
+                    logger.info("batch_inserted", count=count)
 
             await session.commit()
-            print(f"\n✅ Inserted {count} exercises into database")
+            logger.info("database_update_completed", exercise_count=count)
 
 
 if __name__ == "__main__":

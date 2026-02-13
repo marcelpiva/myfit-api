@@ -15,6 +15,7 @@ import sys
 from pathlib import Path
 
 import httpx
+import structlog
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
@@ -24,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from src.config.database import AsyncSessionLocal
 from src.domains.workouts.models import Exercise, MuscleGroup
 
+logger = structlog.get_logger(__name__)
 
 # ExerciseDB API configuration
 EXERCISEDB_API_URL = "https://exercisedb.p.rapidapi.com"
@@ -92,8 +94,8 @@ def get_muscle_group(body_part: str, target: str) -> MuscleGroup:
 async def fetch_all_exercises() -> list[dict]:
     """Fetch all exercises from ExerciseDB API."""
     if not EXERCISEDB_API_KEY:
-        print("ERROR: EXERCISEDB_API_KEY environment variable not set")
-        print("Get your API key from: https://rapidapi.com/justin-WFnsXH_t6/api/exercisedb")
+        logger.error("api_key_not_set", variable="EXERCISEDB_API_KEY",
+                     help_url="https://rapidapi.com/justin-WFnsXH_t6/api/exercisedb")
         return []
 
     headers = {
@@ -102,7 +104,7 @@ async def fetch_all_exercises() -> list[dict]:
     }
 
     async with httpx.AsyncClient(timeout=60.0) as client:
-        print("Fetching exercises from ExerciseDB...")
+        logger.info("fetching_exercises", source="ExerciseDB")
         response = await client.get(
             f"{EXERCISEDB_API_URL}/exercises",
             headers=headers,
@@ -110,12 +112,11 @@ async def fetch_all_exercises() -> list[dict]:
         )
 
         if response.status_code != 200:
-            print(f"ERROR: API returned status {response.status_code}")
-            print(response.text)
+            logger.error("api_request_failed", status_code=response.status_code, response=response.text)
             return []
 
         exercises = response.json()
-        print(f"Fetched {len(exercises)} exercises from API")
+        logger.info("exercises_fetched", count=len(exercises))
         return exercises
 
 
@@ -123,7 +124,7 @@ async def seed_exercises_from_api(session: AsyncSession, clear_existing: bool = 
     """Seed the database with exercises from ExerciseDB API."""
 
     if clear_existing:
-        print("Clearing existing exercises...")
+        logger.info("clearing_existing_exercises")
         await session.execute(delete(Exercise).where(Exercise.is_custom == False))
         await session.commit()
     else:
@@ -132,7 +133,7 @@ async def seed_exercises_from_api(session: AsyncSession, clear_existing: bool = 
             select(Exercise).where(Exercise.is_custom == False).limit(1)
         )
         if result.scalar_one_or_none():
-            print("Public exercises already exist. Use clear_existing=True to replace.")
+            logger.info("exercises_already_exist", hint="use clear_existing=True to replace")
             return 0
 
     exercises_data = await fetch_all_exercises()
@@ -185,10 +186,10 @@ async def seed_exercises_from_api(session: AsyncSession, clear_existing: bool = 
             # Commit in batches
             if count % batch_size == 0:
                 await session.commit()
-                print(f"  Inserted {count} exercises...")
+                logger.info("batch_inserted", count=count)
 
         except Exception as e:
-            print(f"Error processing exercise {ex_data.get('name')}: {e}")
+            logger.error("exercise_processing_failed", exercise_name=ex_data.get('name'), error=str(e))
             continue
 
     # Final commit
@@ -204,19 +205,15 @@ async def main():
     parser.add_argument("--clear", action="store_true", help="Clear existing public exercises first")
     args = parser.parse_args()
 
-    print("=" * 60)
-    print("ExerciseDB Seed Script")
-    print("=" * 60)
+    logger.info("exercisedb_seed_script_started")
 
     async with AsyncSessionLocal() as session:
         count = await seed_exercises_from_api(session, clear_existing=args.clear)
 
     if count > 0:
-        print("=" * 60)
-        print(f"Successfully seeded {count} exercises!")
-        print("=" * 60)
+        logger.info("exercisedb_seed_script_completed", exercise_count=count)
     else:
-        print("No exercises were seeded.")
+        logger.info("no_exercises_seeded")
 
 
 if __name__ == "__main__":
