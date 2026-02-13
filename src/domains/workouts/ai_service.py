@@ -4,10 +4,13 @@ import json
 import uuid
 from typing import Any
 
+import structlog
 from openai import AsyncOpenAI
 
 from src.config.settings import settings
 from src.domains.workouts.models import Difficulty, WorkoutGoal
+
+logger = structlog.get_logger(__name__)
 
 # Keywords to classify exercises as compound or isolation
 COMPOUND_KEYWORDS = [
@@ -82,7 +85,7 @@ class AIExerciseService:
                     allowed_techniques=allowed_techniques,
                 )
             except Exception as e:
-                print(f"AI suggestion failed, falling back to rules: {e}")
+                logger.warning("ai_suggestion_fallback", error=str(e), type=type(e).__name__)
 
         # Fallback to rule-based selection
         return self._rule_based_suggest(
@@ -1507,7 +1510,7 @@ Responda APENAS com um JSON valido no formato:
                 duration_weeks=duration_weeks,
             )
         except Exception as e:
-            print(f"AI plan generation failed: {e}")
+            logger.warning("ai_plan_generation_failed", error=str(e), type=type(e).__name__)
             return None
 
     async def _ai_generate_plan(

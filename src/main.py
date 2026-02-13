@@ -1,3 +1,4 @@
+import structlog
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 
@@ -25,6 +26,8 @@ from src.domains.trainers.router import router as trainers_router
 from src.domains.users.router import router as users_router
 from src.domains.workouts.router import router as workouts_router
 
+logger = structlog.get_logger(__name__)
+
 
 async def run_pending_migrations():
     """Run any pending database migrations."""
@@ -32,7 +35,7 @@ async def run_pending_migrations():
 
     database_url = os.getenv("DATABASE_URL", "")
     if not database_url:
-        print("No DATABASE_URL, skipping migrations")
+        logger.info("skipping_migrations", reason="no DATABASE_URL configured")
         return
 
     # Convert to asyncpg format
@@ -63,9 +66,9 @@ async def run_pending_migrations():
         try:
             module = __import__(module_path, fromlist=["migrate"])
             await module.migrate(database_url)
-            print(f"Migration {name} completed")
+            logger.info("migration_completed", name=name)
         except Exception as e:
-            print(f"Migration {name} error (may already be applied): {type(e).__name__}: {e}")
+            logger.warning("migration_error", name=name, error=str(e), type=type(e).__name__, note="may already be applied")
 
 
 async def seed_exercises_if_empty():
@@ -82,32 +85,30 @@ async def seed_exercises_if_empty():
             count = result.scalar()
 
             if count == 0:
-                print("No exercises found in database, seeding...")
+                logger.info("seeding_exercises", reason="no exercises found in database")
                 # Import and run the seed script
                 from src.scripts.seed_exercises import seed_exercises
                 seeded_count = await seed_exercises(session, clear_existing=False)
-                print(f"Exercises seeded successfully: {seeded_count} exercises added")
+                logger.info("exercises_seeded", count=seeded_count)
             else:
-                print(f"Database has {count} exercises, skipping seed")
+                logger.info("exercises_seed_skipped", existing_count=count)
     except Exception as e:
-        print(f"Error checking/seeding exercises: {type(e).__name__}: {e}")
+        logger.warning("exercise_seed_error", error=str(e), type=type(e).__name__)
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan events."""
     # Startup
-    print(f"Starting {settings.APP_NAME}...")
-    print(f"Environment: {settings.APP_ENV}")
-    print(f"Database URL configured: {bool(settings.DATABASE_URL)}")
+    logger.info("app_starting", app_name=settings.APP_NAME, environment=settings.APP_ENV, database_configured=bool(settings.DATABASE_URL))
 
     # Initialize database tables
     try:
         from src.config.database import init_db
         await init_db()
-        print("Database tables initialized")
+        logger.info("database_initialized")
     except Exception as e:
-        print(f"ERROR initializing database: {type(e).__name__}: {e}")
+        logger.error("database_init_failed", error=str(e), type=type(e).__name__)
         # Re-raise in production to prevent unhealthy startup
         if settings.is_production:
             raise
@@ -116,31 +117,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     try:
         await run_pending_migrations()
     except Exception as e:
-        print(f"Warning: Could not run migrations: {type(e).__name__}: {e}")
+        logger.warning("migrations_failed", error=str(e), type=type(e).__name__)
 
     # Auto-seed exercises if database is empty
     try:
         await seed_exercises_if_empty()
     except Exception as e:
-        print(f"Warning: Could not seed exercises: {type(e).__name__}: {e}")
+        logger.warning("exercise_seed_failed", error=str(e), type=type(e).__name__)
 
     # Start background scheduler
     from src.core.scheduler import scheduler
     try:
         await scheduler.start()
-        print("Background scheduler started")
+        logger.info("scheduler_started")
     except Exception as e:
-        print(f"Warning: Could not start scheduler: {type(e).__name__}: {e}")
+        logger.warning("scheduler_start_failed", error=str(e), type=type(e).__name__)
 
     yield
     # Shutdown
-    print(f"Shutting down {settings.APP_NAME}...")
+    logger.info("app_shutting_down", app_name=settings.APP_NAME)
     # Stop background scheduler
     try:
         await scheduler.stop()
-        print("Background scheduler stopped")
+        logger.info("scheduler_stopped")
     except Exception as e:
-        print(f"Warning: Could not stop scheduler: {type(e).__name__}: {e}")
+        logger.warning("scheduler_stop_failed", error=str(e), type=type(e).__name__)
 
 
 def create_app() -> FastAPI:
@@ -164,8 +165,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=settings.CORS_ORIGINS,
         allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-Organization-Id", "X-Request-Id"],
     )
 
     # Include routers
@@ -199,78 +200,6 @@ def create_app() -> FastAPI:
             "version": settings.APP_VERSION,
             "environment": settings.APP_ENV,
         }
-
-    # Temporary debug endpoint - remove after fixing org isolation
-    from fastapi import Request as DebugRequest
-    @app.get("/debug/headers")
-    async def debug_headers(request: DebugRequest) -> dict:
-        return {
-            "x_organization_id": request.headers.get("x-organization-id"),
-            "all_headers": dict(request.headers),
-        }
-
-    # Temporary debug endpoint - query workouts and org data
-    @app.get("/debug/workouts")
-    async def debug_workouts() -> dict:
-        from sqlalchemy import text
-        from src.config.database import AsyncSessionLocal
-        async with AsyncSessionLocal() as session:
-            # All workouts
-            result = await session.execute(
-                text("""
-                    SELECT w.id, w.name, w.organization_id, w.created_by_id,
-                           w.is_template, w.is_public,
-                           u.name as creator_name, u.email as creator_email,
-                           o.name as org_name
-                    FROM workouts w
-                    LEFT JOIN users u ON u.id = w.created_by_id
-                    LEFT JOIN organizations o ON o.id = w.organization_id
-                    ORDER BY w.created_at DESC
-                    LIMIT 50
-                """)
-            )
-            rows = result.fetchall()
-
-            # Also get org memberships for marcelpiva
-            memberships = await session.execute(
-                text("""
-                    SELECT u.name, u.email, om.organization_id, o.name as org_name,
-                           om.role, o.type as org_type
-                    FROM organization_memberships om
-                    JOIN users u ON u.id = om.user_id
-                    JOIN organizations o ON o.id = om.organization_id
-                    WHERE u.email = 'marcelpiva@gmail.com' AND om.is_active = true
-                """)
-            )
-            membership_rows = memberships.fetchall()
-
-            return {
-                "workouts": [
-                    {
-                        "id": str(r[0]),
-                        "name": r[1],
-                        "organization_id": str(r[2]) if r[2] else None,
-                        "created_by_id": str(r[3]),
-                        "is_template": r[4],
-                        "is_public": r[5],
-                        "creator_name": r[6],
-                        "creator_email": r[7],
-                        "org_name": r[8],
-                    }
-                    for r in rows
-                ],
-                "marcel_memberships": [
-                    {
-                        "user_name": r[0],
-                        "email": r[1],
-                        "organization_id": str(r[2]),
-                        "org_name": r[3],
-                        "role": r[4],
-                        "org_type": r[5],
-                    }
-                    for r in membership_rows
-                ],
-            }
 
     # Scalar API Reference - Modern API documentation
     @app.get("/reference", include_in_schema=False)

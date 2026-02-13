@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-02-13
+
+### Security
+- **Remove debug endpoints**: Deleted `/debug/headers` and `/debug/workouts` (raw SQL, info disclosure)
+- **JWT fail-fast**: App now refuses to start in production with default JWT secret keys
+- **CORS hardening**: Replace `allow_methods=["*"]` / `allow_headers=["*"]` with explicit whitelists
+
+### Changed
+- **Structured logging**: Replace all `print()` calls with `structlog` in main.py, database.py, observability.py, organizations/router.py, ai_service.py
+- **Consolidate dependencies**: Remove `requirements.txt`, use only `pyproject.toml` + `uv.lock`. Railway Nixpacks auto-detects pyproject.toml
+- **Remove stale dep**: Remove unused `tzlocal` from dependencies
+- **Add missing deps**: Add `PyJWT[crypto]`, `firebase-admin`, `resend`, `tzdata` to pyproject.toml
+
 ## [0.9.0] - 2026-02-13
 
 ### Added

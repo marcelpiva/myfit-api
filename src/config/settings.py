@@ -114,10 +114,25 @@ class Settings(BaseSettings):
         return self.APP_ENV == "development"
 
 
+_INSECURE_DEFAULTS = {
+    "your-super-secret-key-change-in-production",
+    "your-refresh-secret-key-change-in-production",
+}
+
+
 @lru_cache
 def get_settings() -> Settings:
     """Get cached settings instance."""
-    return Settings()
+    s = Settings()
+    if s.is_production and (
+        s.JWT_SECRET_KEY in _INSECURE_DEFAULTS
+        or s.JWT_REFRESH_SECRET_KEY in _INSECURE_DEFAULTS
+    ):
+        raise RuntimeError(
+            "JWT secret keys must be changed from default values in production. "
+            "Set JWT_SECRET_KEY and JWT_REFRESH_SECRET_KEY environment variables."
+        )
+    return s
 
 
 settings = get_settings()

@@ -27,11 +27,15 @@ dependencies = [
     "python-jose[cryptography]>=3.3.0",
     "passlib[bcrypt]>=1.7.4",
     "python-multipart>=0.0.18",
+    "PyJWT[crypto]>=2.8.0",
 
     # Validation
     "pydantic>=2.10.0",
     "pydantic-settings>=2.6.0",
     "email-validator>=2.2.0",
+
+    # Push Notifications
+    "firebase-admin>=6.5.0",
 
     # Background Tasks
     "celery>=5.4.0",
@@ -60,6 +64,12 @@ dependencies = [
     "tenacity>=9.0.0",
     "structlog>=24.4.0",
     "qrcode[pil]>=8.0",
+
+    # Email
+    "resend>=2.0.0",
+
+    # Timezone
+    "tzdata>=2025.1",
 
     # Observability (GlitchTip/Sentry compatible)
     "sentry-sdk[fastapi]>=2.0.0",

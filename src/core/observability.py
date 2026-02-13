@@ -5,6 +5,8 @@ Provides error tracking and performance monitoring using GlitchTip
 (open-source, Sentry-compatible).
 """
 
+import structlog
+
 import sentry_sdk
 from sentry_sdk.integrations.fastapi import FastApiIntegration
 from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
@@ -12,11 +14,13 @@ from sentry_sdk.integrations.starlette import StarletteIntegration
 
 from src.config.settings import settings
 
+logger = structlog.get_logger(__name__)
+
 
 def init_observability() -> None:
     """Initialize GlitchTip/Sentry observability."""
     if not settings.GLITCHTIP_DSN:
-        print("[Observability] Disabled - no DSN configured")
+        logger.info("observability_disabled", reason="no DSN configured")
         return
 
     # Determine sample rates based on environment
@@ -42,7 +46,7 @@ def init_observability() -> None:
         before_send=_before_send,
     )
 
-    print(f"[Observability] Initialized for {settings.APP_ENV}")
+    logger.info("observability_initialized", environment=settings.APP_ENV)
 
 
 def _before_send(event: dict, hint: dict) -> dict | None:

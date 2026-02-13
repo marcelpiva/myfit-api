@@ -1,3 +1,4 @@
+import structlog
 from contextvars import ContextVar
 from typing import AsyncGenerator
 
@@ -5,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import DeclarativeBase
 
 from src.config.settings import settings
+
+logger = structlog.get_logger(__name__)
 
 # Context variable to hold current tenant
 current_tenant_id: ContextVar[str | None] = ContextVar("current_tenant_id", default=None)
@@ -174,12 +177,12 @@ async def _run_pending_migrations() -> None:
                             sql = f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_type}{default_clause}"
                             await conn2.execute(text(sql))
                             await conn2.commit()
-                            print(f"Added column {table_name}.{column_name}")
+                            logger.info("column_added", table=table_name, column=column_name)
             except Exception as e:
                 # Column might already exist or other error - continue with next
                 err_str = str(e)
                 if "already exists" not in err_str.lower():
-                    print(f"Migration note ({table_name}.{column_name}): {e}")
+                    logger.info("migration_note", table=table_name, column=column_name, error=str(e))
 
         # Schema fixes: correct column types
         schema_fixes = [
@@ -193,11 +196,11 @@ async def _run_pending_migrations() -> None:
                 async with migration_engine.connect() as conn:
                     await conn.execute(text(sql))
                     await conn.commit()
-                    print(f"Schema fix ({description}): done")
+                    logger.info("schema_fix_applied", description=description)
             except Exception as e:
                 err_str = str(e).lower()
                 if "does not exist" not in err_str and "already" not in err_str:
-                    print(f"Schema fix note ({description}): {e}")
+                    logger.info("schema_fix_note", description=description, error=str(e))
 
         # Data fixes: correct invalid enum values
         data_fixes = [
@@ -211,9 +214,9 @@ async def _run_pending_migrations() -> None:
                     result = await conn.execute(text(sql))
                     await conn.commit()
                     if result.rowcount > 0:
-                        print(f"Data fix ({description}): {result.rowcount} rows updated")
+                        logger.info("data_fix_applied", description=description, rows_updated=result.rowcount)
             except Exception as e:
-                print(f"Data fix note ({description}): {e}")
+                logger.info("data_fix_note", description=description, error=str(e))
 
     finally:
         await migration_engine.dispose()
@@ -249,8 +252,8 @@ async def _sync_enum_values() -> None:
             # Add missing values
             for value in expected_values:
                 if value not in current_values:
-                    print(f"Adding '{value}' to {enum_name}...")
+                    logger.info("enum_value_adding", enum=enum_name, value=value)
                     await conn.execute(
                         text(f"ALTER TYPE {enum_name} ADD VALUE '{value}'")
                     )
-                    print(f"Successfully added '{value}' to {enum_name}")
+                    logger.info("enum_value_added", enum=enum_name, value=value)

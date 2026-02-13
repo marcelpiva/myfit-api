@@ -1,4 +1,5 @@
 """Organization router with CRUD and member management endpoints."""
+import structlog
 from datetime import datetime, timezone
 from typing import Annotated
 from uuid import UUID
@@ -32,6 +33,8 @@ from src.domains.subscriptions.service import SubscriptionService
 from src.domains.subscriptions.models import PlatformTier
 from src.domains.notifications.schemas import NotificationCreate
 from src.domains.notifications.models import NotificationType
+
+logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
@@ -149,10 +152,8 @@ async def create_organization(
 ) -> OrganizationResponse:
     """Create a new organization."""
     from src.domains.organizations.schemas import MembershipInOrganization, OrganizationInMembershipCreate
-    import traceback
     try:
-        print(f"[CREATE_ORG] Request: name={request.name}, type={request.type}")
-        print(f"[CREATE_ORG] User: {current_user.id}, {current_user.email}")
+        logger.info("create_org_request", name=request.name, org_type=str(request.type), user_id=str(current_user.id), email=current_user.email)
 
         org_service = OrganizationService(db)
 
@@ -169,7 +170,7 @@ async def create_organization(
 
         # Get the owner's membership to include in response
         membership = await org_service.get_membership(org.id, current_user.id)
-        print(f"[CREATE_ORG] Success! org_id={org.id}, membership_role={membership.role if membership else 'None'}")
+        logger.info("create_org_success", org_id=str(org.id), membership_role=str(membership.role) if membership else None)
 
         response = OrganizationResponse.model_validate(org)
         if membership:
@@ -184,8 +185,7 @@ async def create_organization(
             )
         return response
     except Exception as e:
-        print(f"[CREATE_ORG] ERROR: {type(e).__name__}: {e}")
-        traceback.print_exc()
+        logger.error("create_org_failed", error=str(e), type=type(e).__name__, exc_info=True)
         raise
 
 
@@ -201,10 +201,9 @@ async def create_autonomous_organization(
     The user can create and manage their own workouts independently, without a trainer.
     """
     from src.domains.organizations.schemas import MembershipInOrganization, OrganizationInMembershipCreate
-    import traceback
 
     try:
-        print(f"[CREATE_AUTONOMOUS] Request: name={name}, user={current_user.id}")
+        logger.info("create_autonomous_request", name=name, user_id=str(current_user.id))
 
         org_service = OrganizationService(db)
 
@@ -212,11 +211,11 @@ async def create_autonomous_organization(
             user=current_user,
             name=name,
         )
-        print(f"[CREATE_AUTONOMOUS] Created org: {org.id}")
+        logger.info("create_autonomous_org_created", org_id=str(org.id))
 
         # Get the user's membership to include in response
         membership = await org_service.get_membership(org.id, current_user.id)
-        print(f"[CREATE_AUTONOMOUS] Got membership: {membership.id if membership else 'None'}")
+        logger.info("create_autonomous_membership", membership_id=str(membership.id) if membership else None)
 
         response = OrganizationResponse.model_validate(org)
         if membership:
@@ -230,8 +229,7 @@ async def create_autonomous_organization(
             )
         return response
     except Exception as e:
-        print(f"[CREATE_AUTONOMOUS] ERROR: {type(e).__name__}: {e}")
-        traceback.print_exc()
+        logger.error("create_autonomous_failed", error=str(e), type=type(e).__name__, exc_info=True)
         raise
 
 
