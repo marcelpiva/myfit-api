@@ -1,4 +1,5 @@
 """Consultancy marketplace router."""
+import structlog
 from typing import Annotated
 from uuid import UUID
 
@@ -189,7 +190,7 @@ async def get_my_profile(
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Professional profile not found. Create one first.",
+            detail="Perfil profissional não encontrado. Crie um primeiro.",
         )
 
     return _profile_to_response(profile)
@@ -209,7 +210,7 @@ async def create_profile(
     if existing.scalar_one_or_none():
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail="Professional profile already exists",
+            detail="Perfil profissional já existe",
         )
 
     profile = ProfessionalProfile(
@@ -245,7 +246,7 @@ async def update_profile(
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Professional profile not found",
+            detail="Perfil profissional não encontrado",
         )
 
     update_data = request.model_dump(exclude_unset=True)
@@ -279,7 +280,7 @@ async def get_profile(
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Professional profile not found",
+            detail="Perfil profissional não encontrado",
         )
 
     return _profile_to_response(profile)
@@ -419,7 +420,7 @@ async def create_listing(
     if not profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Create a professional profile first before listing consultancies",
+            detail="Crie um perfil profissional antes de publicar serviços",
         )
 
     listing = ConsultancyListing(
@@ -459,7 +460,7 @@ async def get_listing(
     if not listing or listing.deleted_at:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found",
+            detail="Serviço não encontrado",
         )
 
     # Increment view count
@@ -477,12 +478,13 @@ async def update_listing(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ConsultancyListingResponse:
     """Update a consultancy listing (owner only)."""
+    log = structlog.get_logger()
     listing = await db.get(ConsultancyListing, listing_id)
 
     if not listing or listing.deleted_at:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found",
+            detail="Serviço não encontrado",
         )
 
     prof_query = select(ProfessionalProfile).where(
@@ -491,10 +493,19 @@ async def update_listing(
     prof_result = await db.execute(prof_query)
     profile = prof_result.scalar_one_or_none()
 
+    log.info(
+        "consultancy.update_listing.ownership_check",
+        listing_id=str(listing_id),
+        user_id=str(current_user.id),
+        profile_id=str(profile.id) if profile else None,
+        listing_professional_id=str(listing.professional_id),
+        match=profile is not None and listing.professional_id == profile.id,
+    )
+
     if not profile or listing.professional_id != profile.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the owner can update this listing",
+            detail="Apenas o proprietário pode editar este serviço",
         )
 
     update_data = request.model_dump(exclude_unset=True)
@@ -521,7 +532,7 @@ async def delete_listing(
     if not listing or listing.deleted_at:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found",
+            detail="Serviço não encontrado",
         )
 
     prof_query = select(ProfessionalProfile).where(
@@ -533,7 +544,7 @@ async def delete_listing(
     if not profile or listing.professional_id != profile.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only the owner can delete this listing",
+            detail="Apenas o proprietário pode excluir este serviço",
         )
 
     listing.deleted_at = datetime.now(timezone.utc)
@@ -556,14 +567,14 @@ async def purchase_consultancy(
     if not listing or not listing.is_active or listing.deleted_at:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Listing not found or not available",
+            detail="Serviço não encontrado ou indisponível",
         )
 
     # Can't buy your own listing
     if listing.professional_id == current_user.id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Cannot purchase your own consultancy",
+            detail="Você não pode comprar seu próprio serviço",
         )
 
     commission_cents = listing.commission_amount_cents
@@ -626,13 +637,13 @@ async def get_transaction_status(
     if not txn:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Transaction not found",
+            detail="Transação não encontrada",
         )
 
     if txn.buyer_id != current_user.id and txn.seller_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Not authorized to view this transaction",
+            detail="Sem permissão para visualizar esta transação",
         )
 
     return {
@@ -692,13 +703,13 @@ async def confirm_transaction(
     txn = await db.get(ConsultancyTransaction, transaction_id)
 
     if not txn:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transação não encontrada")
 
     if txn.seller_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the seller can confirm")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o vendedor pode confirmar")
 
     if txn.status != TransactionStatus.PENDING:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transaction is not in pending state")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transação não está em estado pendente")
 
     txn.status = TransactionStatus.CONFIRMED
     txn.confirmed_at = datetime.now(timezone.utc)
@@ -721,13 +732,13 @@ async def complete_transaction(
     txn = await db.get(ConsultancyTransaction, transaction_id)
 
     if not txn:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transação não encontrada")
 
     if txn.seller_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the seller can complete")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o vendedor pode concluir")
 
     if txn.status not in (TransactionStatus.CONFIRMED, TransactionStatus.ACTIVE):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transaction cannot be completed from current state")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Transação não pode ser concluída no estado atual")
 
     txn.status = TransactionStatus.COMPLETED
     txn.completed_at = datetime.now(timezone.utc)
@@ -761,20 +772,20 @@ async def create_review(
     txn = await db.get(ConsultancyTransaction, transaction_id)
 
     if not txn:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found")
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Transação não encontrada")
 
     if txn.buyer_id != current_user.id:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only the buyer can review")
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Apenas o comprador pode avaliar")
 
     if txn.status != TransactionStatus.COMPLETED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Can only review completed transactions")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Só é possível avaliar transações concluídas")
 
     # Check if already reviewed
     existing = await db.execute(
         select(ConsultancyReview).where(ConsultancyReview.transaction_id == transaction_id)
     )
     if existing.scalar_one_or_none():
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transaction already reviewed")
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Transação já foi avaliada")
 
     review = ConsultancyReview(
         transaction_id=txn.id,
