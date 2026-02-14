@@ -485,7 +485,13 @@ async def update_listing(
             detail="Listing not found",
         )
 
-    if listing.professional_id != current_user.id:
+    prof_query = select(ProfessionalProfile).where(
+        ProfessionalProfile.user_id == current_user.id
+    )
+    prof_result = await db.execute(prof_query)
+    profile = prof_result.scalar_one_or_none()
+
+    if not profile or listing.professional_id != profile.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the owner can update this listing",
@@ -518,7 +524,13 @@ async def delete_listing(
             detail="Listing not found",
         )
 
-    if listing.professional_id != current_user.id:
+    prof_query = select(ProfessionalProfile).where(
+        ProfessionalProfile.user_id == current_user.id
+    )
+    prof_result = await db.execute(prof_query)
+    profile = prof_result.scalar_one_or_none()
+
+    if not profile or listing.professional_id != profile.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Only the owner can delete this listing",
