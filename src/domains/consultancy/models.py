@@ -184,7 +184,7 @@ class ConsultancyListing(Base, UUIDMixin, TimestampMixin, SoftDeleteMixin):
     @property
     def price_display(self) -> str:
         if self.price_cents == 0:
-            return "Gratis"
+            return "Grátis"
         price = self.price_cents / 100
         return f"R$ {price:.2f}"
 

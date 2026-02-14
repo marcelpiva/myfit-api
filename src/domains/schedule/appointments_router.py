@@ -1257,7 +1257,7 @@ def _generate_ics(appointments: list) -> str:
                 names += f" +{len(apt.participants) - 3}"
             summary = f"Grupo ({len(apt.participants)}) - {apt.workout_type.value if apt.workout_type else 'Treino'}"
         else:
-            summary = f"{apt.student.name if apt.student else 'Sessao'} - {apt.workout_type.value if apt.workout_type else 'Treino'}"
+            summary = f"{apt.student.name if apt.student else 'Sessão'} - {apt.workout_type.value if apt.workout_type else 'Treino'}"
 
         location = apt.organization.name if apt.organization else ""
         description = (apt.notes or "").replace("\n", "\\n")
